@@ -29,7 +29,9 @@ func NewOpenAIParser(key, model string, timeout time.Duration) *OpenAIParser {
 }
 func (p *OpenAIParser) ParseSearchIntent(ctx context.Context, query string, c Context) (Intent, error) {
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.openai.parse_intent")
 	out, err := p.parseSearchIntent(ctx, query, c)
+	finish(err)
 	observability.Provider("openai", observability.Outcome(err), time.Since(started))
 	return out, err
 }

@@ -14,16 +14,18 @@ import (
 )
 
 type GooglePlaces struct {
-	key    string
-	client *http.Client
+	key, baseURL string
+	client       *http.Client
 }
 
 func NewGooglePlaces(key string) *GooglePlaces {
-	return &GooglePlaces{key, &http.Client{Timeout: 4 * time.Second}}
+	return &GooglePlaces{key: key, baseURL: "https://places.googleapis.com/v1", client: &http.Client{Timeout: 4 * time.Second}}
 }
 func (g *GooglePlaces) TextSearch(ctx context.Context, q string, lat, lon *float64, radius int) ([]Place, error) {
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.google_places.text_search")
 	out, err := g.textSearch(ctx, q, lat, lon, radius)
+	finish(err)
 	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
 	return out, err
 }
@@ -37,7 +39,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 		body["locationBias"] = map[string]any{"circle": map[string]any{"center": map[string]float64{"latitude": *lat, "longitude": *lon}, "radius": radius}}
 	}
 	b, _ := json.Marshal(body)
-	req, e := http.NewRequestWithContext(ctx, http.MethodPost, "https://places.googleapis.com/v1/places:searchText", bytes.NewReader(b))
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/places:searchText", bytes.NewReader(b))
 	if e != nil {
 		return nil, e
 	}
@@ -84,7 +86,9 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 }
 func (g *GooglePlaces) PlaceDetails(ctx context.Context, id string) (Place, error) {
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.google_places.place_details")
 	out, err := g.placeDetails(ctx, id)
+	finish(err)
 	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
 	return out, err
 }
@@ -93,7 +97,7 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 	if g.key == "" {
 		return Place{}, fmt.Errorf("places not configured")
 	}
-	u := "https://places.googleapis.com/v1/places/" + url.PathEscape(id)
+	u := g.baseURL + "/places/" + url.PathEscape(id)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("X-Goog-Api-Key", g.key)
 	req.Header.Set("X-Goog-FieldMask", "id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions")

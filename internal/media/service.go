@@ -52,7 +52,9 @@ func (s *Service) Create(ctx context.Context, user uuid.UUID, in CreateRequest) 
 	id := uuid.New()
 	key := filepath.ToSlash("users/" + user.String() + "/" + id.String() + ext)
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.object_storage.create_upload")
 	upload, e := s.storage.CreateUpload(ctx, key, in.MimeType, in.SizeBytes)
+	finish(e)
 	observability.Provider("object_storage", observability.Outcome(e), time.Since(started))
 	if e != nil {
 		return CreateResponse{}, e
@@ -74,7 +76,9 @@ func (s *Service) Complete(ctx context.Context, user, id uuid.UUID, width, heigh
 		return e
 	}
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.object_storage.stat")
 	info, e := s.storage.Stat(ctx, key)
+	finish(e)
 	observability.Provider("object_storage", observability.Outcome(e), time.Since(started))
 	if e != nil {
 		return httpapi.E(422, "MEDIA_UPLOAD_INCOMPLETE", "Media upload is not complete")

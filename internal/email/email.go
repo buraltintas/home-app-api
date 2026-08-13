@@ -43,7 +43,9 @@ func (e *DeliveryError) Error() string { return fmt.Sprintf("email provider stat
 
 func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
 	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.resend.send")
 	id, err := s.send(ctx, m)
+	finish(err)
 	observability.Provider("resend", observability.Outcome(err), time.Since(started))
 	return id, err
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type Server struct {
@@ -41,7 +42,7 @@ func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *soci
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, metricsToken ...string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(appmw.RequestID, appmw.Recover(log), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders)
+	r.Use(appmw.RequestID, appmw.Recover(log), otelhttp.NewMiddleware("home-app-api"), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)

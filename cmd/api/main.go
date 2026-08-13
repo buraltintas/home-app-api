@@ -13,6 +13,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/burakaltintas/home-app-api/internal/media"
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -31,6 +32,16 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	shutdownTracing, e := observability.SetupTracing(ctx, cfg.OTELEnabled, cfg.OTLPEndpoint, cfg.Environment)
+	if e != nil {
+		log.Error("tracing unavailable", "error", e)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = shutdownTracing(shutdown)
+	}()
 	db, e := database.Open(ctx, cfg.DatabaseURL)
 	if e != nil {
 		log.Error("database unavailable", "error", e)
