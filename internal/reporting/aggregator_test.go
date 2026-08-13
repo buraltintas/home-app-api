@@ -52,3 +52,13 @@ func TestLifetimePostDelta(t *testing.T) {
 		t.Fatalf("unexpected post deltas: %v %v", created, deleted)
 	}
 }
+
+func TestAttributionWindowRoundsUpToCalendarDays(t *testing.T) {
+	s, e := NewService(nil, "Europe/Istanbul", 49*time.Hour)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if s.attributionDays != 3 {
+		t.Fatalf("attribution days=%d", s.attributionDays)
+	}
+}

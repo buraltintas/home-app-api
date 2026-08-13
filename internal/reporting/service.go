@@ -11,17 +11,23 @@ import (
 )
 
 type Service struct {
-	db       *pgxpool.Pool
-	location *time.Location
-	now      func() time.Time
+	db              *pgxpool.Pool
+	location        *time.Location
+	attributionDays int
+	now             func() time.Time
 }
 
-func NewService(db *pgxpool.Pool, timezone string) (*Service, error) {
+func NewService(db *pgxpool.Pool, timezone string, attributionWindow ...time.Duration) (*Service, error) {
 	loc, e := time.LoadLocation(timezone)
 	if e != nil {
 		return nil, e
 	}
-	return &Service{db, loc, time.Now}, nil
+	window := 72 * time.Hour
+	if len(attributionWindow) > 0 && attributionWindow[0] > 0 {
+		window = attributionWindow[0]
+	}
+	days := int((window + 24*time.Hour - 1) / (24 * time.Hour))
+	return &Service{db: db, location: loc, attributionDays: days, now: time.Now}, nil
 }
 
 func (s *Service) Record(ctx context.Context, e Event) (bool, error) {

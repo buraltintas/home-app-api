@@ -26,7 +26,7 @@ func main() {
 		log.Fatal(e)
 	}
 	defer db.Close()
-	svc, e := reporting.NewService(db, cfg.ReportingTimezone)
+	svc, e := reporting.NewService(db, cfg.ReportingTimezone, cfg.SearchAttributionWindow)
 	if e != nil {
 		log.Fatal(e)
 	}

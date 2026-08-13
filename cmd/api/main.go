@@ -38,7 +38,7 @@ func main() {
 	}
 	defer db.Close()
 	tokens := security.NewTokenManager(cfg.AccessTokenSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone)
+	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone, cfg.SearchAttributionWindow)
 	if e != nil {
 		log.Error("reporting unavailable", "error", e)
 		os.Exit(1)

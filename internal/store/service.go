@@ -30,19 +30,28 @@ type Stats struct {
 	PostCount     int     `json:"post_count"`
 }
 type Item struct {
-	ID              uuid.UUID `json:"id"`
-	Name            string    `json:"name"`
-	Slug            string    `json:"slug"`
-	BrandName       string    `json:"brand_name,omitempty"`
-	Address         string    `json:"address"`
-	City            string    `json:"city"`
-	District        string    `json:"district"`
-	Latitude        float64   `json:"latitude"`
-	Longitude       float64   `json:"longitude"`
-	DistanceMeters  *float64  `json:"distance_meters,omitempty"`
-	Categories      []string  `json:"categories"`
-	Platform        Stats     `json:"platform"`
-	ViewerFavorited bool      `json:"viewer_has_favorited"`
+	ID                uuid.UUID        `json:"id"`
+	Name              string           `json:"name"`
+	Slug              string           `json:"slug"`
+	BrandName         string           `json:"brand_name,omitempty"`
+	Address           string           `json:"address"`
+	City              string           `json:"city"`
+	District          string           `json:"district"`
+	Latitude          float64          `json:"latitude"`
+	Longitude         float64          `json:"longitude"`
+	DistanceMeters    *float64         `json:"distance_meters,omitempty"`
+	Categories        []string         `json:"categories"`
+	Platform          Stats            `json:"platform"`
+	ViewerFavorited   bool             `json:"viewer_has_favorited"`
+	ViewerHasReviewed bool             `json:"viewer_has_reviewed"`
+	ExternalSources   []ExternalSource `json:"external_sources,omitempty"`
+}
+
+type ExternalSource struct {
+	Provider    string         `json:"provider"`
+	ExternalID  string         `json:"external_id"`
+	Attribution map[string]any `json:"attribution"`
+	RefreshedAt *time.Time     `json:"refreshed_at,omitempty"`
 }
 
 func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat, lon *float64) (Item, error) {
@@ -51,9 +60,11 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 	e := s.db.QueryRow(ctx, `SELECT s.id,s.name,s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $3::float8 IS NULL OR $4::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography) END,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,
- EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2)
+ EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2),
+ EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
+ coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb)
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.ViewerFavorited)
+ WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return x, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}

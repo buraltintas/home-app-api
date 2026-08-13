@@ -47,6 +47,9 @@ type DailyMetrics struct {
 	NewUsers, ActiveUsers, AnonymousVisitors, NewStores, NewPosts, VerifiedPosts, LocationRejected, NewComments, NewLikes, NewFollows, NewFavorites, Searches, SearchesWithResults, ZeroResultSearches, AuthenticatedSearches, AnonymousSearches, AISearches, GooglePlacesSearches, Impressions, Clicks, StoreOpens, FavoritesFromSearch, ReviewsFromSearch, OTPRequests, SuccessfulAuth, FailedAuth int64
 }
 type SearchOverview struct{ Searches, SearchesWithResults, ZeroResultSearches, AuthenticatedSearches, AnonymousSearches, AISearches, GooglePlacesSearches, Impressions, Clicks, StoreOpens, Favorites, Reviews int64 }
+type SearchFunnel struct {
+	Searches, SearchesWithResults, StoreOpens, Favorites, Reviews int64
+}
 type QueryMetric struct {
 	NormalizedQuery                                                                                                                        string
 	SearchCount, UniqueUserCount, UniqueVisitorCount, ResultCountTotal, ZeroResultCount, ClickCount, OpenCount, FavoriteCount, ReviewCount int64

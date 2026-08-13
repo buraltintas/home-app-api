@@ -55,6 +55,20 @@ func (s *Service) GetTopSearchQueries(ctx context.Context, from, to time.Time, l
 	}
 	return out, rows.Err()
 }
+func (s *Service) GetZeroResultQueries(ctx context.Context, from, to time.Time, limit int) ([]QueryMetric, error) {
+	return s.GetTopSearchQueries(ctx, from, to, limit, true)
+}
+func (s *Service) GetTopSearchCategories(ctx context.Context, from, to time.Time, limit int) ([]DimensionMetric, error) {
+	return s.GetTopSearchDimensions(ctx, from, to, "category", limit)
+}
+func (s *Service) GetTopSearchLocations(ctx context.Context, from, to time.Time, limit int) ([]DimensionMetric, error) {
+	return s.GetTopSearchDimensions(ctx, from, to, "location", limit)
+}
+func (s *Service) GetSearchConversionFunnel(ctx context.Context, from, to time.Time) (SearchFunnel, error) {
+	var x SearchFunnel
+	e := s.db.QueryRow(ctx, `SELECT coalesce(sum(searches_count),0),coalesce(sum(searches_with_results_count),0),coalesce(sum(store_opens_from_search_count),0),coalesce(sum(favorites_from_search_count),0),coalesce(sum(reviews_from_search_count),0) FROM platform_daily_metrics WHERE metric_date BETWEEN $1 AND $2`, from, to).Scan(&x.Searches, &x.SearchesWithResults, &x.StoreOpens, &x.Favorites, &x.Reviews)
+	return x, e
+}
 func (s *Service) GetTopSearchDimensions(ctx context.Context, from, to time.Time, dimension string, limit int) ([]DimensionMetric, error) {
 	allowed := map[string]bool{"category": true, "product": true, "style": true, "location": true, "price_intent": true}
 	if !allowed[dimension] {

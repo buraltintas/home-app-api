@@ -36,11 +36,10 @@ Search history is private and owner-only. Deleting retained search history casca
 
 ## Operations
 
-The worker recomputes today hourly and yesterday to absorb late interactions. Repair all projections from retained source data with:
+The worker recomputes every search day still inside `SEARCH_ATTRIBUTION_WINDOW_HOURS` so late favorites and reviews update the originating query/store aggregates. Repair all projections from retained source data with:
 
 ```bash
 make rebuild-admin-metrics
 ```
 
 Future admin code can call `GetPlatformSnapshot`, `GetDailyMetrics`, `GetSearchOverview`, top/zero-result query methods, intent dimensions, most impressed/clicked stores, and high-demand/low-review stores. No admin HTTP endpoint or frontend is exposed yet.
-

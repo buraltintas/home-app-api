@@ -55,7 +55,7 @@ func (s *Service) AggregateDay(ctx context.Context, day time.Time) error {
 	if _, e = tx.Exec(ctx, `DELETE FROM search_query_daily_metrics WHERE metric_date=$1`, metricDate); e != nil {
 		return s.failRun(ctx, runID, e)
 	}
-	_, e = tx.Exec(ctx, `WITH ds AS (SELECT * FROM searches WHERE created_at>=$2 AND created_at<$3),ia AS (SELECT search_id,count(*) FILTER(WHERE event_type='result_click') clicks,count(*) FILTER(WHERE event_type='store_open') opens,count(*) FILTER(WHERE event_type='favorite') favorites,count(*) FILTER(WHERE event_type='review_created') reviews FROM search_interactions WHERE created_at>=$2 AND created_at<$3 GROUP BY search_id) INSERT INTO search_query_daily_metrics(metric_date,query_fingerprint,normalized_query,search_count,unique_user_count,unique_visitor_count,result_count_total,zero_result_count,result_click_count,store_open_count,favorite_count,review_count,ai_search_count,google_places_search_count) SELECT $1,digest(normalized_query,'sha256'),normalized_query,count(*),count(DISTINCT user_id),count(DISTINCT visitor_session_id),sum(total_result_count),count(*) FILTER(WHERE total_result_count=0),coalesce(sum(ia.clicks),0),coalesce(sum(ia.opens),0),coalesce(sum(ia.favorites),0),coalesce(sum(ia.reviews),0),count(*) FILTER(WHERE ai_used),count(*) FILTER(WHERE google_places_used) FROM ds LEFT JOIN ia ON ia.search_id=ds.id GROUP BY normalized_query`, metricDate, start, end)
+	_, e = tx.Exec(ctx, `WITH ds AS (SELECT * FROM searches WHERE created_at>=$2 AND created_at<$3),ia AS (SELECT i.search_id,count(*) FILTER(WHERE i.event_type='result_click') clicks,count(*) FILTER(WHERE i.event_type='store_open') opens,count(*) FILTER(WHERE i.event_type='favorite') favorites,count(*) FILTER(WHERE i.event_type='review_created') reviews FROM search_interactions i JOIN ds ON ds.id=i.search_id GROUP BY i.search_id) INSERT INTO search_query_daily_metrics(metric_date,query_fingerprint,normalized_query,search_count,unique_user_count,unique_visitor_count,result_count_total,zero_result_count,result_click_count,store_open_count,favorite_count,review_count,ai_search_count,google_places_search_count) SELECT $1,digest(normalized_query,'sha256'),normalized_query,count(*),count(DISTINCT user_id),count(DISTINCT visitor_session_id),sum(total_result_count),count(*) FILTER(WHERE total_result_count=0),coalesce(sum(ia.clicks),0),coalesce(sum(ia.opens),0),coalesce(sum(ia.favorites),0),coalesce(sum(ia.reviews),0),count(*) FILTER(WHERE ai_used),count(*) FILTER(WHERE google_places_used) FROM ds LEFT JOIN ia ON ia.search_id=ds.id GROUP BY normalized_query`, metricDate, start, end)
 	if e != nil {
 		return s.failRun(ctx, runID, e)
 	}
@@ -69,7 +69,7 @@ func (s *Service) AggregateDay(ctx context.Context, day time.Time) error {
 	if _, e = tx.Exec(ctx, `DELETE FROM store_search_daily_metrics WHERE metric_date=$1`, metricDate); e != nil {
 		return s.failRun(ctx, runID, e)
 	}
-	_, e = tx.Exec(ctx, `WITH ri AS (SELECT r.*,coalesce(r.store_id::text,r.external_provider||':'||r.external_place_id) result_key FROM search_results r JOIN searches s ON s.id=r.search_id WHERE s.created_at>=$2 AND s.created_at<$3),ia AS (SELECT search_result_id,count(*) FILTER(WHERE event_type='result_click') clicks,count(*) FILTER(WHERE event_type='store_open') opens,count(*) FILTER(WHERE event_type='favorite') favorites,count(*) FILTER(WHERE event_type='review_created') reviews FROM search_interactions WHERE created_at>=$2 AND created_at<$3 AND search_result_id IS NOT NULL GROUP BY search_result_id) INSERT INTO store_search_daily_metrics(metric_date,result_key,store_id,external_provider,external_place_id,impression_count,click_count,open_count,favorite_count,review_count,platform_review_count_latest) SELECT $1,ri.result_key,(array_agg(ri.store_id) FILTER(WHERE ri.store_id IS NOT NULL))[1],max(ri.external_provider),max(ri.external_place_id),count(*),coalesce(sum(ia.clicks),0),coalesce(sum(ia.opens),0),coalesce(sum(ia.favorites),0),coalesce(sum(ia.reviews),0),max(ri.platform_review_count_at_time) FROM ri LEFT JOIN ia ON ia.search_result_id=ri.id WHERE ri.result_key IS NOT NULL GROUP BY ri.result_key`, metricDate, start, end)
+	_, e = tx.Exec(ctx, `WITH ri AS (SELECT r.*,coalesce(r.store_id::text,r.external_provider||':'||r.external_place_id) result_key FROM search_results r JOIN searches s ON s.id=r.search_id WHERE s.created_at>=$2 AND s.created_at<$3),ia AS (SELECT i.search_result_id,count(*) FILTER(WHERE i.event_type='result_click') clicks,count(*) FILTER(WHERE i.event_type='store_open') opens,count(*) FILTER(WHERE i.event_type='favorite') favorites,count(*) FILTER(WHERE i.event_type='review_created') reviews FROM search_interactions i JOIN ri ON ri.id=i.search_result_id WHERE i.search_result_id IS NOT NULL GROUP BY i.search_result_id) INSERT INTO store_search_daily_metrics(metric_date,result_key,store_id,external_provider,external_place_id,impression_count,click_count,open_count,favorite_count,review_count,platform_review_count_latest) SELECT $1,ri.result_key,(array_agg(ri.store_id) FILTER(WHERE ri.store_id IS NOT NULL))[1],max(ri.external_provider),max(ri.external_place_id),count(*),coalesce(sum(ia.clicks),0),coalesce(sum(ia.opens),0),coalesce(sum(ia.favorites),0),coalesce(sum(ia.reviews),0),max(ri.platform_review_count_at_time) FROM ri LEFT JOIN ia ON ia.search_result_id=ri.id WHERE ri.result_key IS NOT NULL GROUP BY ri.result_key`, metricDate, start, end)
 	if e != nil {
 		return s.failRun(ctx, runID, e)
 	}
@@ -106,7 +106,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 }
 
 func (s *Service) Run(ctx context.Context) error {
-	if e := s.AggregateDay(ctx, s.now()); e != nil {
+	if e := s.aggregateAttributionWindow(ctx, s.now()); e != nil {
 		return e
 	}
 	ticker := time.NewTicker(time.Hour)
@@ -116,8 +116,16 @@ func (s *Service) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case now := <-ticker.C:
-			_ = s.AggregateDay(ctx, now)
-			_ = s.AggregateDay(ctx, now.Add(-24*time.Hour))
+			_ = s.aggregateAttributionWindow(ctx, now)
 		}
 	}
+}
+
+func (s *Service) aggregateAttributionWindow(ctx context.Context, now time.Time) error {
+	for i := 0; i <= s.attributionDays; i++ {
+		if e := s.AggregateDay(ctx, now.AddDate(0, 0, -i)); e != nil {
+			return e
+		}
+	}
+	return nil
 }

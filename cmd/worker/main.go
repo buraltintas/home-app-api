@@ -39,7 +39,7 @@ func main() {
 		sender = &email.ResendSender{URL: url, APIKey: cfg.EmailAPIKey, Client: &http.Client{Timeout: 10 * time.Second}}
 	}
 	w := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
-	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone)
+	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone, cfg.SearchAttributionWindow)
 	if e != nil {
 		log.Error("reporting unavailable", "error", e)
 		os.Exit(1)
