@@ -238,16 +238,16 @@ func parseID(r *http.Request) (uuid.UUID, error) {
 	}
 	return id, nil
 }
-func queryFloat(r *http.Request, key string) *float64 {
+func queryFloat(r *http.Request, key string) (*float64, error) {
 	v := r.URL.Query().Get(key)
 	if v == "" {
-		return nil
+		return nil, nil
 	}
 	n, e := strconv.ParseFloat(v, 64)
 	if e != nil {
-		return nil
+		return nil, ErrInvalidInput
 	}
-	return &n
+	return &n, nil
 }
 func queryInt(r *http.Request, key string, d int) int {
 	n, e := strconv.Atoi(r.URL.Query().Get(key))
@@ -267,8 +267,13 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	lat, lon := queryFloat(r, "latitude"), queryFloat(r, "longitude")
+	lat, e := queryFloat(r, "latitude")
+	lon, lonErr := queryFloat(r, "longitude")
 	radius := queryInt(r, "radius_meters", 10000)
+	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) || radius < 100 || radius > 50000 || len(r.URL.Query().Get("q")) > 500 {
+		WriteError(w, ErrInvalidInput)
+		return
+	}
 	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), nil, "", lat, lon, radius, queryInt(r, "limit", 20), viewer(r))
 	if e != nil {
 		WriteError(w, e)
@@ -291,12 +296,22 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
-	x, e := s.stores.Get(r.Context(), id, viewer(r), queryFloat(r, "latitude"), queryFloat(r, "longitude"))
+	lat, latErr := queryFloat(r, "latitude")
+	lon, lonErr := queryFloat(r, "longitude")
+	if latErr != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) {
+		WriteError(w, ErrInvalidInput)
+		return
+	}
+	x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 	if e != nil {
 		WriteError(w, e)
 		return
 	}
-	posts, _ := s.social.PostsBy(r.Context(), "store_id", id, 5)
+	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 5)
+	if e != nil {
+		WriteError(w, e)
+		return
+	}
 	JSON(w, 200, map[string]any{"store": x, "recent_posts": posts})
 }
 func (s *Server) postDetail(w http.ResponseWriter, r *http.Request) {
@@ -333,7 +348,7 @@ func (s *Server) postsBy(w http.ResponseWriter, r *http.Request, column string) 
 		WriteError(w, e)
 		return
 	}
-	x, e := s.social.PostsBy(r.Context(), column, id, queryInt(r, "limit", 20))
+	x, e := s.social.PostsBy(r.Context(), column, id, viewer(r), queryInt(r, "limit", 20))
 	if e != nil {
 		WriteError(w, e)
 		return

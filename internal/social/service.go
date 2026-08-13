@@ -74,6 +74,16 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	if in.StoreID == uuid.Nil || len(in.Text) < 3 || len(in.Text) > 5000 || in.Rating < 1 || in.Rating > 5 || !storepkg.ValidCoordinates(in.Latitude, in.Longitude) || len(in.MediaIDs) > 10 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
+	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))
+	for _, id := range in.MediaIDs {
+		if id == uuid.Nil {
+			return uuid.Nil, httpapi.ErrInvalidInput
+		}
+		if _, exists := seenMedia[id]; exists {
+			return uuid.Nil, httpapi.E(400, "DUPLICATE_MEDIA", "Each media item can only be attached once")
+		}
+		seenMedia[id] = struct{}{}
+	}
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
 		return uuid.Nil, e
@@ -197,15 +207,15 @@ func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Co
 	}
 	return out, rows.Err()
 }
-func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, limit int) ([]Post, error) {
+func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, viewer *uuid.UUID, limit int) ([]Post, error) {
 	if column != "user_id" && column != "store_id" {
 		return nil, httpapi.ErrInvalidInput
 	}
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),false,false,false,coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
-	rows, e := s.db.Query(ctx, q, id, limit)
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e
 	}
@@ -238,7 +248,7 @@ func (s *Service) Like(ctx context.Context, user, post uuid.UUID, add bool) erro
 	if add {
 		event = reporting.LikeCreated
 	}
-	return s.uniqueMutation(ctx, add, `INSERT INTO likes(user_id,post_id) SELECT $1,id FROM posts WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM likes WHERE user_id=$1 AND post_id=$2`, user, post, event, reporting.Event{UserID: &user, PostID: &post})
+	return s.uniqueMutation(ctx, add, `INSERT INTO likes(user_id,post_id) SELECT $1,id FROM posts WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM likes WHERE user_id=$1 AND post_id=$2`, `SELECT EXISTS(SELECT 1 FROM posts WHERE id=$1 AND deleted_at IS NULL)`, user, post, event, reporting.Event{UserID: &user, PostID: &post}, httpapi.E(404, "POST_NOT_FOUND", "Post not found"))
 }
 func (s *Service) Follow(ctx context.Context, user, target uuid.UUID, add bool) error {
 	if user == target {
@@ -248,9 +258,9 @@ func (s *Service) Follow(ctx context.Context, user, target uuid.UUID, add bool) 
 	if add {
 		event = reporting.FollowCreated
 	}
-	return s.uniqueMutation(ctx, add, `INSERT INTO follows(follower_id,following_id) SELECT $1,id FROM users WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM follows WHERE follower_id=$1 AND following_id=$2`, user, target, event, reporting.Event{UserID: &user, Metadata: map[string]any{"following_user_id": target.String()}})
+	return s.uniqueMutation(ctx, add, `INSERT INTO follows(follower_id,following_id) SELECT $1,id FROM users WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM follows WHERE follower_id=$1 AND following_id=$2`, `SELECT EXISTS(SELECT 1 FROM users WHERE id=$1 AND deleted_at IS NULL)`, user, target, event, reporting.Event{UserID: &user, Metadata: map[string]any{"following_user_id": target.String()}}, httpapi.E(404, "USER_NOT_FOUND", "User not found"))
 }
-func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del string, a, b uuid.UUID, event string, ev reporting.Event) error {
+func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del, existsQuery string, a, b uuid.UUID, event string, ev reporting.Event, notFound error) error {
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
 		return e
@@ -265,6 +275,15 @@ func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del stri
 		return e
 	}
 	if tag.RowsAffected() == 0 {
+		if add {
+			var exists bool
+			if e = tx.QueryRow(ctx, existsQuery, b).Scan(&exists); e != nil {
+				return e
+			}
+			if !exists {
+				return notFound
+			}
+		}
 		return tx.Commit(ctx)
 	}
 	ev.Type = event
