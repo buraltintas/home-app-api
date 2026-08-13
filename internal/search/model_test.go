@@ -1,6 +1,7 @@
 package search
 
 import (
+	"strings"
 	"testing"
 
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
@@ -16,6 +17,20 @@ func TestDeterministicTurkishIntent(t *testing.T) {
 func TestIntentRejectsUnknownCategory(t *testing.T) {
 	if Validate(Intent{Categories: []string{"restaurant"}}) == nil {
 		t.Fatal("unknown category accepted")
+	}
+}
+func TestIntentRejectsOversizedOrMalformedValues(t *testing.T) {
+	if Validate(Intent{ProductTerms: []string{strings.Repeat("x", 81)}}) == nil {
+		t.Fatal("oversized product accepted")
+	}
+	if Validate(Intent{SemanticTerms: []string{"safe\nunsafe"}}) == nil {
+		t.Fatal("control character accepted")
+	}
+}
+func TestInternalQueryUsesParsedDemandTerms(t *testing.T) {
+	got := internalQuery(Intent{NormalizedQuery: "uzun doğal cümle", ProductTerms: []string{"avize", "lamba"}})
+	if got != "avize OR lamba" {
+		t.Fatalf("query=%q", got)
 	}
 }
 func has(v []string, w string) bool {

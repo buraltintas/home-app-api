@@ -269,7 +269,7 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	lat, lon := queryFloat(r, "latitude"), queryFloat(r, "longitude")
 	radius := queryInt(r, "radius_meters", 10000)
-	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), lat, lon, radius, queryInt(r, "limit", 20), viewer(r))
+	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), nil, "", lat, lon, radius, queryInt(r, "limit", 20), viewer(r))
 	if e != nil {
 		WriteError(w, e)
 		return

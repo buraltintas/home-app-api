@@ -157,7 +157,7 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			fallback = "ai_unavailable_or_invalid"
 		}
 	}
-	internal, e := s.stores.Search(ctx, intent.NormalizedQuery, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
+	internal, e := s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
 	if e != nil {
 		return Response{}, e
 	}
@@ -401,6 +401,14 @@ func joinFallback(a, b string) string {
 		return b
 	}
 	return a + "," + b
+}
+func internalQuery(i Intent) string {
+	terms := append([]string{}, i.ProductTerms...)
+	terms = append(terms, i.SemanticTerms...)
+	if len(terms) == 0 {
+		return i.NormalizedQuery
+	}
+	return strings.Join(terms, " OR ")
 }
 func haversine(a, b, c, d float64) float64 {
 	const r = 6371000

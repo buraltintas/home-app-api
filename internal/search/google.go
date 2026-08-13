@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
@@ -59,7 +60,7 @@ func (g *GooglePlaces) TextSearch(ctx context.Context, q string, lat, lon *float
 			}
 		}
 	}
-	if e = json.NewDecoder(r.Body).Decode(&payload); e != nil {
+	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
 		return nil, e
 	}
 	out := make([]Place, 0, len(payload.Places))
@@ -97,7 +98,7 @@ func (g *GooglePlaces) PlaceDetails(ctx context.Context, id string) (Place, erro
 		UserRatingCount  int
 		Types            []string
 	}
-	if e = json.NewDecoder(r.Body).Decode(&x); e != nil {
+	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); e != nil {
 		return Place{}, e
 	}
 	return Place{x.ID, x.DisplayName.Text, x.FormattedAddress, x.Location.Latitude, x.Location.Longitude, x.Rating, x.UserRatingCount, x.Types, nil}, nil

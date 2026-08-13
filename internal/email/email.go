@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -65,7 +66,7 @@ func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
 	var out struct {
 		ID string `json:"id"`
 	}
-	if e := json.NewDecoder(r.Body).Decode(&out); e != nil {
+	if e := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&out); e != nil {
 		return "", e
 	}
 	if out.ID == "" {

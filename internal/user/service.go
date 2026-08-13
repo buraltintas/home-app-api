@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -71,12 +73,8 @@ func (s *Service) Me(ctx context.Context, id uuid.UUID) (Me, error) {
 	return m, e
 }
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
-	if in.Username != nil {
-		v := strings.TrimSpace(*in.Username)
-		if len(v) < 3 || len(v) > 30 {
-			return httpapi.ErrInvalidInput
-		}
-		in.Username = &v
+	if e := validateUpdate(&in); e != nil {
+		return e
 	}
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
@@ -85,6 +83,10 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 	defer tx.Rollback(ctx)
 	_, e = tx.Exec(ctx, `UPDATE user_profiles SET username=coalesce($2,username),display_name=coalesce($3,display_name),avatar_url=coalesce($4,avatar_url),bio=coalesce($5,bio),city=coalesce($6,city),updated_at=now() WHERE user_id=$1`, id, in.Username, in.DisplayName, in.AvatarURL, in.Bio, in.City)
 	if e != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(e, &pgErr) && pgErr.Code == "23505" {
+			return httpapi.E(409, "USERNAME_TAKEN", "Username is already in use")
+		}
 		return e
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO user_private_profiles(user_id,relationship_status,has_children,children_age_ranges,housing_status,occupation,age_range,home_style_interests) VALUES($1,$2,$3,coalesce($4,'{}'),$5,$6,$7,coalesce($8,'{}')) ON CONFLICT(user_id) DO UPDATE SET relationship_status=coalesce($2,user_private_profiles.relationship_status),has_children=coalesce($3,user_private_profiles.has_children),children_age_ranges=coalesce($4,user_private_profiles.children_age_ranges),housing_status=coalesce($5,user_private_profiles.housing_status),occupation=coalesce($6,user_private_profiles.occupation),age_range=coalesce($7,user_private_profiles.age_range),home_style_interests=coalesce($8,user_private_profiles.home_style_interests),updated_at=now()`, id, in.RelationshipStatus, in.HasChildren, in.ChildrenAgeRanges, in.HousingStatus, in.Occupation, in.AgeRange, in.HomeStyleInterests)
@@ -92,6 +94,62 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 		return e
 	}
 	return tx.Commit(ctx)
+}
+
+func validateUpdate(in *Update) error {
+	if in.Username != nil {
+		v := strings.TrimSpace(*in.Username)
+		if len(v) < 3 || len(v) > 30 {
+			return httpapi.ErrInvalidInput
+		}
+		in.Username = &v
+	}
+	for _, field := range []struct {
+		value *string
+		max   int
+	}{{in.DisplayName, 100}, {in.Bio, 500}, {in.City, 100}, {in.RelationshipStatus, 40}, {in.Occupation, 100}, {in.AgeRange, 40}} {
+		if field.value != nil {
+			v := strings.TrimSpace(*field.value)
+			if len(v) > field.max || strings.ContainsRune(v, '\x00') {
+				return httpapi.ErrInvalidInput
+			}
+			*field.value = v
+		}
+	}
+	if in.AvatarURL != nil {
+		v := strings.TrimSpace(*in.AvatarURL)
+		if len(v) > 2048 {
+			return httpapi.ErrInvalidInput
+		}
+		if v != "" {
+			u, e := url.ParseRequestURI(v)
+			if e != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+				return httpapi.ErrInvalidInput
+			}
+		}
+		*in.AvatarURL = v
+	}
+	if in.HousingStatus != nil {
+		allowed := map[string]bool{"owner": true, "renter": true, "living_with_family": true, "other": true}
+		if !allowed[*in.HousingStatus] {
+			return httpapi.ErrInvalidInput
+		}
+	}
+	for _, values := range []*[]string{in.ChildrenAgeRanges, in.HomeStyleInterests} {
+		if values == nil {
+			continue
+		}
+		if len(*values) > 20 {
+			return httpapi.ErrInvalidInput
+		}
+		for i := range *values {
+			(*values)[i] = strings.TrimSpace((*values)[i])
+			if (*values)[i] == "" || len((*values)[i]) > 50 || strings.ContainsRune((*values)[i], '\x00') {
+				return httpapi.ErrInvalidInput
+			}
+		}
+	}
+	return nil
 }
 
 type SearchHistory struct {

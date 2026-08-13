@@ -116,7 +116,10 @@ func Deterministic(raw string) Intent {
 }
 func Validate(i Intent) error {
 	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "storage": true, "home_accessories": true, "household": true}
-	if len(i.Categories) > 8 || len(i.ProductTerms) > 12 || len(i.StyleTerms) > 8 || len(i.Attributes) > 8 {
+	if len(i.NormalizedQuery) > 500 || len(i.LocationText) > 120 {
+		return fmt.Errorf("intent text too long")
+	}
+	if len(i.Categories) > 8 || len(i.ProductTerms) > 12 || len(i.StyleTerms) > 8 || len(i.Attributes) > 8 || len(i.SemanticTerms) > 12 {
 		return fmt.Errorf("too many intent values")
 	}
 	for _, c := range i.Categories {
@@ -125,6 +128,13 @@ func Validate(i Intent) error {
 		}
 		if len(c) > 40 {
 			return fmt.Errorf("category too long")
+		}
+	}
+	for _, values := range [][]string{i.ProductTerms, i.StyleTerms, i.Attributes, i.SemanticTerms} {
+		for _, value := range values {
+			if strings.TrimSpace(value) == "" || len(value) > 80 || strings.ContainsAny(value, "\x00\r\n") {
+				return fmt.Errorf("invalid intent value")
+			}
 		}
 	}
 	if i.PriceIntent != "" && i.PriceIntent != "budget" && i.PriceIntent != "midrange" && i.PriceIntent != "premium" {

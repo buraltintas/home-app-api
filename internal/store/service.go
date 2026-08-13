@@ -72,8 +72,9 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 	return x, e
 }
 
-func (s *Service) Search(ctx context.Context, q string, lat, lon *float64, radius int, limit int, viewer *uuid.UUID) ([]Item, error) {
+func (s *Service) Search(ctx context.Context, q string, categories []string, location string, lat, lon *float64, radius int, limit int, viewer *uuid.UUID) ([]Item, error) {
 	q = strings.TrimSpace(q)
+	location = strings.ToLower(strings.TrimSpace(location))
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
@@ -82,10 +83,11 @@ func (s *Service) Search(ctx context.Context, q string, lat, lon *float64, radiu
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,
  EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6)
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.deleted_at IS NULL AND ($1='' OR to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')||' '||coalesce(s.city,'')||' '||coalesce(s.district,'')) @@ plainto_tsquery('simple',$1))
+ WHERE s.deleted_at IS NULL AND ($1='' OR to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')||' '||coalesce(s.description,'')||' '||coalesce(s.city,'')||' '||coalesce(s.district,'')) @@ websearch_to_tsquery('simple',$1) OR ($7::text[] IS NOT NULL AND EXISTS(SELECT 1 FROM store_category_links cl JOIN store_categories sc ON sc.id=cl.category_id WHERE cl.store_id=s.id AND sc.slug=ANY($7))))
+ AND ($8='' OR lower(s.city) LIKE '%'||$8||'%' OR lower(coalesce(s.district,'')) LIKE '%'||$8||'%')
  AND ($2::float8 IS NULL OR $3::float8 IS NULL OR ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography,$4))
- GROUP BY s.id,ss.store_id ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank(to_tsvector('simple',s.name||' '||coalesce(s.brand_name,'')),plainto_tsquery('simple',$1)) END DESC,
- CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,ss.review_count DESC LIMIT $5`, q, lat, lon, radius, limit, viewer)
+ GROUP BY s.id,ss.store_id ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank(to_tsvector('simple',s.name||' '||coalesce(s.brand_name,'')),websearch_to_tsquery('simple',$1)) END DESC,
+ CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,ss.review_count DESC LIMIT $5`, q, lat, lon, radius, limit, viewer, nilStrings(categories), location)
 	if e != nil {
 		return nil, e
 	}
@@ -99,6 +101,13 @@ func (s *Service) Search(ctx context.Context, q string, lat, lon *float64, radiu
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+func nilStrings(v []string) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return v
 }
 
 func (s *Service) Favorite(ctx context.Context, user, store uuid.UUID, add bool) (bool, error) {
