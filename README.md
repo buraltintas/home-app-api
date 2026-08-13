@@ -94,7 +94,7 @@ See [.env.example](.env.example). Important groups are:
 
 - core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`
 - client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback)
-- auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs and attempt limit
+- auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, and per-email/IP/visitor request limits
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, `EMAIL_API_KEY`, optional `EMAIL_API_URL`

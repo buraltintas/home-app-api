@@ -16,6 +16,8 @@ type Config struct {
 	AccessTokenTTL, RefreshTokenTTL                time.Duration
 	OTPTTL                                         time.Duration
 	OTPMaxAttempts                                 int
+	OTPEmailRequestLimit, OTPIPRequestLimit        int
+	OTPVisitorRequestLimit                         int
 	GoogleClientID, GooglePlacesAPIKey             string
 	OpenAIAPIKey, OpenAIModel                      string
 	OpenAITimeout                                  time.Duration
@@ -61,6 +63,15 @@ func Load() (Config, error) {
 		return c, err
 	}
 	if c.OTPMaxAttempts, err = integer("OTP_MAX_ATTEMPTS", 5); err != nil {
+		return c, err
+	}
+	if c.OTPEmailRequestLimit, err = integer("OTP_EMAIL_REQUEST_LIMIT", 3); err != nil {
+		return c, err
+	}
+	if c.OTPIPRequestLimit, err = integer("OTP_IP_REQUEST_LIMIT", 10); err != nil {
+		return c, err
+	}
+	if c.OTPVisitorRequestLimit, err = integer("OTP_VISITOR_REQUEST_LIMIT", 5); err != nil {
 		return c, err
 	}
 	if c.SearchLocationDecimals, err = integer("SEARCH_LOCATION_DECIMALS", 3); err != nil {
@@ -115,6 +126,9 @@ func Load() (Config, error) {
 	}
 	if c.OTPMaxAttempts < 1 || c.OTPMaxAttempts > 20 {
 		return c, errors.New("OTP_MAX_ATTEMPTS must be between 1 and 20")
+	}
+	if c.OTPEmailRequestLimit < 1 || c.OTPIPRequestLimit < 1 || c.OTPVisitorRequestLimit < 1 {
+		return c, errors.New("OTP request limits must be positive")
 	}
 	if c.SearchLocationDecimals < 0 || c.SearchLocationDecimals > 5 {
 		return c, errors.New("SEARCH_LOCATION_DECIMALS must be 0..5")

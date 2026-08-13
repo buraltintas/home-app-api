@@ -64,7 +64,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
 		r.Get("/stores/{id}/posts", s.postsByStore)
-		r.Post("/stores/resolve-external", s.resolveExternalStore)
+		r.With(appmw.RequireAuth, writeLimit.Middleware).Post("/stores/resolve-external", s.resolveExternalStore)
 		r.Get("/posts/{id}", s.postDetail)
 		r.Get("/posts/{id}/comments", s.comments)
 		r.Get("/users/{id}", s.userPublic)
@@ -170,6 +170,9 @@ func (s *Server) verifyCode(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	if visitor, ok := appmw.VisitorID(r); ok {
+		_ = s.auth.LinkVisitor(r.Context(), x.UserID, visitor)
+	}
 	JSON(w, 200, x)
 }
 func (s *Server) google(w http.ResponseWriter, r *http.Request) {
@@ -184,6 +187,9 @@ func (s *Server) google(w http.ResponseWriter, r *http.Request) {
 	if e != nil {
 		WriteError(w, e)
 		return
+	}
+	if visitor, ok := appmw.VisitorID(r); ok {
+		_ = s.auth.LinkVisitor(r.Context(), x.UserID, visitor)
 	}
 	JSON(w, 200, x)
 }

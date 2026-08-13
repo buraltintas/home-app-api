@@ -43,7 +43,7 @@ func main() {
 		log.Error("reporting unavailable", "error", e)
 		os.Exit(1)
 	}
-	authSvc := auth.NewService(db, auth.Config{OTPTTL: cfg.OTPTTL, OTPMaxAttempts: cfg.OTPMaxAttempts, RefreshTTL: cfg.RefreshTokenTTL, HashKey: []byte(cfg.OTPHashSecret)}, tokens, auth.NewGoogleVerifier(cfg.GoogleClientID), reportSvc)
+	authSvc := auth.NewService(db, auth.Config{OTPTTL: cfg.OTPTTL, OTPMaxAttempts: cfg.OTPMaxAttempts, OTPEmailLimit: cfg.OTPEmailRequestLimit, OTPIPLimit: cfg.OTPIPRequestLimit, OTPVisitorLimit: cfg.OTPVisitorRequestLimit, RefreshTTL: cfg.RefreshTokenTTL, HashKey: []byte(cfg.OTPHashSecret)}, tokens, auth.NewGoogleVerifier(cfg.GoogleClientID), reportSvc)
 	stores := storepkg.NewService(db, reportSvc)
 	socialSvc := social.NewService(db, cfg.StoreReviewRadiusMeters, reportSvc)
 	var ai searchpkg.IntentParser

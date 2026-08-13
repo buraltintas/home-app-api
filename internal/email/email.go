@@ -114,7 +114,7 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var j job
-	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts FROM email_outbox WHERE status IN ('pending','failed') AND available_at<=now() ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts)
+	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts FROM email_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -142,7 +142,7 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	}
 	delay := time.Duration(1<<min(j.Attempts, 8)) * time.Minute
 	status := "failed"
-	if j.Attempts >= 9 {
+	if j.Attempts+1 >= 10 {
 		delay = 365 * 24 * time.Hour
 	}
 	safeError := "provider delivery failed"

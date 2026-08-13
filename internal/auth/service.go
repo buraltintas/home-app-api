@@ -18,10 +18,13 @@ import (
 )
 
 type Config struct {
-	OTPTTL         time.Duration
-	OTPMaxAttempts int
-	RefreshTTL     time.Duration
-	HashKey        []byte
+	OTPTTL          time.Duration
+	OTPMaxAttempts  int
+	OTPEmailLimit   int
+	OTPIPLimit      int
+	OTPVisitorLimit int
+	RefreshTTL      time.Duration
+	HashKey         []byte
 }
 type Service struct {
 	db     *pgxpool.Pool
@@ -82,6 +85,23 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 		return e
 	}
 	defer tx.Rollback(ctx)
+	if visitor != nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now()`, *visitor); e != nil {
+			return e
+		}
+	}
+	var emailCount, ipCount, visitorCount int
+	e = tx.QueryRow(ctx, `SELECT
+	 count(*) FILTER(WHERE normalized_email=$1 AND created_at>=now()-interval '10 minutes'),
+	 count(*) FILTER(WHERE $2::bytea IS NOT NULL AND request_ip_hash=$2 AND created_at>=now()-interval '1 hour'),
+	 count(*) FILTER(WHERE $3::uuid IS NOT NULL AND visitor_session_id=$3 AND created_at>=now()-interval '1 hour')
+	 FROM email_verification_codes WHERE created_at>=now()-interval '1 hour'`, norm, nilBytes(ipHash), visitor).Scan(&emailCount, &ipCount, &visitorCount)
+	if e != nil {
+		return e
+	}
+	if emailCount >= s.cfg.OTPEmailLimit || ipCount >= s.cfg.OTPIPLimit || visitorCount >= s.cfg.OTPVisitorLimit {
+		return httpapi.E(429, "RATE_LIMITED", "Too many verification code requests")
+	}
 	_, e = tx.Exec(ctx, `UPDATE email_verification_codes SET invalidated_at=$2 WHERE normalized_email=$1 AND consumed_at IS NULL AND invalidated_at IS NULL`, norm, now)
 	if e != nil {
 		return e
@@ -217,7 +237,6 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 	e = tx.QueryRow(ctx, `SELECT id FROM users WHERE primary_email=$1 AND deleted_at IS NULL FOR UPDATE`, email).Scan(&user)
 	created := false
 	if errors.Is(e, pgx.ErrNoRows) {
-		created = true
 		user = uuid.New()
 		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email) VALUES($1,$2)`, user, email); e != nil {
 			return uuid.Nil, false, e
@@ -231,6 +250,35 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified) VALUES($1,$2,$3,$4,true)`, user, provider, subject, email)
 	return user, created, e
+}
+
+// LinkVisitor associates anonymous product activity after a successful login.
+// The identifier is analytics-only: it never grants access to either account.
+func (s *Service) LinkVisitor(ctx context.Context, user, visitor uuid.UUID) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	var linked uuid.UUID
+	e = tx.QueryRow(ctx, `UPDATE visitor_sessions SET linked_user_id=$1,last_seen_at=now() WHERE id=$2 AND (linked_user_id IS NULL OR linked_user_id=$1) RETURNING id`, user, visitor).Scan(&linked)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return nil
+	}
+	if e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE searches SET user_id=$1 WHERE visitor_session_id=$2 AND user_id IS NULL`, user, visitor); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func nilBytes(v []byte) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return v
 }
 
 func (s *Service) createSession(ctx context.Context, tx pgx.Tx, user uuid.UUID, client Client) (TokenPair, error) {
