@@ -1,0 +1,178 @@
+package email
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"html/template"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/burakaltintas/home-app-api/internal/security"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type Message struct{ From, To, Subject, HTML, Text string }
+type Sender interface {
+	Send(context.Context, Message) (string, error)
+}
+type DevSender struct{}
+
+func (DevSender) Send(_ context.Context, m Message) (string, error) {
+	return "dev-" + uuid.NewString(), nil
+}
+
+type ResendSender struct {
+	URL, APIKey string
+	Client      *http.Client
+}
+
+func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
+	payload := struct {
+		From    string   `json:"from"`
+		To      []string `json:"to"`
+		Subject string   `json:"subject"`
+		HTML    string   `json:"html"`
+		Text    string   `json:"text"`
+	}{m.From, []string{m.To}, m.Subject, m.HTML, m.Text}
+	b, _ := json.Marshal(payload)
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, s.URL, bytes.NewReader(b))
+	if e != nil {
+		return "", e
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+s.APIKey)
+	r, e := s.Client.Do(req)
+	if e != nil {
+		return "", e
+	}
+	defer r.Body.Close()
+	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		return "", fmt.Errorf("email provider status %d", r.StatusCode)
+	}
+	var out struct {
+		ID string `json:"id"`
+	}
+	if e := json.NewDecoder(r.Body).Decode(&out); e != nil {
+		return "", e
+	}
+	if out.ID == "" {
+		return "", fmt.Errorf("email provider returned no message id")
+	}
+	return out.ID, nil
+}
+
+type Worker struct {
+	db     *pgxpool.Pool
+	sender Sender
+	from   string
+	key    []byte
+	log    *slog.Logger
+}
+
+func NewWorker(db *pgxpool.Pool, s Sender, from string, key []byte, log *slog.Logger) *Worker {
+	return &Worker{db, s, from, key, log}
+}
+
+type job struct {
+	ID                  uuid.UUID
+	Recipient, Template string
+	Payload             []byte
+	Attempts            int
+}
+
+func (w *Worker) Run(ctx context.Context) error {
+	t := time.NewTicker(time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+			for i := 0; i < 10; i++ {
+				ok, e := w.once(ctx)
+				if e != nil {
+					w.log.Error("email worker iteration failed", "error", e)
+					break
+				}
+				if !ok {
+					break
+				}
+			}
+		}
+	}
+}
+func (w *Worker) once(ctx context.Context) (bool, error) {
+	tx, e := w.db.BeginTx(ctx, pgx.TxOptions{})
+	if e != nil {
+		return false, e
+	}
+	defer tx.Rollback(ctx)
+	var j job
+	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts FROM email_outbox WHERE status IN ('pending','failed') AND available_at<=now() ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if e != nil {
+		return false, e
+	}
+	_, e = tx.Exec(ctx, `UPDATE email_outbox SET status='processing',locked_at=now(),attempts=attempts+1 WHERE id=$1`, j.ID)
+	if e != nil {
+		return false, e
+	}
+	if e = tx.Commit(ctx); e != nil {
+		return false, e
+	}
+	msg, e := w.render(j)
+	if e == nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		var providerID string
+		providerID, e = w.sender.Send(ctx, msg)
+		if e == nil {
+			_, e = w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status='sent',sent_at=now(),provider_message_id=$2,last_error=NULL WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,provider_message_id,success) VALUES($1,'configured',$2,true)`, j.ID, providerID)
+			return true, e
+		}
+	}
+	delay := time.Duration(1<<min(j.Attempts, 8)) * time.Minute
+	status := "failed"
+	if j.Attempts >= 9 {
+		delay = 365 * 24 * time.Hour
+	}
+	safeError := "provider delivery failed"
+	_, dbErr := w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status=$2,available_at=now()+$3::interval,last_error=$4 WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,success,error_code) VALUES($1,'configured',false,'DELIVERY_FAILED')`, j.ID, status, delay.String(), safeError)
+	if dbErr != nil {
+		return true, dbErr
+	}
+	return true, e
+}
+func (w *Worker) render(j job) (Message, error) {
+	if j.Template != "login_code" {
+		return Message{}, fmt.Errorf("unknown template")
+	}
+	var p struct {
+		EncryptedCode  string `json:"encrypted_code"`
+		ExpiresMinutes int    `json:"expires_minutes"`
+	}
+	if e := json.Unmarshal(j.Payload, &p); e != nil {
+		return Message{}, e
+	}
+	code, e := security.Open(w.key, p.EncryptedCode)
+	if e != nil {
+		return Message{}, e
+	}
+	data := struct {
+		Code    string
+		Minutes int
+	}{code, p.ExpiresMinutes}
+	var html, text bytes.Buffer
+	_ = template.Must(template.New("html").Parse(`<h1>Giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`)).Execute(&html, data)
+	_ = template.Must(template.New("text").Parse("Giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.")).Execute(&text, data)
+	return Message{w.from, j.Recipient, "home-app giriş kodunuz", html.String(), text.String()}, nil
+}

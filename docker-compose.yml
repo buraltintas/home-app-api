@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_USER: home_app
+      POSTGRES_PASSWORD: home_app
+      POSTGRES_DB: home_app
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U home_app -d home_app"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - home_app_pg:/var/lib/postgresql/data
+
+volumes:
+  home_app_pg:
+
