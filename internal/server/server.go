@@ -266,13 +266,24 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"items": items, "next_cursor": next})
 }
 func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	lat, lon := queryFloat(r, "latitude"), queryFloat(r, "longitude")
-	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), lat, lon, queryInt(r, "radius_meters", 10000), queryInt(r, "limit", 20))
+	radius := queryInt(r, "radius_meters", 10000)
+	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), lat, lon, radius, queryInt(r, "limit", 20), viewer(r))
 	if e != nil {
 		WriteError(w, e)
 		return
 	}
-	JSON(w, 200, map[string]any{"items": items})
+	var visitor *uuid.UUID
+	if id, ok := appmw.VisitorID(r); ok {
+		visitor = &id
+	}
+	searchID, visitor, e := s.search.RecordInternalSearch(r.Context(), viewer(r), visitor, searchpkg.Request{Query: r.URL.Query().Get("q"), Latitude: lat, Longitude: lon, RadiusMeters: radius}, items, time.Since(start))
+	if e != nil {
+		WriteError(w, e)
+		return
+	}
+	JSON(w, 200, map[string]any{"search_id": searchID, "visitor_session_id": visitor, "items": items})
 }
 func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)

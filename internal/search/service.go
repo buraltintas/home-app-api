@@ -156,7 +156,7 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			fallback = "ai_unavailable_or_invalid"
 		}
 	}
-	internal, e := s.stores.Search(ctx, intent.NormalizedQuery, in.Latitude, in.Longitude, in.RadiusMeters, 20)
+	internal, e := s.stores.Search(ctx, intent.NormalizedQuery, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
 	if e != nil {
 		return Response{}, e
 	}
@@ -287,11 +287,12 @@ func (s *Service) Interaction(ctx context.Context, searchID uuid.UUID, user, vis
 	if !allowed[event] {
 		return httpapi.ErrInvalidInput
 	}
-	tag, e := s.db.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,user_id,visitor_session_id,store_id,event_type,idempotency_key) SELECT s.id,r.id,$2,$3,r.store_id,$5,nullif($6,'') FROM searches s LEFT JOIN search_results r ON r.id=$4 AND r.search_id=s.id WHERE s.id=$1 AND (($2::uuid IS NOT NULL AND s.user_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND s.visitor_session_id=$3)) AND ($4::uuid IS NULL OR r.id IS NOT NULL) ON CONFLICT DO NOTHING`, searchID, user, visitor, resultID, event, key)
+	var owned bool
+	e := s.db.QueryRow(ctx, `WITH owned AS (SELECT s.id search_id,r.id result_id,r.store_id FROM searches s LEFT JOIN search_results r ON r.id=$4 AND r.search_id=s.id WHERE s.id=$1 AND (($2::uuid IS NOT NULL AND s.user_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND s.visitor_session_id=$3)) AND ($4::uuid IS NULL OR r.id IS NOT NULL)),ins AS (INSERT INTO search_interactions(search_id,search_result_id,user_id,visitor_session_id,store_id,event_type,idempotency_key) SELECT search_id,result_id,$2,$3,store_id,$5,nullif($6,'') FROM owned ON CONFLICT DO NOTHING) SELECT EXISTS(SELECT 1 FROM owned)`, searchID, user, visitor, resultID, event, key).Scan(&owned)
 	if e != nil {
 		return e
 	}
-	if tag.RowsAffected() == 0 && key == "" {
+	if !owned {
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
 	}
 	return nil
@@ -301,14 +302,61 @@ func (s *Service) Attribute(ctx context.Context, searchID, resultID, user, store
 	if event != "favorite" && event != "unfavorite" && event != "review_created" && event != "review_started" {
 		return httpapi.ErrInvalidInput
 	}
-	tag, e := s.db.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,user_id,store_id,event_type,idempotency_key) SELECT s.id,r.id,$3,$4,$5,$6 FROM searches s JOIN search_results r ON r.id=$2 AND r.search_id=s.id WHERE s.id=$1 AND s.user_id=$3 AND r.store_id=$4 AND s.created_at>=now()-$7::interval ON CONFLICT DO NOTHING`, searchID, resultID, user, store, event, key, s.attributionWindow.String())
+	var valid bool
+	e := s.db.QueryRow(ctx, `WITH valid AS (SELECT s.id search_id,r.id result_id FROM searches s JOIN search_results r ON r.id=$2 AND r.search_id=s.id WHERE s.id=$1 AND s.user_id=$3 AND (r.store_id=$4 OR EXISTS(SELECT 1 FROM store_external_sources x WHERE x.store_id=$4 AND x.provider=r.external_provider AND x.external_id=r.external_place_id)) AND s.created_at>=now()-$7::interval),ins AS (INSERT INTO search_interactions(search_id,search_result_id,user_id,store_id,event_type,idempotency_key) SELECT search_id,result_id,$3,$4,$5,$6 FROM valid ON CONFLICT DO NOTHING) SELECT EXISTS(SELECT 1 FROM valid)`, searchID, resultID, user, store, event, key, s.attributionWindow.String()).Scan(&valid)
 	if e != nil {
 		return e
 	}
-	if tag.RowsAffected() == 0 {
+	if !valid {
 		return httpapi.E(422, "SEARCH_ATTRIBUTION_INVALID", "Search attribution is invalid or expired")
 	}
 	return nil
+}
+
+func (s *Service) RecordInternalSearch(ctx context.Context, user, visitor *uuid.UUID, in Request, items []storepkg.Item, elapsed time.Duration) (uuid.UUID, *uuid.UUID, error) {
+	if user == nil && visitor == nil {
+		id := uuid.New()
+		visitor = &id
+	}
+	if visitor != nil {
+		if _, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now()`, *visitor); e != nil {
+			return uuid.Nil, visitor, e
+		}
+	}
+	intent := Deterministic(in.Query)
+	if intent.NormalizedQuery == "" {
+		intent.NormalizedQuery = "nearby"
+	}
+	intentJSON, _ := json.Marshal(intent)
+	id := uuid.New()
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return uuid.Nil, visitor, e
+	}
+	defer tx.Rollback(ctx)
+	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,total_result_count,status) VALUES($1,$2,$3,$4,$5,$6,'classic',$7,$8,$9,$10,$11,$11,'completed')`, id, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, lat, lon, in.RadiusMeters, elapsed.Milliseconds(), len(items))
+	if e != nil {
+		return uuid.Nil, visitor, e
+	}
+	for i, item := range items {
+		_, e = tx.Exec(ctx, `INSERT INTO search_results(search_id,rank,store_id,source,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,distance_meters,ranking_reason) VALUES($1,$2,$3,'internal',$4,$5,$6,$7,$8,'classic_internal')`, id, i+1, item.ID, item.Platform.AverageRating, item.Platform.ReviewCount, item.Platform.FavoriteCount, item.Platform.PostCount, roundedDistance(item.DistanceMeters))
+		if e != nil {
+			return uuid.Nil, visitor, e
+		}
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + id.String(), UserID: user, VisitorSessionID: visitor, SearchID: &id, Metadata: map[string]any{"zero_results": len(items) == 0}}); e != nil {
+		return uuid.Nil, visitor, e
+	}
+	return id, visitor, tx.Commit(ctx)
+}
+
+func roundedDistance(v *float64) *int {
+	if v == nil {
+		return nil
+	}
+	n := int(math.Round(*v))
+	return &n
 }
 func merge(a, b Intent) Intent {
 	if b.LocationText != "" {

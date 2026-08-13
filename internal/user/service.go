@@ -124,11 +124,17 @@ func (s *Service) Searches(ctx context.Context, user uuid.UUID, limit int) ([]Se
 func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.UUID) error {
 	if id == nil {
 		_, e := s.db.Exec(ctx, `DELETE FROM searches WHERE user_id=$1`, user)
+		if e == nil {
+			e = s.report.RebuildSnapshot(ctx)
+		}
 		return e
 	}
 	tag, e := s.db.Exec(ctx, `DELETE FROM searches WHERE id=$1 AND user_id=$2`, *id, user)
 	if e == nil && tag.RowsAffected() == 0 {
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
+	}
+	if e == nil {
+		e = s.report.RebuildSnapshot(ctx)
 	}
 	return e
 }
