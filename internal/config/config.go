@@ -31,6 +31,7 @@ type Config struct {
 	SearchLocationDecimals                         int
 	ReportingTimezone                              string
 	SearchAttributionWindow                        time.Duration
+	SearchRetentionDays, VisitorRetentionDays      int
 }
 
 func Load() (Config, error) {
@@ -86,6 +87,12 @@ func Load() (Config, error) {
 		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
 	}
 	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
+	if c.SearchRetentionDays, err = integer("SEARCH_RETENTION_DAYS", 365); err != nil {
+		return c, err
+	}
+	if c.VisitorRetentionDays, err = integer("VISITOR_RETENTION_DAYS", 180); err != nil {
+		return c, err
+	}
 	if _, err = time.LoadLocation(c.ReportingTimezone); err != nil {
 		return c, fmt.Errorf("REPORTING_TIMEZONE: %w", err)
 	}
