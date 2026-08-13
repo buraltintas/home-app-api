@@ -55,7 +55,7 @@ func main() {
 		places = searchpkg.NewGooglePlaces(cfg.GooglePlacesAPIKey)
 	}
 	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow)
-	users := userpkg.NewService(db)
+	users := userpkg.NewService(db, reportSvc)
 	var storage media.ObjectStorage = media.NewDevStorage(cfg.ObjectStorageUploadTTL)
 	if cfg.ObjectStorageProvider == "s3" || cfg.ObjectStorageProvider == "r2" {
 		storage, e = media.NewS3Storage(ctx, media.S3Config{Region: cfg.ObjectStorageRegion, Endpoint: cfg.ObjectStorageEndpoint, AccessKey: cfg.ObjectStorageAccessKey, SecretKey: cfg.ObjectStorageSecretKey, Bucket: cfg.Bucket, PathStyle: cfg.ObjectStoragePathStyle, UploadTTL: cfg.ObjectStorageUploadTTL})

@@ -7,14 +7,18 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Service struct{ db *pgxpool.Pool }
+type Service struct {
+	db     *pgxpool.Pool
+	report *reporting.Service
+}
 
-func NewService(db *pgxpool.Pool) *Service { return &Service{db} }
+func NewService(db *pgxpool.Pool, report *reporting.Service) *Service { return &Service{db, report} }
 
 type PublicProfile struct {
 	ID             uuid.UUID `json:"id"`
@@ -127,4 +131,41 @@ func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.U
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
 	}
 	return e
+}
+
+func (s *Service) DeleteAccount(ctx context.Context, user uuid.UUID) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	rows, e := tx.Query(ctx, `SELECT DISTINCT store_id FROM posts WHERE user_id=$1 AND deleted_at IS NULL`, user)
+	if e != nil {
+		return e
+	}
+	var stores []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if e = rows.Scan(&id); e != nil {
+			return e
+		}
+		stores = append(stores, id)
+	}
+	rows.Close()
+	tag, e := tx.Exec(ctx, `UPDATE posts SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL;UPDATE comments SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL;DELETE FROM likes WHERE user_id=$1;DELETE FROM follows WHERE follower_id=$1 OR following_id=$1;DELETE FROM favorites WHERE user_id=$1;DELETE FROM searches WHERE user_id=$1;DELETE FROM auth_identities WHERE user_id=$1;UPDATE auth_sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='account_deleted' WHERE user_id=$1;DELETE FROM user_private_profiles WHERE user_id=$1;UPDATE user_profiles SET username=NULL,display_name='Deleted user',avatar_url=NULL,bio=NULL,city=NULL,updated_at=now() WHERE user_id=$1;UPDATE users SET primary_email=('deleted+'||id::text||'@invalid.local')::citext,status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, user)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(404, "USER_NOT_FOUND", "User not found")
+	}
+	for _, store := range stores {
+		if _, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg,updated_at=now() FROM(SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL)x WHERE ss.store_id=$1`, store); e != nil {
+			return e
+		}
+	}
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	return s.report.RebuildSnapshot(ctx)
 }

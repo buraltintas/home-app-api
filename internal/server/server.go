@@ -78,6 +78,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Group(func(r chi.Router) {
 			r.Use(appmw.RequireAuth)
 			r.Get("/me", s.me)
+			r.Delete("/me", s.deleteAccount)
 			r.Patch("/me", s.updateMe)
 			r.Get("/me/searches", s.mySearches)
 			r.Delete("/me/searches", s.deleteMySearches)
@@ -425,6 +426,14 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.me(w, r)
+}
+func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	if e := s.users.DeleteAccount(r.Context(), p.UserID); e != nil {
+		WriteError(w, e)
+		return
+	}
+	w.WriteHeader(204)
 }
 func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
