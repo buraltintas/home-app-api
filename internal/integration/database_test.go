@@ -160,6 +160,46 @@ func TestAuthenticationIdentityAndSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestConcurrentIdentityCreationProducesOneUser(t *testing.T) {
+	db := database(t)
+	email := "concurrent-" + uuid.NewString() + "@example.test"
+	google := googleStub{map[string]auth.GoogleIdentity{"same-token": {Subject: "subject-" + uuid.NewString(), Email: email, EmailVerified: true}}}
+	authSvc, _, _, _, _ := services(t, db, google, nil)
+	const attempts = 20
+	users := make(chan uuid.UUID, attempts)
+	errs := make(chan error, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pair, err := authSvc.Google(context.Background(), "same-token", auth.Client{Type: "integration"})
+			users <- pair.UserID
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(users)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := uuid.Nil
+	for id := range users {
+		if want == uuid.Nil {
+			want = id
+		} else if id != want {
+			t.Fatalf("concurrent identity resolved to %s and %s", want, id)
+		}
+	}
+	var count int
+	if err := db.QueryRow(t.Context(), `SELECT count(*) FROM users WHERE primary_email=$1`, email).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("users=%d err=%v", count, err)
+	}
+}
+
 func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	db := database(t)
 	author := user(t, db, "author-"+uuid.NewString()+"@example.test")
@@ -173,6 +213,12 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	}
 	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Bu konum çok uzakta", Rating: 3, Latitude: 41.010, Longitude: 29.0000}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
 		t.Fatalf("outside-radius review: %v", err)
+	}
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen içindeki ziyaret", Rating: 4, Latitude: 41.00448, Longitude: 29.0000}); err != nil {
+		t.Fatalf("inside boundary review: %v", err)
+	}
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen dışındaki ziyaret", Rating: 4, Latitude: 41.00452, Longitude: 29.0000}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
+		t.Fatalf("outside boundary review: %v", err)
 	}
 	for i := 0; i < 2; i++ {
 		if _, err = stores.Favorite(t.Context(), viewer, storeID, true); err != nil {
@@ -192,8 +238,12 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	if err != nil || len(feed) != 1 {
 		t.Fatalf("feed: len=%d cursor=%q err=%v", len(feed), cursor, err)
 	}
-	if !feed[0].ViewerLiked || !feed[0].ViewerFollows || !feed[0].ViewerFavorited || !feed[0].VisitVerified {
-		t.Fatalf("incorrect viewer state: %+v", feed[0])
+	post, err := socialSvc.GetPost(t.Context(), postID, &viewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !post.ViewerLiked || !post.ViewerFollows || !post.ViewerFavorited || !post.VisitVerified {
+		t.Fatalf("incorrect viewer state: %+v", post)
 	}
 	items, err := stores.Search(t.Context(), "Integration", nil, "", nil, nil, 10000, 20, &viewer)
 	if err != nil || len(items) == 0 {
@@ -213,6 +263,12 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	if err = searchSvc.Attribute(t.Context(), searchID, resultID, viewer, items[0].ID, "favorite", "favorite-1"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err = db.Exec(t.Context(), `UPDATE searches SET created_at=now()-interval '73 hours' WHERE id=$1`, searchID); err != nil {
+		t.Fatal(err)
+	}
+	if err = searchSvc.Attribute(t.Context(), searchID, resultID, viewer, items[0].ID, "favorite", "favorite-expired"); appCode(err) != "SEARCH_ATTRIBUTION_INVALID" {
+		t.Fatalf("expired attribution: %v", err)
+	}
 	if err = report.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -229,6 +285,40 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	}
 	if first.RegisteredUsersTotal != second.RegisteredUsersTotal || first.PostsCurrentTotal != second.PostsCurrentTotal || first.SearchesLifetime != second.SearchesLifetime {
 		t.Fatalf("rebuild is not idempotent: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestFeedCursorTieBreakerHasNoDuplicatesOrGaps(t *testing.T) {
+	db := database(t)
+	author := user(t, db, "pagination-"+uuid.NewString()+"@example.test")
+	storeID := store(t, db, 41, 29)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	created := time.Now().Add(24 * time.Hour).Truncate(time.Microsecond)
+	expected := map[uuid.UUID]bool{}
+	for i := 0; i < 6; i++ {
+		id := uuid.New()
+		expected[id] = true
+		if _, err := db.Exec(t.Context(), `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,created_at) VALUES($1,$2,$3,$4,5,0,$5,$5)`, id, author, storeID, fmt.Sprintf("pagination %d", i), created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen := map[uuid.UUID]bool{}
+	cursor := ""
+	for page := 0; page < 3; page++ {
+		items, next, err := socialSvc.Feed(t.Context(), nil, cursor, 2)
+		if err != nil || len(items) != 2 {
+			t.Fatalf("page=%d len=%d err=%v", page, len(items), err)
+		}
+		for _, item := range items {
+			if !expected[item.ID] || seen[item.ID] {
+				t.Fatalf("unexpected or duplicate post %s", item.ID)
+			}
+			seen[item.ID] = true
+		}
+		cursor = next
+	}
+	if len(seen) != len(expected) {
+		t.Fatalf("seen=%d expected=%d", len(seen), len(expected))
 	}
 }
 
@@ -344,18 +434,19 @@ func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
 	first := user(t, db, "push-first-"+uuid.NewString()+"@example.test")
 	second := user(t, db, "push-second-"+uuid.NewString()+"@example.test")
 	repo := notification.NewRepository(db, []byte(testHashKey))
-	deviceA, err := repo.RegisterDevice(t.Context(), first, "ios", "shared-device-token")
+	token := "shared-device-token-" + uuid.NewString()
+	deviceA, err := repo.RegisterDevice(t.Context(), first, "ios", token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deviceB, err := repo.RegisterDevice(t.Context(), second, "android", "shared-device-token")
+	deviceB, err := repo.RegisterDevice(t.Context(), second, "android", token)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deviceA != deviceB {
 		t.Fatalf("token replacement created a second device: %s != %s", deviceA, deviceB)
 	}
-	deleted, err := repo.DeleteDevice(t.Context(), first, "shared-device-token")
+	deleted, err := repo.DeleteDevice(t.Context(), first, token)
 	if err != nil || deleted {
 		t.Fatalf("old owner deleted replacement device: deleted=%v err=%v", deleted, err)
 	}

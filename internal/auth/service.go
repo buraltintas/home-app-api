@@ -14,6 +14,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -192,6 +193,19 @@ func (s *Service) Google(ctx context.Context, idToken string, client Client) (To
 	if e != nil {
 		return TokenPair{}, e
 	}
+	for attempt := 0; attempt < 3; attempt++ {
+		pair, err := s.googleIdentity(ctx, g, norm, client)
+		if err == nil {
+			return pair, nil
+		}
+		if !identityRace(err) || attempt == 2 {
+			return TokenPair{}, err
+		}
+	}
+	return TokenPair{}, e
+}
+
+func (s *Service) googleIdentity(ctx context.Context, g GoogleIdentity, norm string, client Client) (TokenPair, error) {
 	tx, e := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if e != nil {
 		return TokenPair{}, e
@@ -217,6 +231,11 @@ func (s *Service) Google(ctx context.Context, idToken string, client Client) (To
 		return TokenPair{}, e
 	}
 	return pair, nil
+}
+
+func identityRace(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01" || pgErr.Code == "23505")
 }
 
 func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subject, email string, verified bool) (uuid.UUID, bool, error) {
