@@ -3,10 +3,13 @@ package media
 import (
 	"context"
 	"errors"
+	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -22,6 +25,13 @@ type Service struct {
 
 func NewService(db *pgxpool.Pool, storage ObjectStorage, max int64, report *reporting.Service) *Service {
 	return &Service{db, storage, max, report}
+}
+
+func (s *Service) UploadHandler() http.Handler {
+	if local, ok := s.storage.(*LocalStorage); ok {
+		return local.Handler()
+	}
+	return nil
 }
 
 type CreateRequest struct {
@@ -41,7 +51,9 @@ func (s *Service) Create(ctx context.Context, user uuid.UUID, in CreateRequest) 
 	}
 	id := uuid.New()
 	key := filepath.ToSlash("users/" + user.String() + "/" + id.String() + ext)
+	started := time.Now()
 	upload, e := s.storage.CreateUpload(ctx, key, in.MimeType, in.SizeBytes)
+	observability.Provider("object_storage", observability.Outcome(e), time.Since(started))
 	if e != nil {
 		return CreateResponse{}, e
 	}
@@ -61,7 +73,9 @@ func (s *Service) Complete(ctx context.Context, user, id uuid.UUID, width, heigh
 	if e != nil {
 		return e
 	}
+	started := time.Now()
 	info, e := s.storage.Stat(ctx, key)
+	observability.Provider("object_storage", observability.Outcome(e), time.Since(started))
 	if e != nil {
 		return httpapi.E(422, "MEDIA_UPLOAD_INCOMPLETE", "Media upload is not complete")
 	}

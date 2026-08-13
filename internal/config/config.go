@@ -25,6 +25,7 @@ type Config struct {
 	EmailAPIURL, EmailAPIKey                                               string
 	ObjectStorageProvider, Bucket                                          string
 	ObjectStorageRegion, ObjectStorageEndpoint                             string
+	ObjectStorageLocalDir, ObjectStoragePublicURL                          string
 	ObjectStorageAccessKey, ObjectStorageSecretKey                         string
 	ObjectStoragePathStyle                                                 bool
 	ObjectStorageUploadTTL                                                 time.Duration
@@ -34,6 +35,7 @@ type Config struct {
 	ReportingTimezone                                                      string
 	SearchAttributionWindow                                                time.Duration
 	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
+	MetricsToken                                                           string
 }
 
 func Load() (Config, error) {
@@ -47,7 +49,9 @@ func Load() (Config, error) {
 		EmailAPIURL: os.Getenv("EMAIL_API_URL"), EmailAPIKey: os.Getenv("EMAIL_API_KEY"),
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: env("OBJECT_STORAGE_BUCKET", "home-app-dev"),
 		ObjectStorageRegion: env("OBJECT_STORAGE_REGION", "auto"), ObjectStorageEndpoint: os.Getenv("OBJECT_STORAGE_ENDPOINT"), ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"), ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
+		ObjectStorageLocalDir: env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),
 		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
+		MetricsToken:      os.Getenv("METRICS_TOKEN"),
 	}
 	var err error
 	if c.AccessTokenTTL, err = duration("ACCESS_TOKEN_TTL", 15*time.Minute); err != nil {

@@ -13,6 +13,7 @@ import (
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/burakaltintas/home-app-api/internal/social"
@@ -38,9 +39,9 @@ func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *soci
 	return &Server{db, a, st, so, se, u, m, hashKey}
 }
 
-func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager) http.Handler {
+func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, metricsToken ...string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(appmw.RequestID, appmw.Recover(log), appmw.Logging(log), appmw.SecurityHeaders)
+	r.Use(appmw.RequestID, appmw.Recover(log), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders)
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
@@ -51,6 +52,14 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		}
 		JSON(w, 200, map[string]string{"status": "ready"})
 	})
+	token := ""
+	if len(metricsToken) > 0 {
+		token = metricsToken[0]
+	}
+	r.Handle("/metrics", observability.MetricsHandler(token))
+	if uploads := s.media.UploadHandler(); uploads != nil {
+		r.Mount("/uploads", http.StripPrefix("/uploads", uploads))
+	}
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(appmw.BFF(bff))
 		r.Use(appmw.NewLimiter(180, 40).Middleware)
@@ -151,9 +160,11 @@ func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {
 	}
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if e := s.auth.RequestCode(r.Context(), in.Email, visitor, auth.IPHash(s.hashKey, ip)); e != nil {
+		observability.Auth("otp_request", "failure")
 		WriteError(w, e)
 		return
 	}
+	observability.Auth("otp_request", "success")
 	JSON(w, 202, map[string]string{"status": "accepted"})
 }
 func client(r *http.Request) auth.Client {
@@ -167,9 +178,11 @@ func (s *Server) verifyCode(w http.ResponseWriter, r *http.Request) {
 	}
 	x, e := s.auth.VerifyCode(r.Context(), in.Email, in.Code, client(r))
 	if e != nil {
+		observability.Auth("otp_verify", "failure")
 		WriteError(w, e)
 		return
 	}
+	observability.Auth("otp_verify", "success")
 	if visitor, ok := appmw.VisitorID(r); ok {
 		_ = s.auth.LinkVisitor(r.Context(), x.UserID, visitor)
 	}
@@ -185,9 +198,11 @@ func (s *Server) google(w http.ResponseWriter, r *http.Request) {
 	}
 	x, e := s.auth.Google(r.Context(), in.IDToken, client(r))
 	if e != nil {
+		observability.Auth("google_login", "failure")
 		WriteError(w, e)
 		return
 	}
+	observability.Auth("google_login", "success")
 	if visitor, ok := appmw.VisitorID(r); ok {
 		_ = s.auth.LinkVisitor(r.Context(), x.UserID, visitor)
 	}
@@ -203,9 +218,11 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 	x, e := s.auth.Refresh(r.Context(), in.RefreshToken, client(r))
 	if e != nil {
+		observability.Auth("refresh", "failure")
 		WriteError(w, e)
 		return
 	}
+	observability.Auth("refresh", "success")
 	JSON(w, 200, x)
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {

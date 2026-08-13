@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/burakaltintas/home-app-api/internal/observability"
 )
 
 type GooglePlaces struct {
@@ -20,6 +22,13 @@ func NewGooglePlaces(key string) *GooglePlaces {
 	return &GooglePlaces{key, &http.Client{Timeout: 4 * time.Second}}
 }
 func (g *GooglePlaces) TextSearch(ctx context.Context, q string, lat, lon *float64, radius int) ([]Place, error) {
+	started := time.Now()
+	out, err := g.textSearch(ctx, q, lat, lon, radius)
+	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
+	return out, err
+}
+
+func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float64, radius int) ([]Place, error) {
 	if g.key == "" {
 		return nil, nil
 	}
@@ -74,6 +83,13 @@ func (g *GooglePlaces) TextSearch(ctx context.Context, q string, lat, lon *float
 	return out, nil
 }
 func (g *GooglePlaces) PlaceDetails(ctx context.Context, id string) (Place, error) {
+	started := time.Now()
+	out, err := g.placeDetails(ctx, id)
+	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
+	return out, err
+}
+
+func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, error) {
 	if g.key == "" {
 		return Place{}, fmt.Errorf("places not configured")
 	}

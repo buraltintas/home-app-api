@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -41,6 +42,13 @@ type DeliveryError struct {
 func (e *DeliveryError) Error() string { return fmt.Sprintf("email provider status %d", e.Status) }
 
 func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
+	started := time.Now()
+	id, err := s.send(ctx, m)
+	observability.Provider("resend", observability.Outcome(err), time.Since(started))
+	return id, err
+}
+
+func (s *ResendSender) send(ctx context.Context, m Message) (string, error) {
 	payload := struct {
 		From    string   `json:"from"`
 		To      []string `json:"to"`
@@ -147,6 +155,7 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 		shouldRetry = retryable(e)
 		if e == nil {
 			_, e = w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status='sent',sent_at=now(),provider_message_id=$2,last_error=NULL WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,provider_message_id,success) VALUES($1,'configured',$2,true)`, j.ID, providerID)
+			observability.Worker("email", observability.Outcome(e), false)
 			return true, e
 		}
 	}
@@ -159,8 +168,10 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	safeError := "provider delivery failed"
 	_, dbErr := w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status=$2,available_at=CASE WHEN $3='infinity' THEN 'infinity'::timestamptz ELSE now()+$3::interval END,last_error=$4 WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,success,error_code) VALUES($1,'configured',false,'DELIVERY_FAILED')`, j.ID, status, available, safeError)
 	if dbErr != nil {
+		observability.Worker("email", "failure", shouldRetry)
 		return true, dbErr
 	}
+	observability.Worker("email", "failure", shouldRetry)
 	return true, e
 }
 

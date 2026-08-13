@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
@@ -121,6 +122,13 @@ func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, pla
 	return &Service{db, stores, ai, places, model, decimals, report, attribution, visitorTTL, time.Now}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
+	started := time.Now()
+	out, err := s.search(ctx, user, visitor, in)
+	observability.Search("hybrid", observability.Outcome(err), time.Since(started), len(out.Results))
+	return out, err
+}
+
+func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
 	in.Query = strings.TrimSpace(in.Query)
 	if len(in.Query) < 2 || len(in.Query) > 500 || (in.Latitude == nil) != (in.Longitude == nil) {
@@ -315,6 +323,13 @@ func (s *Service) Attribute(ctx context.Context, searchID, resultID, user, store
 }
 
 func (s *Service) RecordInternalSearch(ctx context.Context, user, visitor *uuid.UUID, in Request, items []storepkg.Item, elapsed time.Duration) (uuid.UUID, *uuid.UUID, error) {
+	started := time.Now()
+	id, visitorID, err := s.recordInternalSearch(ctx, user, visitor, in, items, elapsed)
+	observability.Search("classic", observability.Outcome(err), time.Since(started), len(items))
+	return id, visitorID, err
+}
+
+func (s *Service) recordInternalSearch(ctx context.Context, user, visitor *uuid.UUID, in Request, items []storepkg.Item, elapsed time.Duration) (uuid.UUID, *uuid.UUID, error) {
 	if user == nil && visitor == nil {
 		id := uuid.New()
 		visitor = &id

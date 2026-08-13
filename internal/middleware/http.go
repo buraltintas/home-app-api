@@ -13,6 +13,7 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/security"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
@@ -40,7 +41,11 @@ func Logging(log *slog.Logger) func(http.Handler) http.Handler {
 			start := time.Now()
 			rw := &recorder{ResponseWriter: w, status: 200}
 			next.ServeHTTP(rw, r)
-			attrs := []any{"request_id", RequestIDFrom(r.Context()), "method", r.Method, "route", r.URL.Path, "status", rw.status, "duration_ms", time.Since(start).Milliseconds()}
+			route := chi.RouteContext(r.Context()).RoutePattern()
+			if route == "" {
+				route = "unmatched"
+			}
+			attrs := []any{"request_id", RequestIDFrom(r.Context()), "method", r.Method, "route", route, "status", rw.status, "duration_ms", time.Since(start).Milliseconds(), "client_type", strings.TrimSpace(r.Header.Get("X-Client-Type"))}
 			if p, ok := PrincipalFrom(r.Context()); ok {
 				attrs = append(attrs, "user_id", p.UserID.String())
 			}

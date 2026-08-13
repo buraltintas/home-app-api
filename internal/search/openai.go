@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/invopop/jsonschema"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -27,6 +28,13 @@ func NewOpenAIParser(key, model string, timeout time.Duration) *OpenAIParser {
 	return &OpenAIParser{openai.NewClient(option.WithAPIKey(key)), model, timeout, schema}
 }
 func (p *OpenAIParser) ParseSearchIntent(ctx context.Context, query string, c Context) (Intent, error) {
+	started := time.Now()
+	out, err := p.parseSearchIntent(ctx, query, c)
+	observability.Provider("openai", observability.Outcome(err), time.Since(started))
+	return out, err
+}
+
+func (p *OpenAIParser) parseSearchIntent(ctx context.Context, query string, c Context) (Intent, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	prompt := fmt.Sprintf("Parse this Turkish home/living physical-store search into the schema. Use only canonical category slugs. Do not invent coordinates. Locale=%s. Query=%q", c.Locale, query)

@@ -3,9 +3,13 @@
 package integration_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"sync"
 	"testing"
@@ -13,6 +17,7 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/media"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -265,5 +270,51 @@ func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
 	}
 	if stores != 1 || mappings != 1 {
 		t.Fatal(fmt.Sprintf("stores=%d mappings=%d", stores, mappings))
+	}
+}
+
+func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
+	db := database(t)
+	owner := user(t, db, "media-owner-"+uuid.NewString()+"@example.test")
+	other := user(t, db, "media-other-"+uuid.NewString()+"@example.test")
+	storeID := store(t, db, 41, 29)
+	_, _, socialSvc, _, report := services(t, db, googleStub{}, nil)
+	storage, err := media.NewLocalStorage(t.TempDir(), "http://localhost:8080/uploads", time.Minute, []byte(testHashKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mediaSvc := media.NewService(db, storage, 1<<20, report)
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89")
+	created, err := mediaSvc.Create(t.Context(), owner, media.CreateRequest{MimeType: "image/png", SizeBytes: int64(len(png))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _ := url.Parse(created.Upload.UploadURL)
+	req := httptest.NewRequest(http.MethodPut, target.RequestURI(), bytes.NewReader(png))
+	req.Header.Set("Content-Type", "image/png")
+	rr := httptest.NewRecorder()
+	storage.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNoContent {
+		t.Fatalf("upload status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err = mediaSvc.Complete(t.Context(), other, created.ID, 1, 1); appCode(err) != "MEDIA_NOT_FOUND" {
+		t.Fatalf("unauthorized finalize: %v", err)
+	}
+	if err = mediaSvc.Complete(t.Context(), owner, created.ID, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = mediaSvc.Complete(t.Context(), owner, created.ID, 1, 1); appCode(err) != "MEDIA_NOT_FOUND" {
+		t.Fatalf("duplicate finalize: %v", err)
+	}
+	postID, err := socialSvc.CreatePost(t.Context(), owner, social.CreatePost{StoreID: storeID, Text: "Yerel dosya ile gerçek medya akışı", Rating: 5, Latitude: 41, Longitude: 29, MediaIDs: []uuid.UUID{created.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := socialSvc.GetPost(t.Context(), postID, &owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(post.Media) != 1 || post.Media[0] != created.Upload.StorageKey {
+		t.Fatalf("post media=%v", post.Media)
 	}
 }
