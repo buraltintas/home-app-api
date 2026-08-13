@@ -11,13 +11,16 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
+	"github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/notification"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/search"
@@ -333,12 +336,12 @@ func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := 0; i < count; i++ {
 		wg.Add(1)
-		go func() {
+		go func(locale i18n.Locale) {
 			defer wg.Done()
-			id, err := searchSvc.MaterializeGoogleStore(context.Background(), placeID)
+			id, err := searchSvc.MaterializeGoogleStore(i18n.WithLocale(context.Background(), locale), placeID)
 			ids <- id
 			errs <- err
-		}()
+		}(i18n.Supported()[i%len(i18n.Supported())])
 	}
 	wg.Wait()
 	close(ids)
@@ -435,11 +438,11 @@ func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
 	second := user(t, db, "push-second-"+uuid.NewString()+"@example.test")
 	repo := notification.NewRepository(db, []byte(testHashKey))
 	token := "shared-device-token-" + uuid.NewString()
-	deviceA, err := repo.RegisterDevice(t.Context(), first, "ios", token)
+	deviceA, err := repo.RegisterDeviceLocale(t.Context(), first, "ios", token, i18n.LocaleDE)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deviceB, err := repo.RegisterDevice(t.Context(), second, "android", token)
+	deviceB, err := repo.RegisterDeviceLocale(t.Context(), second, "android", token, i18n.LocaleRU)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -453,19 +456,200 @@ func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
 	if err = repo.SetPreferences(t.Context(), second, map[string]bool{"social": true, "marketing": false}); err != nil {
 		t.Fatal(err)
 	}
-	created, err := repo.Enqueue(t.Context(), second, "social.like", "push-"+deviceA.String(), map[string]any{"post_id": uuid.NewString()})
+	created, err := repo.EnqueueLocalized(t.Context(), second, "social.like", notification.TemplatePostLiked, "push-"+deviceA.String(), i18n.LocaleRU, map[string]any{"actor": "Ada", "post_id": uuid.NewString()})
 	if err != nil || !created {
 		t.Fatalf("enqueue created=%v err=%v", created, err)
 	}
-	created, err = repo.Enqueue(t.Context(), second, "social.like", "push-"+deviceA.String(), map[string]any{})
+	created, err = repo.EnqueueLocalized(t.Context(), second, "social.like", notification.TemplatePostLiked, "push-"+deviceA.String(), i18n.LocaleRU, map[string]any{"actor": "Ada"})
 	if err != nil || created {
 		t.Fatalf("duplicate enqueue created=%v err=%v", created, err)
 	}
 	job, ok, err := repo.Claim(t.Context())
-	if err != nil || !ok || job.UserID != second {
+	if err != nil || !ok || job.UserID != second || job.Locale != i18n.LocaleRU || job.TemplateKey != notification.TemplatePostLiked {
 		t.Fatalf("claim ok=%v job=%+v err=%v", ok, job, err)
+	}
+	var deviceLocale string
+	if err = db.QueryRow(t.Context(), `SELECT locale::text FROM push_devices WHERE id=$1`, deviceA).Scan(&deviceLocale); err != nil || deviceLocale != "ru" {
+		t.Fatalf("replacement device locale=%q err=%v", deviceLocale, err)
 	}
 	if err = repo.Complete(t.Context(), job.ID, "provider-123"); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestMultilingualArchitectureMatrix(t *testing.T) {
+	db := database(t)
+	authSvc, stores, socialSvc, searchSvc, report := services(t, db, googleStub{}, nil)
+
+	// The OTP request locale is persisted independently from the worker context.
+	for _, locale := range i18n.Supported() {
+		email := "otp-" + string(locale) + "-" + uuid.NewString() + "@example.test"
+		visitor := uuid.New()
+		ctx := i18n.WithLocale(t.Context(), locale)
+		if err := authSvc.RequestCode(ctx, email, &visitor, nil); err != nil {
+			t.Fatalf("request code %s: %v", locale, err)
+		}
+		var verificationLocale, outboxLocale, visitorLocale string
+		if err := db.QueryRow(ctx, `SELECT v.locale::text,o.locale::text,s.locale::text FROM email_verification_codes v JOIN email_outbox o ON o.idempotency_key='otp:'||v.id::text JOIN visitor_sessions s ON s.id=v.visitor_session_id WHERE v.normalized_email=$1 ORDER BY v.created_at DESC LIMIT 1`, email).Scan(&verificationLocale, &outboxLocale, &visitorLocale); err != nil {
+			t.Fatal(err)
+		}
+		if verificationLocale != string(locale) || outboxLocale != string(locale) || visitorLocale != string(locale) {
+			t.Fatalf("locale=%s verification=%s outbox=%s visitor=%s", locale, verificationLocale, outboxLocale, visitorLocale)
+		}
+	}
+
+	// Signup takes the persisted verification locale; changing preference affects
+	// the very next authenticated request without refreshing the token.
+	email := "locale-user-" + uuid.NewString() + "@example.test"
+	code := "654321"
+	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at,locale) VALUES($1,$2,5,now()+interval '10 minutes','de')`, email, security.Hash([]byte(testHashKey), code)); err != nil {
+		t.Fatal(err)
+	}
+	pair, err := authSvc.VerifyCode(i18n.WithLocale(t.Context(), i18n.LocaleTR), email, code, auth.Client{Type: "integration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	users := userpkg.NewService(db, report)
+	me, err := users.Me(t.Context(), pair.UserID)
+	if err != nil || me.PreferredLocale != "de" {
+		t.Fatalf("signup locale=%q err=%v", me.PreferredLocale, err)
+	}
+	ru := "ru"
+	bioLanguage := "ru-RU"
+	bio := "Люблю современный интерьер"
+	if err = users.Update(t.Context(), pair.UserID, userpkg.Update{PreferredLocale: &ru, BioLanguage: &bioLanguage, Bio: &bio}); err != nil {
+		t.Fatal(err)
+	}
+	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
+	resolved := func(explicit string) string {
+		request := httptest.NewRequest(http.MethodGet, "/", nil)
+		request.Header.Set("Authorization", "Bearer "+pair.AccessToken)
+		request.Header.Set("Accept-Language", "en-US")
+		if explicit != "" {
+			request.Header.Set("X-Locale", explicit)
+		}
+		recorder := httptest.NewRecorder()
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(i18n.FromContext(r.Context()))) })
+		middleware.RequestLocale(i18n.LocaleTR)(middleware.OptionalAuth(tokens)(middleware.UserLocale(db)(handler))).ServeHTTP(recorder, request)
+		return recorder.Body.String()
+	}
+	if got := resolved(""); got != "ru" {
+		t.Fatalf("updated authenticated locale=%q", got)
+	}
+	if got := resolved("de-DE"); got != "de" {
+		t.Fatalf("explicit locale override=%q", got)
+	}
+
+	// Canonical category keys stay stable while labels vary by presentation locale.
+	storeID := store(t, db, 41, 29)
+	if _, err = db.Exec(t.Context(), `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug='curtain' ON CONFLICT DO NOTHING`, storeID); err != nil {
+		t.Fatal(err)
+	}
+	wantLabels := map[i18n.Locale]string{i18n.LocaleTR: "Perde", i18n.LocaleEN: "Curtains", i18n.LocaleDE: "Gardinen", i18n.LocaleRU: "Шторы"}
+	for locale, want := range wantLabels {
+		item, err := stores.Get(i18n.WithLocale(t.Context(), locale), storeID, nil, nil, nil)
+		if err != nil || len(item.Categories) != 1 || item.Categories[0] != "curtain" || len(item.CategoryLabels) != 1 || item.CategoryLabels[0] != want {
+			t.Fatalf("locale=%s item=%+v err=%v", locale, item, err)
+		}
+	}
+	var translatedCounts []int
+	rows, err := db.Query(t.Context(), `SELECT count(*) FROM store_category_translations GROUP BY locale ORDER BY locale`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var count int
+		if err = rows.Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		translatedCounts = append(translatedCounts, count)
+	}
+	rows.Close()
+	if len(translatedCounts) != 4 {
+		t.Fatalf("translation locale counts=%v", translatedCounts)
+	}
+	for _, count := range translatedCounts {
+		if count != 13 {
+			t.Fatalf("expected 13 taxonomy translations per locale, counts=%v", translatedCounts)
+		}
+	}
+
+	// User content is byte-for-byte preserved and only annotated with language.
+	russianPost := "Очень хороший магазин штор"
+	russian := "ru"
+	postID, err := socialSvc.CreatePost(t.Context(), pair.UserID, social.CreatePost{StoreID: storeID, Text: russianPost, Rating: 5, Latitude: 41, Longitude: 29, ContentLanguage: &russian})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commentText := "Полностью согласна"
+	if _, err = socialSvc.AddCommentLocalized(t.Context(), pair.UserID, postID, commentText, &russian); err != nil {
+		t.Fatal(err)
+	}
+	post, err := socialSvc.GetPost(t.Context(), postID, &pair.UserID)
+	comments, commentsErr := socialSvc.Comments(t.Context(), postID, 10)
+	if err != nil || commentsErr != nil || post.Text != russianPost || post.ContentLanguage != "ru" || len(comments) != 1 || comments[0].Body != commentText || comments[0].ContentLanguage != "ru" {
+		t.Fatalf("post=%+v comments=%+v err=%v commentsErr=%v", post, comments, err, commentsErr)
+	}
+
+	// Equivalent Unicode queries persist their detected language and canonical intent.
+	queries := map[i18n.Locale]string{
+		i18n.LocaleTR: "Antalya'da uygun fiyatlı perde mağazası",
+		i18n.LocaleEN: "affordable curtain stores in Antalya",
+		i18n.LocaleDE: "günstige Gardinengeschäfte in Antalya",
+		i18n.LocaleRU: "недорогие магазины штор в Анталии",
+	}
+	for locale, query := range queries {
+		searchID, _, err := searchSvc.RecordInternalSearch(i18n.WithLocale(t.Context(), locale), &pair.UserID, nil, search.Request{Query: query}, nil, time.Millisecond)
+		if err != nil {
+			t.Fatalf("record search %s: %v", locale, err)
+		}
+		var raw, language string
+		var categories []string
+		if err = db.QueryRow(t.Context(), `SELECT raw_query,query_language::text,ARRAY(SELECT jsonb_array_elements_text(parsed_intent->'categories')) FROM searches WHERE id=$1`, searchID).Scan(&raw, &language, &categories); err != nil {
+			t.Fatal(err)
+		}
+		if raw != query || language != string(locale) || !containsAll(categories, "curtain", "home_textile") {
+			t.Fatalf("locale=%s raw=%q language=%q categories=%v", locale, raw, language, categories)
+		}
+	}
+	history, err := users.Searches(t.Context(), pair.UserID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundCyrillic := false
+	for _, entry := range history {
+		foundCyrillic = foundCyrillic || strings.Contains(entry.RawQuery, "штор")
+	}
+	if !foundCyrillic {
+		t.Fatalf("Cyrillic query missing from history: %+v", history)
+	}
+	if err = report.AggregateDay(t.Context(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	today := time.Now()
+	localizedCategories, err := report.GetTopSearchDimensionsByLocale(t.Context(), today, today, "category", "ru", 20)
+	if err != nil || len(localizedCategories) == 0 || localizedCategories[0].QueryLanguage != "ru" {
+		t.Fatalf("localized category metrics=%+v err=%v", localizedCategories, err)
+	}
+	localizedQueries, err := report.GetTopSearchQueriesByLocale(t.Context(), today, today, "ru", 20, false)
+	if err != nil || len(localizedQueries) == 0 || localizedQueries[0].QueryLanguage != "ru" {
+		t.Fatalf("localized query metrics=%+v err=%v", localizedQueries, err)
+	}
+	var localeMetrics int
+	if err = db.QueryRow(t.Context(), `SELECT count(*) FROM locale_daily_metrics WHERE metric_date=(now() AT TIME ZONE 'Europe/Istanbul')::date AND dimension='search_query' AND locale IN ('tr','en','de','ru')`).Scan(&localeMetrics); err != nil || localeMetrics != 4 {
+		t.Fatalf("search locale metrics=%d err=%v", localeMetrics, err)
+	}
+}
+
+func containsAll(values []string, wanted ...string) bool {
+	set := make(map[string]bool, len(values))
+	for _, value := range values {
+		set[value] = true
+	}
+	for _, value := range wanted {
+		if !set[value] {
+			return false
+		}
+	}
+	return true
 }

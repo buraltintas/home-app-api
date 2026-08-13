@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
@@ -145,25 +146,29 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	if user == nil && visitor == nil {
 		id := uuid.New()
-		_, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval)`, id, s.visitorTTL.String())
+		_, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at,locale) VALUES($1,now()+$2::interval,$3)`, id, s.visitorTTL.String(), i18n.FromContext(ctx))
 		if e != nil {
 			return Response{}, e
 		}
 		visitor = &id
 	} else if visitor != nil {
-		_, _ = s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.visitorTTL.String())
+		_, _ = s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at,locale) VALUES($1,now()+$2::interval,$3) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at),locale=excluded.locale`, *visitor, s.visitorTTL.String(), i18n.FromContext(ctx))
 	}
+	requestLocale := i18n.FromContext(ctx)
 	intent := Deterministic(in.Query)
 	aiUsed := false
 	fallback := ""
 	if s.ai != nil {
-		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, "tr-TR"})
+		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, requestLocale})
 		if e == nil && Validate(enriched) == nil {
 			intent = merge(intent, enriched)
 			aiUsed = true
 		} else {
 			fallback = "ai_unavailable_or_invalid"
 		}
+	}
+	if !i18n.IsSupported(intent.QueryLanguage) {
+		intent.QueryLanguage = requestLocale
 	}
 	internal, e := s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
 	if e != nil {
@@ -180,7 +185,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	googleUsed := false
 	if s.places != nil {
 		googleUsed = true
-		external, e = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters)
+		if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+			external, e = localized.TextSearchLocalized(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters, requestLocale)
+		} else {
+			external, e = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters)
+		}
 		if e != nil {
 			fallback = joinFallback(fallback, "places_unavailable")
 			external = nil
@@ -228,7 +237,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	defer tx.Rollback(ctx)
 	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
-	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed')`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed)
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status,query_language) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed',$20)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed, intent.QueryLanguage)
 	if e != nil {
 		return Response{}, e
 	}
@@ -335,11 +344,14 @@ func (s *Service) recordInternalSearch(ctx context.Context, user, visitor *uuid.
 		visitor = &id
 	}
 	if visitor != nil {
-		if _, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.visitorTTL.String()); e != nil {
+		if _, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at,locale) VALUES($1,now()+$2::interval,$3) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at),locale=excluded.locale`, *visitor, s.visitorTTL.String(), i18n.FromContext(ctx)); e != nil {
 			return uuid.Nil, visitor, e
 		}
 	}
 	intent := Deterministic(in.Query)
+	if !i18n.IsSupported(intent.QueryLanguage) {
+		intent.QueryLanguage = i18n.FromContext(ctx)
+	}
 	if intent.NormalizedQuery == "" {
 		intent.NormalizedQuery = "nearby"
 	}
@@ -351,7 +363,7 @@ func (s *Service) recordInternalSearch(ctx context.Context, user, visitor *uuid.
 	}
 	defer tx.Rollback(ctx)
 	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
-	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,total_result_count,status) VALUES($1,$2,$3,$4,$5,$6,'classic',$7,$8,$9,$10,$11,$11,'completed')`, id, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, lat, lon, in.RadiusMeters, elapsed.Milliseconds(), len(items))
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,total_result_count,status,query_language) VALUES($1,$2,$3,$4,$5,$6,'classic',$7,$8,$9,$10,$11,$11,'completed',$12)`, id, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, lat, lon, in.RadiusMeters, elapsed.Milliseconds(), len(items), intent.QueryLanguage)
 	if e != nil {
 		return uuid.Nil, visitor, e
 	}
@@ -375,6 +387,9 @@ func roundedDistance(v *float64) *int {
 	return &n
 }
 func merge(a, b Intent) Intent {
+	if i18n.IsSupported(b.QueryLanguage) {
+		a.QueryLanguage = b.QueryLanguage
+	}
 	if b.LocationText != "" {
 		a.LocationText = b.LocationText
 	}

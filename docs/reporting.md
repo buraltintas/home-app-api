@@ -2,6 +2,14 @@
 
 Reporting uses UTC source timestamps and calendar days in `REPORTING_TIMEZONE` (`Europe/Istanbul` by default). A day is converted to explicit UTC `[start,end)` bounds in Go; server-local time is never used.
 
+Locale is a dimension rather than a fixed set of language columns.
+`locale_daily_metrics` records user preferences, search languages, anonymous
+session locales, email locales, active push-device locales, and notification
+locales for `tr`, `en`, `de`, and `ru`. Query aggregates retain
+`query_language`; intent/category aggregates can be queried globally or filtered
+by language. This supports per-language volume, zero-result, AI-fallback, query,
+and category analysis without changing table shape for a future fifth locale.
+
 Core domain tables remain authoritative. `platform_stats` is the cheap single-row current snapshot, `platform_events` preserves non-state transitions, and daily aggregate tables are rebuildable projections. Domain writes and their reporting event/snapshot delta share a PostgreSQL transaction where possible. `idempotency_key` is unique, so replaying the same logical event cannot increment a snapshot twice.
 
 ## Metric definitions

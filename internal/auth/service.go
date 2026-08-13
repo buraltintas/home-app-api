@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
@@ -81,6 +82,7 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 		return e
 	}
 	now := s.now()
+	locale := i18n.FromContext(ctx)
 	id := uuid.New()
 	tx, e := s.db.BeginTx(ctx, pgx.TxOptions{})
 	if e != nil {
@@ -88,7 +90,7 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	}
 	defer tx.Rollback(ctx)
 	if visitor != nil {
-		if _, e = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.cfg.VisitorTTL.String()); e != nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at,locale) VALUES($1,now()+$2::interval,$3) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at),locale=excluded.locale`, *visitor, s.cfg.VisitorTTL.String(), locale); e != nil {
 			return e
 		}
 	}
@@ -108,12 +110,12 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	if e != nil {
 		return e
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO email_verification_codes(id,normalized_email,code_hash,visitor_session_id,request_ip_hash,max_attempts,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7)`, id, norm, security.Hash(s.cfg.HashKey, code), visitor, ipHash, s.cfg.OTPMaxAttempts, now.Add(s.cfg.OTPTTL))
+	_, e = tx.Exec(ctx, `INSERT INTO email_verification_codes(id,normalized_email,code_hash,visitor_session_id,request_ip_hash,max_attempts,expires_at,locale) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, norm, security.Hash(s.cfg.HashKey, code), visitor, ipHash, s.cfg.OTPMaxAttempts, now.Add(s.cfg.OTPTTL), locale)
 	if e != nil {
 		return e
 	}
 	payload, _ := json.Marshal(map[string]any{"encrypted_code": cipher, "expires_minutes": int(s.cfg.OTPTTL.Minutes())})
-	_, e = tx.Exec(ctx, `INSERT INTO email_outbox(idempotency_key,template,recipient,payload) VALUES($1,'login_code',$2,$3)`, "otp:"+id.String(), norm, payload)
+	_, e = tx.Exec(ctx, `INSERT INTO email_outbox(idempotency_key,template,recipient,payload,locale) VALUES($1,'login_code',$2,$3,$4)`, "otp:"+id.String(), norm, payload, locale)
 	if e != nil {
 		return e
 	}
@@ -141,7 +143,8 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 	var hash []byte
 	var attempts, max int
 	var expires time.Time
-	e = tx.QueryRow(ctx, `SELECT id,code_hash,attempts,max_attempts,expires_at FROM email_verification_codes WHERE normalized_email=$1 AND consumed_at IS NULL AND invalidated_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, norm).Scan(&id, &hash, &attempts, &max, &expires)
+	var verificationLocale i18n.Locale
+	e = tx.QueryRow(ctx, `SELECT id,code_hash,attempts,max_attempts,expires_at,locale::text FROM email_verification_codes WHERE normalized_email=$1 AND consumed_at IS NULL AND invalidated_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, norm).Scan(&id, &hash, &attempts, &max, &expires, &verificationLocale)
 	invalid := httpapi.E(401, "INVALID_CODE", "The verification code is invalid or expired")
 	if errors.Is(e, pgx.ErrNoRows) || s.now().After(expires) || attempts >= max {
 		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.OTPVerificationFailed, IdempotencyKey: "otp-failed:" + uuid.NewString(), VisitorSessionID: nil})
@@ -161,7 +164,7 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 	if _, e = tx.Exec(ctx, `UPDATE email_verification_codes SET consumed_at=$2 WHERE id=$1`, id, s.now()); e != nil {
 		return TokenPair{}, e
 	}
-	user, created, e := s.resolveIdentity(ctx, tx, "email", norm, norm, true)
+	user, created, e := s.resolveIdentity(i18n.WithLocale(ctx, verificationLocale), tx, "email", norm, norm, true)
 	if e != nil {
 		return TokenPair{}, e
 	}
@@ -258,7 +261,7 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 	created := false
 	if errors.Is(e, pgx.ErrNoRows) {
 		user = uuid.New()
-		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email) VALUES($1,$2)`, user, email); e != nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email,preferred_locale) VALUES($1,$2,$3)`, user, email, i18n.FromContext(ctx)); e != nil {
 			return uuid.Nil, false, e
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO user_profiles(user_id,username,display_name) VALUES($1,$2,$3)`, user, "user_"+strings.ReplaceAll(user.String()[:8], "-", ""), strings.Split(email, "@")[0])

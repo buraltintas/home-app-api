@@ -11,6 +11,7 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/observability"
@@ -40,9 +41,19 @@ func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *soci
 	return &Server{db, a, st, so, se, u, m, hashKey}
 }
 
-func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, metricsToken ...string) http.Handler {
+func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
+	metricsToken := ""
+	defaultLocale := i18n.DefaultLocale
+	for _, option := range options {
+		switch value := option.(type) {
+		case string:
+			metricsToken = value
+		case i18n.Locale:
+			defaultLocale = value
+		}
+	}
 	r := chi.NewRouter()
-	r.Use(appmw.RequestID, appmw.Recover(log), otelhttp.NewMiddleware("home-app-api"), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders)
+	r.Use(appmw.RequestID, appmw.Recover(log), otelhttp.NewMiddleware("home-app-api"), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders, appmw.RequestLocale(defaultLocale))
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)
@@ -53,11 +64,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		}
 		JSON(w, 200, map[string]string{"status": "ready"})
 	})
-	token := ""
-	if len(metricsToken) > 0 {
-		token = metricsToken[0]
-	}
-	r.Handle("/metrics", observability.MetricsHandler(token))
+	r.Handle("/metrics", observability.MetricsHandler(metricsToken))
 	if uploads := s.media.UploadHandler(); uploads != nil {
 		r.Mount("/uploads", http.StripPrefix("/uploads", uploads))
 	}
@@ -65,6 +72,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Use(appmw.BFF(bff))
 		r.Use(appmw.NewLimiter(180, 40).Middleware)
 		r.Use(appmw.OptionalAuth(tokens))
+		r.Use(appmw.UserLocale(s.db))
 		searchLimit := appmw.NewLimiter(30, 8)
 		writeLimit := appmw.NewLimiter(20, 6)
 		socialLimit := appmw.NewLimiter(60, 15)
@@ -117,12 +125,12 @@ func (s *Server) createMediaUpload(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	var in media.CreateRequest
 	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.media.Create(r.Context(), p.UserID, in)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 201, x)
@@ -141,7 +149,7 @@ func (s *Server) completeMediaUpload(w http.ResponseWriter, r *http.Request) {
 		e = s.media.Complete(r.Context(), p.UserID, id, in.Width, in.Height)
 	}
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -152,7 +160,7 @@ func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {
 		Email string `json:"email"`
 	}
 	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	var visitor *uuid.UUID
@@ -162,7 +170,7 @@ func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {
 	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if e := s.auth.RequestCode(r.Context(), in.Email, visitor, auth.IPHash(s.hashKey, ip)); e != nil {
 		observability.Auth("otp_request", "failure")
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	observability.Auth("otp_request", "success")
@@ -174,13 +182,13 @@ func client(r *http.Request) auth.Client {
 func (s *Server) verifyCode(w http.ResponseWriter, r *http.Request) {
 	var in struct{ Email, Code string }
 	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.auth.VerifyCode(r.Context(), in.Email, in.Code, client(r))
 	if e != nil {
 		observability.Auth("otp_verify", "failure")
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	observability.Auth("otp_verify", "success")
@@ -194,13 +202,13 @@ func (s *Server) google(w http.ResponseWriter, r *http.Request) {
 		IDToken string `json:"id_token"`
 	}
 	if e := Decode(w, r, &in, 64<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.auth.Google(r.Context(), in.IDToken, client(r))
 	if e != nil {
 		observability.Auth("google_login", "failure")
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	observability.Auth("google_login", "success")
@@ -214,13 +222,13 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 		RefreshToken string `json:"refresh_token"`
 	}
 	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.auth.Refresh(r.Context(), in.RefreshToken, client(r))
 	if e != nil {
 		observability.Auth("refresh", "failure")
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	observability.Auth("refresh", "success")
@@ -229,7 +237,7 @@ func (s *Server) refresh(w http.ResponseWriter, r *http.Request) {
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	if e := s.auth.Logout(r.Context(), p.UserID, p.SessionID, false); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -237,7 +245,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 func (s *Server) logoutAll(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	if e := s.auth.Logout(r.Context(), p.UserID, p.SessionID, true); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -278,7 +286,7 @@ func queryInt(r *http.Request, key string, d int) int {
 func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 	items, next, e := s.social.Feed(r.Context(), viewer(r), r.URL.Query().Get("cursor"), queryInt(r, "limit", 20))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"items": items, "next_cursor": next})
@@ -289,12 +297,12 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	lon, lonErr := queryFloat(r, "longitude")
 	radius := queryInt(r, "radius_meters", 10000)
 	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) || radius < 100 || radius > 50000 || len(r.URL.Query().Get("q")) > 500 {
-		WriteError(w, ErrInvalidInput)
+		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
 	items, e := s.stores.Search(r.Context(), r.URL.Query().Get("q"), nil, "", lat, lon, radius, queryInt(r, "limit", 20), viewer(r))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	var visitor *uuid.UUID
@@ -303,7 +311,7 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	searchID, visitor, e := s.search.RecordInternalSearch(r.Context(), viewer(r), visitor, searchpkg.Request{Query: r.URL.Query().Get("q"), Latitude: lat, Longitude: lon, RadiusMeters: radius}, items, time.Since(start))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"search_id": searchID, "visitor_session_id": visitor, "items": items})
@@ -311,23 +319,23 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	lat, latErr := queryFloat(r, "latitude")
 	lon, lonErr := queryFloat(r, "longitude")
 	if latErr != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) {
-		WriteError(w, ErrInvalidInput)
+		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
 	x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 5)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"store": x, "recent_posts": posts})
@@ -335,12 +343,12 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) postDetail(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.social.GetPost(r.Context(), id, viewer(r))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, x)
@@ -348,12 +356,12 @@ func (s *Server) postDetail(w http.ResponseWriter, r *http.Request) {
 func (s *Server) comments(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.social.Comments(r.Context(), id, queryInt(r, "limit", 50))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"items": x})
@@ -363,12 +371,12 @@ func (s *Server) postsByUser(w http.ResponseWriter, r *http.Request)  { s.postsB
 func (s *Server) postsBy(w http.ResponseWriter, r *http.Request, column string) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.social.PostsBy(r.Context(), column, id, viewer(r), queryInt(r, "limit", 20))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"items": x})
@@ -376,12 +384,12 @@ func (s *Server) postsBy(w http.ResponseWriter, r *http.Request, column string) 
 func (s *Server) userPublic(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	x, e := s.users.Public(r.Context(), id)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, x)
@@ -390,7 +398,7 @@ func (s *Server) userPublic(w http.ResponseWriter, r *http.Request) {
 func (s *Server) searchStores(w http.ResponseWriter, r *http.Request) {
 	var in searchpkg.Request
 	if e := Decode(w, r, &in, 64<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	var user *uuid.UUID
@@ -403,7 +411,7 @@ func (s *Server) searchStores(w http.ResponseWriter, r *http.Request) {
 	}
 	x, e := s.search.Search(r.Context(), user, visitor, in)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, x)
@@ -414,16 +422,16 @@ func (s *Server) resolveExternalStore(w http.ResponseWriter, r *http.Request) {
 		PlaceID  string `json:"place_id"`
 	}
 	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	if in.Provider != "google" {
-		WriteError(w, ErrInvalidInput)
+		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
 	id, e := s.search.MaterializeGoogleStore(r.Context(), in.PlaceID)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"id": id})
@@ -431,7 +439,7 @@ func (s *Server) resolveExternalStore(w http.ResponseWriter, r *http.Request) {
 func (s *Server) interaction(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	var in struct {
@@ -440,7 +448,7 @@ func (s *Server) interaction(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey string     `json:"idempotency_key"`
 	}
 	if e = Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	var user *uuid.UUID
@@ -452,7 +460,7 @@ func (s *Server) interaction(w http.ResponseWriter, r *http.Request) {
 		vis = &v
 	}
 	if e = s.search.Interaction(r.Context(), id, user, vis, in.SearchResultID, in.EventType, in.IdempotencyKey); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -462,7 +470,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	x, e := s.users.Me(r.Context(), p.UserID)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, x)
@@ -471,11 +479,11 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	var in userpkg.Update
 	if e := Decode(w, r, &in, 64<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	if e := s.users.Update(r.Context(), p.UserID, in); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	s.me(w, r)
@@ -483,7 +491,7 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	if e := s.users.DeleteAccount(r.Context(), p.UserID); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -492,7 +500,7 @@ func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	x, e := s.users.Searches(r.Context(), p.UserID, queryInt(r, "limit", 30))
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 200, map[string]any{"items": x})
@@ -500,7 +508,7 @@ func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteMySearches(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	if e := s.users.DeleteSearches(r.Context(), p.UserID, nil); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -512,7 +520,7 @@ func (s *Server) deleteMySearch(w http.ResponseWriter, r *http.Request) {
 		e = s.users.DeleteSearches(r.Context(), p.UserID, &id)
 	}
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
@@ -522,12 +530,12 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	var in social.CreatePost
 	if e := Decode(w, r, &in, 128<<10); e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	id, e := s.social.CreatePost(r.Context(), p.UserID, in)
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	if in.OriginSearchID != nil && in.OriginSearchResultID != nil {
@@ -564,7 +572,7 @@ func (s *Server) favoriteAction(w http.ResponseWriter, r *http.Request, add bool
 		changed, e = s.stores.Favorite(r.Context(), p.UserID, storeID, add)
 	}
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	searchID, se := uuid.Parse(r.Header.Get("X-Origin-Search-ID"))
@@ -585,17 +593,18 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	id, e := parseID(r)
 	var in struct {
-		Text string `json:"text"`
+		Text            string  `json:"text"`
+		ContentLanguage *string `json:"content_language"`
 	}
 	if e == nil {
 		e = Decode(w, r, &in, 16<<10)
 	}
 	var comment uuid.UUID
 	if e == nil {
-		comment, e = s.social.AddComment(r.Context(), p.UserID, id, in.Text)
+		comment, e = s.social.AddCommentLocalized(r.Context(), p.UserID, id, in.Text, in.ContentLanguage)
 	}
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	JSON(w, 201, map[string]any{"id": comment})
@@ -607,7 +616,7 @@ func (s *Server) idAction(w http.ResponseWriter, r *http.Request, fn func(uuid.U
 		e = fn(p.UserID, id)
 	}
 	if e != nil {
-		WriteError(w, e)
+		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)

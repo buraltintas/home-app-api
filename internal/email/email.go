@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
@@ -119,6 +120,7 @@ type job struct {
 	Recipient, Template string
 	Payload             []byte
 	Attempts            int
+	Locale              i18n.Locale
 }
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -149,7 +151,7 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var j job
-	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts FROM email_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts)
+	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts,locale::text FROM email_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts, &j.Locale)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -221,12 +223,38 @@ func (w *Worker) render(j job) (Message, error) {
 	if e != nil {
 		return Message{}, e
 	}
+	message, e := RenderLoginCode(j.Locale, code, p.ExpiresMinutes)
+	if e != nil {
+		return Message{}, e
+	}
+	message.From, message.To = w.from, j.Recipient
+	return message, nil
+}
+
+func RenderLoginCode(locale i18n.Locale, code string, minutes int) (Message, error) {
 	data := struct {
 		Code    string
 		Minutes int
-	}{code, p.ExpiresMinutes}
+	}{code, minutes}
+	tpl, ok := loginCodeTemplates[locale]
+	if !ok {
+		tpl = loginCodeTemplates[i18n.DefaultLocale]
+	}
 	var html, text bytes.Buffer
-	_ = template.Must(template.New("html").Parse(`<h1>Giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`)).Execute(&html, data)
-	_ = template.Must(template.New("text").Parse("Giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.")).Execute(&text, data)
-	return Message{w.from, j.Recipient, "home-app giriş kodunuz", html.String(), text.String()}, nil
+	if e := template.Must(template.New("html").Parse(tpl.HTML)).Execute(&html, data); e != nil {
+		return Message{}, e
+	}
+	if e := template.Must(template.New("text").Parse(tpl.Text)).Execute(&text, data); e != nil {
+		return Message{}, e
+	}
+	return Message{Subject: tpl.Subject, HTML: html.String(), Text: text.String()}, nil
+}
+
+type localizedEmailTemplate struct{ Subject, HTML, Text string }
+
+var loginCodeTemplates = map[i18n.Locale]localizedEmailTemplate{
+	i18n.LocaleTR: {"home-app giriş kodunuz", `<h1>Giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`, "Giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın."},
+	i18n.LocaleEN: {"Your home-app sign-in code", `<h1>Your sign-in code</h1><p><strong>{{.Code}}</strong></p><p>This code is valid for {{.Minutes}} minutes. Do not share it with anyone.</p>`, "Your sign-in code: {{.Code}}\nThis code is valid for {{.Minutes}} minutes. Do not share it with anyone."},
+	i18n.LocaleDE: {"Ihr home-app Anmeldecode", `<h1>Ihr Anmeldecode</h1><p><strong>{{.Code}}</strong></p><p>Dieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter.</p>`, "Ihr Anmeldecode: {{.Code}}\nDieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter."},
+	i18n.LocaleRU: {"Ваш код входа в home-app", `<h1>Ваш код входа</h1><p><strong>{{.Code}}</strong></p><p>Код действителен {{.Minutes}} минут. Никому его не сообщайте.</p>`, "Ваш код входа: {{.Code}}\nКод действителен {{.Minutes}} минут. Никому его не сообщайте."},
 }

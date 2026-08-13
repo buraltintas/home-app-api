@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
 )
@@ -21,6 +23,25 @@ func TestBFFRejectsMissingAndInvalidSecret(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if w.Code != 401 {
 			t.Fatalf("secret %q status=%d", secret, w.Code)
+		}
+	}
+}
+
+func TestLocalizedAuthRequiredKeepsStableCode(t *testing.T) {
+	handler := RequestLocale(i18n.LocaleTR)(RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })))
+	for _, locale := range i18n.Supported() {
+		req := httptest.NewRequest(http.MethodPost, "/v1/protected", nil)
+		req.Header.Set("X-Locale", string(locale))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		var payload struct {
+			Error struct{ Code, Message string } `json:"error"`
+		}
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Error.Code != "AUTH_REQUIRED" || payload.Error.Message != i18n.Translate(locale, "AUTH_REQUIRED") {
+			t.Fatalf("locale=%s payload=%+v", locale, payload)
 		}
 	}
 }

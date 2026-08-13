@@ -39,7 +39,7 @@ func (p *OpenAIParser) ParseSearchIntent(ctx context.Context, query string, c Co
 func (p *OpenAIParser) parseSearchIntent(ctx context.Context, query string, c Context) (Intent, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
-	prompt := fmt.Sprintf("Parse this Turkish home/living physical-store search into the schema. Use only canonical category slugs. Do not invent coordinates. Locale=%s. Query=%q", c.Locale, query)
+	prompt := intentPrompt(query, c)
 	r, e := p.client.Responses.New(ctx, responses.ResponseNewParams{Model: p.model, Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)}, Text: responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigParamOfJSONSchema("search_intent", p.schema)}})
 	if e != nil {
 		return Intent{}, e
@@ -52,4 +52,8 @@ func (p *OpenAIParser) parseSearchIntent(ctx context.Context, query string, c Co
 		return Intent{}, e
 	}
 	return out, nil
+}
+
+func intentPrompt(query string, c Context) string {
+	return fmt.Sprintf(`Parse this home/living physical-store search. The input may be Turkish, English, German, or Russian. Detect query_language as tr, en, de, or ru. Preserve proper nouns and the original query exactly, and map meaning into one canonical schema regardless of language. Categories must use canonical slugs; product_terms and style_terms must use stable English-like concept keys, never translated display copy. Do not invent coordinates. Requested response locale=%s. Original query=%q`, c.Locale, query)
 }

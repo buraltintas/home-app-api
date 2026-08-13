@@ -4,25 +4,29 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
+	"golang.org/x/text/unicode/norm"
 )
 
 type Intent struct {
-	NormalizedQuery string   `json:"normalized_query"`
-	LocationText    string   `json:"location_text"`
-	Categories      []string `json:"categories"`
-	ProductTerms    []string `json:"product_terms"`
-	StyleTerms      []string `json:"style_terms"`
-	PriceIntent     string   `json:"price_intent"`
-	Attributes      []string `json:"attributes"`
-	SortPreference  string   `json:"sort_preference"`
-	SemanticTerms   []string `json:"semantic_terms"`
+	QueryLanguage   i18n.Locale `json:"query_language"`
+	NormalizedQuery string      `json:"normalized_query"`
+	LocationText    string      `json:"location_text"`
+	Categories      []string    `json:"categories"`
+	ProductTerms    []string    `json:"product_terms"`
+	StyleTerms      []string    `json:"style_terms"`
+	PriceIntent     string      `json:"price_intent"`
+	Attributes      []string    `json:"attributes"`
+	SortPreference  string      `json:"sort_preference"`
+	SemanticTerms   []string    `json:"semantic_terms"`
 }
 type Context struct {
 	Latitude, Longitude *float64
-	Locale              string
+	Locale              i18n.Locale
 }
 type IntentParser interface {
 	ParseSearchIntent(context.Context, string, Context) (Intent, error)
@@ -38,6 +42,9 @@ type Place struct {
 type PlacesProvider interface {
 	TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error)
 	PlaceDetails(context.Context, string) (Place, error)
+}
+type LocalizedPlacesProvider interface {
+	TextSearchLocalized(context.Context, string, *float64, *float64, int, i18n.Locale) ([]Place, error)
 }
 type Platform struct {
 	StoreID       uuid.UUID `json:"store_id"`
@@ -84,37 +91,117 @@ type Response struct {
 }
 
 func Deterministic(raw string) Intent {
-	n := strings.ToLower(strings.TrimSpace(raw))
-	i := Intent{NormalizedQuery: n, SortPreference: "relevance"}
-	dict := map[string][]string{"lighting": {"avize", "aydınlatma", "lamba"}, "curtain": {"perde"}, "furniture": {"mobilya", "koltuk", "masa", "sandalye", "çocuk odası"}, "home_textile": {"tekstil", "nevresim"}, "carpet": {"halı", "kilim"}, "decoration": {"dekorasyon", "dekor"}, "kitchenware": {"mutfak", "tencere"}, "bathroom": {"banyo"}, "bedding": {"yatak"}, "tableware": {"sofra", "tabak"}, "storage": {"depolama", "dolap"}}
-	for category, terms := range dict {
-		for _, term := range terms {
-			if strings.Contains(n, term) {
-				i.Categories = appendUnique(i.Categories, category)
-				i.ProductTerms = appendUnique(i.ProductTerms, term)
+	n := normalizeText(raw)
+	folded := foldLatin(n)
+	i := Intent{QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, SortPreference: "relevance"}
+	type concept struct {
+		category string
+		product  string
+		terms    []string
+		extra    []string
+	}
+	concepts := []concept{
+		{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "lighting", "chandelier", "lamp", "beleuchtung", "leuchter", "lampe", "освещение", "люстра", "лампа"}, nil},
+		{"curtain", "curtain", []string{"perde", "curtain", "gardine", "vorhang", "штор", "занавес"}, []string{"home_textile"}},
+		{"furniture", "furniture", []string{"mobilya", "koltuk", "masa", "sandalye", "furniture", "sofa", "table", "chair", "möbel", "sofa", "tisch", "stuhl", "мебел", "диван", "стол", "стул"}, nil},
+		{"home_textile", "home_textile", []string{"tekstil", "nevresim", "home textile", "bedding textile", "heimtextil", "домашний текстиль"}, nil},
+		{"carpet", "carpet", []string{"halı", "kilim", "carpet", "rug", "teppich", "ковер", "ковёр"}, nil},
+		{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор"}, nil},
+		{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
+		{"bathroom", "bathroom", []string{"banyo", "bathroom", "badezimmer", "ванная"}, nil},
+		{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
+		{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
+		{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	}
+	for _, concept := range concepts {
+		for _, term := range concept.terms {
+			if containsNormalized(n, folded, term) {
+				i.Categories = appendUnique(i.Categories, concept.category)
+				for _, category := range concept.extra {
+					i.Categories = appendUnique(i.Categories, category)
+				}
+				i.ProductTerms = appendUnique(i.ProductTerms, concept.product)
+				break
 			}
 		}
 	}
-	if containsAny(n, "uygun fiyat", "ucuz", "ekonomik", "çok pahalı olmayan") {
+	if containsAnyFolded(n, folded, "uygun fiyat", "ucuz", "ekonomik", "çok pahalı olmayan", "affordable", "cheap", "budget", "günstig", "preiswert", "nicht teuer", "недорог", "дешев", "бюджет") {
 		i.PriceIntent = "budget"
 	}
-	for _, style := range []string{"modern", "minimalist", "klasik", "rustik", "iskandinav"} {
-		if strings.Contains(n, style) {
-			i.StyleTerms = append(i.StyleTerms, style)
+	styles := map[string][]string{"modern": {"modern", "современн"}, "minimal": {"minimal", "минимал"}, "classic": {"klasik", "classic", "klassisch", "классическ"}, "rustic": {"rustik", "rustic", "rustikal", "рустик"}, "scandinavian": {"iskandinav", "scandinavian", "skandinavisch", "скандинав"}}
+	for key, terms := range styles {
+		for _, term := range terms {
+			if containsNormalized(n, folded, term) {
+				i.StyleTerms = appendUnique(i.StyleTerms, key)
+				break
+			}
 		}
 	}
-	if containsAny(n, "büyük", "geniş seçenek", "çok çeşitli") {
+	if containsAnyFolded(n, folded, "büyük", "geniş seçenek", "çok çeşitli", "large selection", "wide range", "große auswahl", "широкий выбор") {
 		i.Attributes = append(i.Attributes, "large_selection")
 	}
-	for _, city := range []string{"istanbul", "ankara", "antalya", "izmir", "bursa", "adana", "konya", "kadıköy", "çankaya", "lara"} {
-		if strings.Contains(n, city) {
-			i.LocationText = city
+	locations := map[string][]string{"Istanbul": {"istanbul", "стамбул"}, "Ankara": {"ankara", "анкара"}, "Antalya": {"antalya", "антал"}, "Izmir": {"izmir", "измир"}, "Bursa": {"bursa", "бурса"}, "Berlin": {"berlin", "берлин"}, "Kadikoy": {"kadıköy", "kadikoy", "кадыкёй", "кадыкей"}, "Cankaya": {"çankaya", "cankaya", "чанкая"}, "Lara": {"lara", "лара"}}
+	for canonical, terms := range locations {
+		for _, term := range terms {
+			if containsNormalized(n, folded, term) {
+				i.LocationText = canonical
+				break
+			}
+		}
+		if i.LocationText != "" {
 			break
 		}
 	}
 	return i
 }
+
+func DetectLanguage(raw string) i18n.Locale {
+	for _, r := range raw {
+		if unicode.In(r, unicode.Cyrillic) {
+			return i18n.LocaleRU
+		}
+	}
+	n := strings.ToLower(raw)
+	if strings.ContainsAny(n, "ıİşŞğĞçÇ") || containsAny(n, " mağaza", " perde", " mobilya", " uygun fiyat") {
+		return i18n.LocaleTR
+	}
+	if strings.ContainsAny(n, "äß") || containsAny(n, "geschäft", "günstig", "möbel", "gardine") {
+		return i18n.LocaleDE
+	}
+	return i18n.LocaleEN
+}
+
+func normalizeText(raw string) string {
+	return norm.NFC.String(strings.ToLower(strings.TrimSpace(raw)))
+}
+
+func foldLatin(raw string) string {
+	raw = strings.NewReplacer("ı", "i", "ß", "ss").Replace(raw)
+	return strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Mn, r) {
+			return -1
+		}
+		return r
+	}, norm.NFD.String(raw))
+}
+
+func containsNormalized(normalized, folded, term string) bool {
+	term = normalizeText(term)
+	return strings.Contains(normalized, term) || strings.Contains(folded, foldLatin(term))
+}
+
+func containsAnyFolded(normalized, folded string, terms ...string) bool {
+	for _, term := range terms {
+		if containsNormalized(normalized, folded, term) {
+			return true
+		}
+	}
+	return false
+}
 func Validate(i Intent) error {
+	if i.QueryLanguage != "" && !i18n.IsSupported(i.QueryLanguage) {
+		return fmt.Errorf("unsupported query language")
+	}
 	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "storage": true, "home_accessories": true, "household": true}
 	if len(i.NormalizedQuery) > 500 || len(i.LocationText) > 120 {
 		return fmt.Errorf("intent text too long")

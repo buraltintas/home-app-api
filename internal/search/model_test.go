@@ -10,8 +10,36 @@ import (
 
 func TestDeterministicTurkishIntent(t *testing.T) {
 	i := Deterministic("Antalya'da uygun fiyatlı ve büyük perde mağazaları")
-	if i.PriceIntent != "budget" || i.LocationText != "antalya" || !has(i.Categories, "curtain") || !has(i.Attributes, "large_selection") {
+	if i.PriceIntent != "budget" || i.LocationText != "Antalya" || !has(i.Categories, "curtain") || !has(i.Attributes, "large_selection") {
 		t.Fatalf("unexpected intent: %+v", i)
+	}
+}
+
+func TestEquivalentMultilingualQueriesProduceCanonicalIntent(t *testing.T) {
+	tests := []struct {
+		query, language string
+	}{
+		{"Antalya'da uygun fiyatlı perde mağazası", "tr"},
+		{"affordable curtain stores in Antalya", "en"},
+		{"günstige Gardinengeschäfte in Antalya", "de"},
+		{"недорогие магазины штор в Анталии", "ru"},
+	}
+	for _, test := range tests {
+		intent := Deterministic(test.query)
+		if string(intent.QueryLanguage) != test.language || intent.PriceIntent != "budget" || intent.LocationText != "Antalya" || !has(intent.Categories, "curtain") || !has(intent.Categories, "home_textile") || !has(intent.ProductTerms, "curtain") {
+			t.Fatalf("%q produced %+v", test.query, intent)
+		}
+	}
+}
+
+func TestUnicodeNormalizationPreservesCyrillicAndMatchesTurkishASCII(t *testing.T) {
+	if got := Deterministic("магазины штор").NormalizedQuery; got != "магазины штор" {
+		t.Fatalf("Cyrillic changed: %q", got)
+	}
+	for _, query := range []string{"Kadıköy mobilya", "kadikoy furniture"} {
+		if Deterministic(query).LocationText != "Kadikoy" {
+			t.Fatalf("location not normalized for %q", query)
+		}
 	}
 }
 func TestIntentRejectsUnknownCategory(t *testing.T) {

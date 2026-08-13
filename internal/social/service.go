@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
@@ -36,12 +37,14 @@ type CreatePost struct {
 	MediaIDs             []uuid.UUID `json:"media_ids"`
 	OriginSearchID       *uuid.UUID  `json:"origin_search_id"`
 	OriginSearchResultID *uuid.UUID  `json:"origin_search_result_id"`
+	ContentLanguage      *string     `json:"content_language"`
 }
 type Post struct {
 	ID              uuid.UUID `json:"id"`
 	UserID          uuid.UUID `json:"user_id"`
 	StoreID         uuid.UUID `json:"store_id"`
 	Text            string    `json:"text"`
+	ContentLanguage string    `json:"content_language,omitempty"`
 	Rating          int       `json:"rating"`
 	VisitVerified   bool      `json:"visit_verified"`
 	DistanceMeters  float64   `json:"distance_meters"`
@@ -60,13 +63,14 @@ type Post struct {
 	ViewerFavorited bool      `json:"viewer_has_favorited_store"`
 }
 type Comment struct {
-	ID          uuid.UUID `json:"id"`
-	UserID      uuid.UUID `json:"user_id"`
-	Body        string    `json:"body"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	AvatarURL   string    `json:"avatar_url"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              uuid.UUID `json:"id"`
+	UserID          uuid.UUID `json:"user_id"`
+	Body            string    `json:"body"`
+	ContentLanguage string    `json:"content_language,omitempty"`
+	Username        string    `json:"username"`
+	DisplayName     string    `json:"display_name"`
+	AvatarURL       string    `json:"avatar_url"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost) (uuid.UUID, error) {
@@ -75,6 +79,14 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))
+	if in.ContentLanguage != nil {
+		locale, ok := i18n.Normalize(*in.ContentLanguage)
+		if !ok {
+			return uuid.Nil, httpapi.ErrInvalidInput
+		}
+		value := string(locale)
+		in.ContentLanguage = &value
+	}
 	for _, id := range in.MediaIDs {
 		if id == uuid.Nil {
 			return uuid.Nil, httpapi.ErrInvalidInput
@@ -108,7 +120,7 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
 	}
 	id := uuid.New()
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at) VALUES($1,$2,$3,$4,$5,$6,now())`, id, user, in.StoreID, in.Text, in.Rating, distance)
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language) VALUES($1,$2,$3,$4,$5,$6,now(),$7)`, id, user, in.StoreID, in.Text, in.Rating, distance, in.ContentLanguage)
 	if e != nil {
 		return uuid.Nil, e
 	}
@@ -154,7 +166,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 		}
 		before, beforeID = c.Time, c.ID
 	}
-	rows, e := s.db.Query(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,
+	rows, e := s.db.Query(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,
  coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),
  (SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),
  EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$1),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$1),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$1),
@@ -168,7 +180,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 	var out []Post
 	for rows.Next() {
 		var p Post
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media); e != nil {
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media); e != nil {
 			return nil, "", e
 		}
 		out = append(out, p)
@@ -188,7 +200,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 
 func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) (Post, error) {
 	var p Post
-	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media)
+	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
@@ -198,7 +210,7 @@ func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Co
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	rows, e := s.db.Query(ctx, `SELECT c.id,c.user_id,c.body,c.created_at,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,'') FROM comments c JOIN user_profiles p ON p.user_id=c.user_id WHERE c.post_id=$1 AND c.deleted_at IS NULL ORDER BY c.created_at,c.id LIMIT $2`, post, limit)
+	rows, e := s.db.Query(ctx, `SELECT c.id,c.user_id,c.body,coalesce(c.content_language::text,''),c.created_at,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,'') FROM comments c JOIN user_profiles p ON p.user_id=c.user_id WHERE c.post_id=$1 AND c.deleted_at IS NULL ORDER BY c.created_at,c.id LIMIT $2`, post, limit)
 	if e != nil {
 		return nil, e
 	}
@@ -206,7 +218,7 @@ func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Co
 	var out []Comment
 	for rows.Next() {
 		var c Comment
-		if e = rows.Scan(&c.ID, &c.UserID, &c.Body, &c.CreatedAt, &c.Username, &c.DisplayName, &c.AvatarURL); e != nil {
+		if e = rows.Scan(&c.ID, &c.UserID, &c.Body, &c.ContentLanguage, &c.CreatedAt, &c.Username, &c.DisplayName, &c.AvatarURL); e != nil {
 			return nil, e
 		}
 		out = append(out, c)
@@ -220,7 +232,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e
@@ -229,7 +241,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	var out []Post
 	for rows.Next() {
 		var p Post
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media); e != nil {
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media); e != nil {
 			return nil, e
 		}
 		out = append(out, p)
@@ -301,9 +313,21 @@ func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del, exi
 }
 
 func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body string) (uuid.UUID, error) {
+	return s.AddCommentLocalized(ctx, user, post, body, nil)
+}
+
+func (s *Service) AddCommentLocalized(ctx context.Context, user, post uuid.UUID, body string, language *string) (uuid.UUID, error) {
 	body = strings.TrimSpace(body)
 	if len(body) < 1 || len(body) > 2000 {
 		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if language != nil {
+		locale, ok := i18n.Normalize(*language)
+		if !ok {
+			return uuid.Nil, httpapi.ErrInvalidInput
+		}
+		value := string(locale)
+		language = &value
 	}
 	id := uuid.New()
 	tx, e := s.db.Begin(ctx)
@@ -311,7 +335,7 @@ func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body str
 		return uuid.Nil, e
 	}
 	defer tx.Rollback(ctx)
-	tag, e := tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body) SELECT $1,id,$3,$4 FROM posts WHERE id=$2 AND deleted_at IS NULL`, id, post, user, body)
+	tag, e := tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body,content_language) SELECT $1,id,$3,$4,$5 FROM posts WHERE id=$2 AND deleted_at IS NULL`, id, post, user, body, language)
 	if e != nil {
 		return uuid.Nil, e
 	}

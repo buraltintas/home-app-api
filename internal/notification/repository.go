@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,12 +25,16 @@ func NewRepository(db *pgxpool.Pool, key []byte) *Repository {
 }
 
 func (r *Repository) RegisterDevice(ctx context.Context, user uuid.UUID, platform, token string) (uuid.UUID, error) {
+	return r.RegisterDeviceLocale(ctx, user, platform, token, i18n.FromContext(ctx))
+}
+
+func (r *Repository) RegisterDeviceLocale(ctx context.Context, user uuid.UUID, platform, token string, locale i18n.Locale) (uuid.UUID, error) {
 	platform, token = strings.TrimSpace(platform), strings.TrimSpace(token)
-	if user == uuid.Nil || (platform != "ios" && platform != "android" && platform != "web") || token == "" || len(token) > 4096 {
+	if user == uuid.Nil || !i18n.IsSupported(locale) || (platform != "ios" && platform != "android" && platform != "web") || token == "" || len(token) > 4096 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	id := uuid.New()
-	err := r.db.QueryRow(ctx, `INSERT INTO push_devices(id,user_id,platform,token_hash) VALUES($1,$2,$3,$4) ON CONFLICT(token_hash) DO UPDATE SET user_id=excluded.user_id,platform=excluded.platform,disabled_at=NULL RETURNING id`, id, user, platform, security.Hash(r.key, token)).Scan(&id)
+	err := r.db.QueryRow(ctx, `INSERT INTO push_devices(id,user_id,platform,token_hash,locale) VALUES($1,$2,$3,$4,$5) ON CONFLICT(token_hash) DO UPDATE SET user_id=excluded.user_id,platform=excluded.platform,locale=excluded.locale,disabled_at=NULL RETURNING id`, id, user, platform, security.Hash(r.key, token), locale).Scan(&id)
 	return id, err
 }
 
@@ -48,23 +53,29 @@ func (r *Repository) SetPreferences(ctx context.Context, user uuid.UUID, prefere
 }
 
 func (r *Repository) Enqueue(ctx context.Context, user uuid.UUID, event, key string, payload map[string]any) (bool, error) {
-	if user == uuid.Nil || strings.TrimSpace(event) == "" {
+	return r.EnqueueLocalized(ctx, user, event, event, key, i18n.FromContext(ctx), payload)
+}
+
+func (r *Repository) EnqueueLocalized(ctx context.Context, user uuid.UUID, event, templateKey, key string, locale i18n.Locale, payload map[string]any) (bool, error) {
+	if user == uuid.Nil || strings.TrimSpace(event) == "" || strings.TrimSpace(templateKey) == "" || !i18n.IsSupported(locale) {
 		return false, httpapi.ErrInvalidInput
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return false, err
 	}
-	tag, err := r.db.Exec(ctx, `INSERT INTO notification_outbox(user_id,event_type,idempotency_key,payload) VALUES($1,$2,nullif($3,''),$4) ON CONFLICT(idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`, user, event, key, raw)
+	tag, err := r.db.Exec(ctx, `INSERT INTO notification_outbox(user_id,event_type,template_key,template_params,idempotency_key,payload,locale) VALUES($1,$2,$3,$4,nullif($5,''),$4,$6) ON CONFLICT(idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING`, user, event, templateKey, raw, key, locale)
 	return tag.RowsAffected() == 1, err
 }
 
 type Job struct {
-	ID       uuid.UUID
-	UserID   uuid.UUID
-	Event    string
-	Payload  map[string]any
-	Attempts int
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	Event       string
+	Payload     map[string]any
+	Attempts    int
+	Locale      i18n.Locale
+	TemplateKey string
 }
 
 func (r *Repository) Claim(ctx context.Context) (Job, bool, error) {
@@ -75,7 +86,7 @@ func (r *Repository) Claim(ctx context.Context) (Job, bool, error) {
 	defer tx.Rollback(ctx)
 	var job Job
 	var raw []byte
-	err = tx.QueryRow(ctx, `SELECT id,user_id,event_type,payload,attempts FROM notification_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&job.ID, &job.UserID, &job.Event, &raw, &job.Attempts)
+	err = tx.QueryRow(ctx, `SELECT id,user_id,event_type,payload,attempts,locale::text,template_key FROM notification_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at,id FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&job.ID, &job.UserID, &job.Event, &raw, &job.Attempts, &job.Locale, &job.TemplateKey)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Job{}, false, nil
 	}

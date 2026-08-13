@@ -52,11 +52,12 @@ type SearchFunnel struct {
 }
 type QueryMetric struct {
 	NormalizedQuery                                                                                                                        string
+	QueryLanguage                                                                                                                          string
 	SearchCount, UniqueUserCount, UniqueVisitorCount, ResultCountTotal, ZeroResultCount, ClickCount, OpenCount, FavoriteCount, ReviewCount int64
 }
 type DimensionMetric struct {
-	Dimension, Value string
-	SearchCount      int64
+	Dimension, Value, QueryLanguage string
+	SearchCount                     int64
 }
 type StoreSearchMetric struct {
 	ResultKey                                      string

@@ -40,12 +40,12 @@ func OptionalAuth(tokens *security.TokenManager) func(http.Handler) http.Handler
 			}
 			parts := strings.SplitN(h, " ", 2)
 			if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
-				httpapi.WriteError(w, httpapi.ErrInvalidToken)
+				httpapi.WriteError(w, httpapi.ErrInvalidToken, r.Context())
 				return
 			}
 			u, s, err := tokens.ParseAccess(parts[1])
 			if err != nil {
-				httpapi.WriteError(w, httpapi.ErrInvalidToken)
+				httpapi.WriteError(w, httpapi.ErrInvalidToken, r.Context())
 				return
 			}
 			// Preserve the authenticated context on the original request as well as
@@ -60,7 +60,7 @@ func OptionalAuth(tokens *security.TokenManager) func(http.Handler) http.Handler
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := PrincipalFrom(r.Context()); !ok {
-			httpapi.WriteError(w, httpapi.ErrAuthRequired)
+			httpapi.WriteError(w, httpapi.ErrAuthRequired, r.Context())
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -6,6 +6,11 @@ info:
     Backend contract for the React Native client and a future Next.js BFF.
     Every `/v1` operation requires `X-BFF-Secret`. A bearer token is optional
     on discovery reads and required on mutations marked with `bearerAuth`.
+    Supported locales are `tr`, `en`, `de`, and `ru`. Resolution order is a valid
+    explicit `X-Locale`, authenticated private `preferred_locale`,
+    `Accept-Language`, then configured default (`tr`). Regional variants are
+    normalized and unsupported values safely fall back. Domain error codes are
+    stable; messages are localized.
 servers:
   - url: http://localhost:8080
 security:
@@ -190,7 +195,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/ID'}]
       requestBody:
         required: true
-        content: {application/json: {schema: {type: object, required: [text], properties: {text: {type: string, minLength: 1, maxLength: 2000}}}}}
+        content: {application/json: {schema: {type: object, required: [text], properties: {text: {type: string, minLength: 1, maxLength: 2000}, content_language: {$ref: '#/components/schemas/Locale'}}}}}
       responses: {'201': {$ref: '#/components/responses/ID'}}
   /v1/comments/{id}:
     delete:
@@ -251,7 +256,20 @@ paths:
       tags: [Profile]
       summary: Update public/private profile fields
       security: [{bffSecret: [], bearerAuth: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                preferred_locale: {$ref: '#/components/schemas/Locale'}
+                bio_language: {$ref: '#/components/schemas/Locale'}
+                username: {type: string, minLength: 3, maxLength: 30}
+                display_name: {type: string, maxLength: 100}
+                bio: {type: string, maxLength: 500, description: Original user content; never automatically translated.}
+                city: {type: string, maxLength: 100}
+              additionalProperties: true
       responses: {'200': {$ref: '#/components/responses/JSON'}, '409': {$ref: '#/components/responses/Error'}}
     delete:
       tags: [Profile]
@@ -304,6 +322,7 @@ components:
     ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
     Cursor: {name: cursor, in: query, schema: {type: string}, description: Opaque `created_at + id` cursor}
+    LocaleHeader: {name: X-Locale, in: header, required: false, schema: {$ref: '#/components/schemas/Locale'}, description: Explicit presentation locale; overrides authenticated preference and Accept-Language.}
   requestBodies:
     EmailRequest:
       required: true
@@ -339,7 +358,9 @@ components:
               media_ids: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, format: uuid}}
               origin_search_id: {type: [string, 'null'], format: uuid}
               origin_search_result_id: {type: [string, 'null'], format: uuid}
+              content_language: {$ref: '#/components/schemas/Locale', description: Optional language metadata; content is stored unchanged.}
   schemas:
+    Locale: {type: string, enum: [tr, en, de, ru]}
     Error:
       type: object
       required: [error, request_id]
@@ -347,7 +368,7 @@ components:
         error:
           type: object
           required: [code, message]
-          properties: {code: {type: string}, message: {type: string}}
+          properties: {code: {type: string, description: Stable language-independent machine code.}, message: {type: string, description: Localized using the resolved request locale.}}
         request_id: {type: string}
     TokenPair:
       type: object

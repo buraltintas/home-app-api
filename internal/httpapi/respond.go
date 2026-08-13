@@ -1,10 +1,13 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
 type Error struct {
@@ -28,12 +31,17 @@ func JSON(w http.ResponseWriter, status int, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func WriteError(w http.ResponseWriter, err error) {
+func WriteError(w http.ResponseWriter, err error, contexts ...context.Context) {
 	var app *Error
 	if !errors.As(err, &app) {
 		app = E(500, "INTERNAL_ERROR", "An unexpected error occurred")
 	}
-	JSON(w, app.Status, map[string]any{"error": map[string]string{"code": app.Code, "message": app.Message}, "request_id": w.Header().Get("X-Request-ID")})
+	ctx := context.Background()
+	if len(contexts) > 0 && contexts[0] != nil {
+		ctx = contexts[0]
+	}
+	message := i18n.Translate(i18n.FromContext(ctx), app.Code)
+	JSON(w, app.Status, map[string]any{"error": map[string]string{"code": app.Code, "message": message}, "request_id": w.Header().Get("X-Request-ID")})
 }
 
 func Decode(w http.ResponseWriter, r *http.Request, dst any, max int64) error {

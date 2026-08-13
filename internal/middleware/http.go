@@ -62,7 +62,7 @@ func Recover(log *slog.Logger) func(http.Handler) http.Handler {
 			defer func() {
 				if v := recover(); v != nil {
 					log.Error("panic recovered", "request_id", RequestIDFrom(r.Context()), "panic", v, "stack", string(debug.Stack()))
-					httpapi.WriteError(w, httpapi.E(500, "INTERNAL_ERROR", "An unexpected error occurred"))
+					httpapi.WriteError(w, httpapi.E(500, "INTERNAL_ERROR", "An unexpected error occurred"), r.Context())
 				}
 			}()
 			next.ServeHTTP(w, r)
@@ -73,7 +73,7 @@ func BFF(secrets []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !security.MatchSecret(r.Header.Get("X-BFF-Secret"), secrets) {
-				httpapi.WriteError(w, httpapi.ErrInvalidClient)
+				httpapi.WriteError(w, httpapi.ErrInvalidClient, r.Context())
 				return
 			}
 			next.ServeHTTP(w, r)
@@ -127,7 +127,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		l.mu.Unlock()
 		if !allowed {
 			w.Header().Set("Retry-After", strconv.Itoa(60))
-			httpapi.WriteError(w, httpapi.E(429, "RATE_LIMITED", "Too many requests"))
+			httpapi.WriteError(w, httpapi.E(429, "RATE_LIMITED", "Too many requests"), r.Context())
 			return
 		}
 		next.ServeHTTP(w, r)

@@ -2,11 +2,14 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
 type placesRoundTripFunc func(*http.Request) (*http.Response, error)
@@ -21,6 +24,12 @@ func TestGooglePlacesContract(t *testing.T) {
 		body := ""
 		switch r.URL.Path {
 		case "/places:searchText":
+			var request struct {
+				LanguageCode string `json:"languageCode"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.LanguageCode != "de" {
+				t.Errorf("languageCode=%q err=%v", request.LanguageCode, err)
+			}
 			body = `{"places":[{"id":"place-1","displayName":{"text":"Test Mağaza"},"formattedAddress":"Kadıköy, İstanbul","location":{"latitude":40.99,"longitude":29.03},"rating":4.4,"userRatingCount":12,"types":["furniture_store"]}]}`
 		case "/places/place-1":
 			body = `{"ID":"place-1","DisplayName":{"Text":"Test Mağaza"},"FormattedAddress":"Kadıköy, İstanbul","Location":{"Latitude":40.99,"Longitude":29.03},"Rating":4.4,"UserRatingCount":12,"Types":["furniture_store"]}`
@@ -30,7 +39,7 @@ func TestGooglePlacesContract(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
 	})}
 	g := &GooglePlaces{key: "test-key", baseURL: "https://places.test", client: client}
-	places, err := g.TextSearch(context.Background(), "mobilya", nil, nil, 1000)
+	places, err := g.TextSearchLocalized(context.Background(), "Möbel", nil, nil, 1000, i18n.LocaleDE)
 	if err != nil || len(places) != 1 || places[0].PlaceID != "place-1" || places[0].RatingCount != 12 {
 		t.Fatalf("text search places=%+v err=%v", places, err)
 	}

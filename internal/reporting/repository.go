@@ -33,6 +33,9 @@ func (s *Service) GetSearchOverview(ctx context.Context, from, to time.Time) (Se
 	return x, e
 }
 func (s *Service) GetTopSearchQueries(ctx context.Context, from, to time.Time, limit int, zeroOnly bool) ([]QueryMetric, error) {
+	return s.GetTopSearchQueriesByLocale(ctx, from, to, "", limit, zeroOnly)
+}
+func (s *Service) GetTopSearchQueriesByLocale(ctx context.Context, from, to time.Time, locale string, limit int, zeroOnly bool) ([]QueryMetric, error) {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
@@ -40,7 +43,8 @@ func (s *Service) GetTopSearchQueries(ctx context.Context, from, to time.Time, l
 	if zeroOnly {
 		filter = " AND zero_result_count>0"
 	}
-	rows, e := s.db.Query(ctx, `SELECT normalized_query,sum(search_count),sum(unique_user_count),sum(unique_visitor_count),sum(result_count_total),sum(zero_result_count),sum(result_click_count),sum(store_open_count),sum(favorite_count),sum(review_count) FROM search_query_daily_metrics WHERE metric_date BETWEEN $1 AND $2`+filter+` GROUP BY normalized_query ORDER BY `+map[bool]string{true: "sum(zero_result_count)", false: "sum(search_count)"}[zeroOnly]+` DESC LIMIT $3`, from, to, limit)
+	filter += " AND ($4::text='' OR query_language::text=$4)"
+	rows, e := s.db.Query(ctx, `SELECT normalized_query,query_language::text,sum(search_count),sum(unique_user_count),sum(unique_visitor_count),sum(result_count_total),sum(zero_result_count),sum(result_click_count),sum(store_open_count),sum(favorite_count),sum(review_count) FROM search_query_daily_metrics WHERE metric_date BETWEEN $1 AND $2`+filter+` GROUP BY normalized_query,query_language ORDER BY `+map[bool]string{true: "sum(zero_result_count)", false: "sum(search_count)"}[zeroOnly]+` DESC LIMIT $3`, from, to, limit, locale)
 	if e != nil {
 		return nil, e
 	}
@@ -48,7 +52,7 @@ func (s *Service) GetTopSearchQueries(ctx context.Context, from, to time.Time, l
 	var out []QueryMetric
 	for rows.Next() {
 		var x QueryMetric
-		if e = rows.Scan(&x.NormalizedQuery, &x.SearchCount, &x.UniqueUserCount, &x.UniqueVisitorCount, &x.ResultCountTotal, &x.ZeroResultCount, &x.ClickCount, &x.OpenCount, &x.FavoriteCount, &x.ReviewCount); e != nil {
+		if e = rows.Scan(&x.NormalizedQuery, &x.QueryLanguage, &x.SearchCount, &x.UniqueUserCount, &x.UniqueVisitorCount, &x.ResultCountTotal, &x.ZeroResultCount, &x.ClickCount, &x.OpenCount, &x.FavoriteCount, &x.ReviewCount); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -70,6 +74,9 @@ func (s *Service) GetSearchConversionFunnel(ctx context.Context, from, to time.T
 	return x, e
 }
 func (s *Service) GetTopSearchDimensions(ctx context.Context, from, to time.Time, dimension string, limit int) ([]DimensionMetric, error) {
+	return s.GetTopSearchDimensionsByLocale(ctx, from, to, dimension, "", limit)
+}
+func (s *Service) GetTopSearchDimensionsByLocale(ctx context.Context, from, to time.Time, dimension, locale string, limit int) ([]DimensionMetric, error) {
 	allowed := map[string]bool{"category": true, "product": true, "style": true, "location": true, "price_intent": true}
 	if !allowed[dimension] {
 		return nil, fmt.Errorf("invalid dimension")
@@ -77,7 +84,13 @@ func (s *Service) GetTopSearchDimensions(ctx context.Context, from, to time.Time
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, e := s.db.Query(ctx, `SELECT dimension,value,sum(search_count) FROM search_intent_daily_metrics WHERE metric_date BETWEEN $1 AND $2 AND dimension=$3 GROUP BY dimension,value ORDER BY sum(search_count) DESC LIMIT $4`, from, to, dimension, limit)
+	localeFilter := ""
+	args := []any{from, to, dimension, limit}
+	if locale != "" {
+		localeFilter = " AND query_language::text=$5"
+		args = append(args, locale)
+	}
+	rows, e := s.db.Query(ctx, `SELECT dimension,value,CASE WHEN $5::text='' THEN '' ELSE query_language::text END,sum(search_count) FROM search_intent_daily_metrics WHERE metric_date BETWEEN $1 AND $2 AND dimension=$3`+localeFilter+` GROUP BY dimension,value,CASE WHEN $5::text='' THEN '' ELSE query_language::text END ORDER BY sum(search_count) DESC LIMIT $4`, append(args[:4], locale)...)
 	if e != nil {
 		return nil, e
 	}
@@ -85,7 +98,7 @@ func (s *Service) GetTopSearchDimensions(ctx context.Context, from, to time.Time
 	var out []DimensionMetric
 	for rows.Next() {
 		var x DimensionMetric
-		if e = rows.Scan(&x.Dimension, &x.Value, &x.SearchCount); e != nil {
+		if e = rows.Scan(&x.Dimension, &x.Value, &x.QueryLanguage, &x.SearchCount); e != nil {
 			return nil, e
 		}
 		out = append(out, x)

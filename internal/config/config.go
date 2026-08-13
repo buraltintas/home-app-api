@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
 type Config struct {
@@ -39,6 +41,7 @@ type Config struct {
 	MetricsToken                                                           string
 	OTELEnabled                                                            bool
 	OTLPEndpoint                                                           string
+	DefaultLocale                                                          i18n.Locale
 }
 
 func Load() (Config, error) {
@@ -62,6 +65,11 @@ func Load() (Config, error) {
 		MetricsToken:      os.Getenv("METRICS_TOKEN"),
 		OTLPEndpoint:      os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	}
+	defaultLocale, ok := i18n.Normalize(env("DEFAULT_LOCALE", string(i18n.DefaultLocale)))
+	if !ok {
+		return c, errors.New("DEFAULT_LOCALE must be tr, en, de or ru")
+	}
+	c.DefaultLocale = defaultLocale
 	var err error
 	if c.AccessTokenTTL, err = duration("ACCESS_TOKEN_TTL", 15*time.Minute); err != nil {
 		return c, err

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 )
 
@@ -22,19 +23,23 @@ func NewGooglePlaces(key string) *GooglePlaces {
 	return &GooglePlaces{key: key, baseURL: "https://places.googleapis.com/v1", client: &http.Client{Timeout: 4 * time.Second}}
 }
 func (g *GooglePlaces) TextSearch(ctx context.Context, q string, lat, lon *float64, radius int) ([]Place, error) {
+	return g.TextSearchLocalized(ctx, q, lat, lon, radius, i18n.DefaultLocale)
+}
+
+func (g *GooglePlaces) TextSearchLocalized(ctx context.Context, q string, lat, lon *float64, radius int, locale i18n.Locale) ([]Place, error) {
 	started := time.Now()
 	ctx, finish := observability.StartSpan(ctx, "provider.google_places.text_search")
-	out, err := g.textSearch(ctx, q, lat, lon, radius)
+	out, err := g.textSearch(ctx, q, lat, lon, radius, locale)
 	finish(err)
 	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
 	return out, err
 }
 
-func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float64, radius int) ([]Place, error) {
+func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float64, radius int, locale i18n.Locale) ([]Place, error) {
 	if g.key == "" {
 		return nil, nil
 	}
-	body := map[string]any{"textQuery": q, "languageCode": "tr", "regionCode": "TR", "maxResultCount": 20}
+	body := map[string]any{"textQuery": q, "languageCode": string(locale), "maxResultCount": 20}
 	if lat != nil && lon != nil {
 		body["locationBias"] = map[string]any{"circle": map[string]any{"center": map[string]float64{"latitude": *lat, "longitude": *lon}, "radius": radius}}
 	}

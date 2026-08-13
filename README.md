@@ -1,6 +1,6 @@
 # home-app API
 
-Production-oriented Go backend foundation for a Turkey-first social discovery product about real, physical home/living stores.
+Production-oriented Go backend foundation for a multilingual social discovery product about real, physical home/living stores.
 
 The product loop is deliberately narrow: **discover → visit → review → help the next person discover**. Stores do not need an owner or platform membership.
 
@@ -16,14 +16,15 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - public/private profile separation
 - PostGIS physical stores, categories, external IDs, aggregate statistics and favorite uniqueness
 - proximity-verified 1–5 star reviews, media metadata links, feed cursor pagination, likes, comments and follows
-- deterministic Turkish search, optional official OpenAI Go SDK/Responses API structured enrichment, Google Places (New), explicit source-separated ratings, deduplication, ranking and fallback
+- first-class Turkish, English, German and Russian locale resolution, localized API copy/email/notification foundations and canonical localized taxonomy
+- Unicode-aware multilingual search, optional official OpenAI Go SDK/Responses API structured enrichment, locale-aware Google Places, explicit source-separated ratings, deduplication, ranking and fallback
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
 - rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
 - verified S3/R2-compatible signed image uploads and a real local filesystem upload provider with content sniffing
 - request IDs, route-pattern JSON logs, recovery, size/time limits, security headers and bounded in-process rate limiting
 - protected Prometheus metrics and optional OTLP/OpenTelemetry tracing
-- deterministic Turkish seed data, unit/contract tests and opt-in real PostgreSQL/PostGIS integration tests
+- deterministic four-locale seed data, unit/contract tests and opt-in real PostgreSQL/PostGIS integration tests
 
 The detailed schema, route matrix, identity concurrency strategy, threat model and search flow are in [docs/architecture.md](docs/architecture.md).
 Metric semantics and reporting operations are in [docs/reporting.md](docs/reporting.md).
@@ -86,6 +87,12 @@ Every application endpoint requires the client credential:
 curl -H "X-BFF-Secret: ${BFF_SECRETS%%,*}" http://localhost:8080/v1/feed
 ```
 
+Clients may explicitly select `tr`, `en`, `de`, or `ru` using `X-Locale`.
+Regional variants such as `de-DE` are normalized. Resolution order is explicit
+`X-Locale`, authenticated private `preferred_locale`, `Accept-Language`, then
+`DEFAULT_LOCALE` (`tr` by default). Invalid/unsupported locale hints safely fall
+back. API error codes remain stable while their messages use the resolved locale.
+
 An anonymous search creates a visitor session when `X-Visitor-Session-ID` is absent. Persist the returned `visitor_session_id` client-side and send it on later analytics/search calls:
 
 ```bash
@@ -101,7 +108,7 @@ Authenticated actions additionally send `Authorization: Bearer <access_token>`.
 
 See [.env.example](.env.example). Important groups are:
 
-- core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`
+- core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`, `DEFAULT_LOCALE`
 - client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback)
 - auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, and per-email/IP/visitor request limits
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
