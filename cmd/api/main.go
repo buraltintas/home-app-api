@@ -12,6 +12,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/media"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -55,7 +56,16 @@ func main() {
 	}
 	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow)
 	users := userpkg.NewService(db)
-	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, []byte(cfg.OTPHashSecret))
+	var storage media.ObjectStorage = media.NewDevStorage(cfg.ObjectStorageUploadTTL)
+	if cfg.ObjectStorageProvider == "s3" || cfg.ObjectStorageProvider == "r2" {
+		storage, e = media.NewS3Storage(ctx, media.S3Config{Region: cfg.ObjectStorageRegion, Endpoint: cfg.ObjectStorageEndpoint, AccessKey: cfg.ObjectStorageAccessKey, SecretKey: cfg.ObjectStorageSecretKey, Bucket: cfg.Bucket, PathStyle: cfg.ObjectStoragePathStyle, UploadTTL: cfg.ObjectStorageUploadTTL})
+		if e != nil {
+			log.Error("object storage unavailable", "error", e)
+			os.Exit(1)
+		}
+	}
+	mediaSvc := media.NewService(db, storage, cfg.MediaMaxBytes, reportSvc)
+	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
 		log.Info("api listening", "addr", cfg.HTTPAddr, "environment", cfg.Environment)

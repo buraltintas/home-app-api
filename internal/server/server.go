@@ -11,6 +11,7 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -29,11 +30,12 @@ type Server struct {
 	social  *social.Service
 	search  *searchpkg.Service
 	users   *userpkg.Service
+	media   *media.Service
 	hashKey []byte
 }
 
-func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, u, hashKey}
+func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, hashKey []byte) *Server {
+	return &Server{db, a, st, so, se, u, m, hashKey}
 }
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager) http.Handler {
@@ -81,6 +83,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/me/searches", s.deleteMySearches)
 			r.Delete("/me/searches/{id}", s.deleteMySearch)
 			r.Post("/posts", s.createPost)
+			r.Post("/media/uploads", s.createMediaUpload)
+			r.Post("/media/{id}/complete", s.completeMediaUpload)
 			r.Delete("/posts/{id}", s.deletePost)
 			r.Post("/posts/{id}/like", s.like)
 			r.Delete("/posts/{id}/like", s.unlike)
@@ -94,6 +98,39 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Post("/searches/{id}/interactions", s.interaction)
 	})
 	return r
+}
+func (s *Server) createMediaUpload(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	var in media.CreateRequest
+	if e := Decode(w, r, &in, 16<<10); e != nil {
+		WriteError(w, e)
+		return
+	}
+	x, e := s.media.Create(r.Context(), p.UserID, in)
+	if e != nil {
+		WriteError(w, e)
+		return
+	}
+	JSON(w, 201, x)
+}
+func (s *Server) completeMediaUpload(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	id, e := parseID(r)
+	var in struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	}
+	if e == nil {
+		e = Decode(w, r, &in, 16<<10)
+	}
+	if e == nil {
+		e = s.media.Complete(r.Context(), p.UserID, id, in.Width, in.Height)
+	}
+	if e != nil {
+		WriteError(w, e)
+		return
+	}
+	w.WriteHeader(204)
 }
 
 func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {

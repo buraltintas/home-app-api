@@ -10,22 +10,27 @@ import (
 )
 
 type Config struct {
-	Environment, HTTPAddr, DatabaseURL string
-	BFFSecrets                         []string
-	AccessTokenSecret, OTPHashSecret   string
-	AccessTokenTTL, RefreshTokenTTL    time.Duration
-	OTPTTL                             time.Duration
-	OTPMaxAttempts                     int
-	GoogleClientID, GooglePlacesAPIKey string
-	OpenAIAPIKey, OpenAIModel          string
-	OpenAITimeout                      time.Duration
-	EmailProvider, EmailFrom           string
-	EmailAPIURL, EmailAPIKey           string
-	ObjectStorageProvider, Bucket      string
-	StoreReviewRadiusMeters            float64
-	SearchLocationDecimals             int
-	ReportingTimezone                  string
-	SearchAttributionWindow            time.Duration
+	Environment, HTTPAddr, DatabaseURL             string
+	BFFSecrets                                     []string
+	AccessTokenSecret, OTPHashSecret               string
+	AccessTokenTTL, RefreshTokenTTL                time.Duration
+	OTPTTL                                         time.Duration
+	OTPMaxAttempts                                 int
+	GoogleClientID, GooglePlacesAPIKey             string
+	OpenAIAPIKey, OpenAIModel                      string
+	OpenAITimeout                                  time.Duration
+	EmailProvider, EmailFrom                       string
+	EmailAPIURL, EmailAPIKey                       string
+	ObjectStorageProvider, Bucket                  string
+	ObjectStorageRegion, ObjectStorageEndpoint     string
+	ObjectStorageAccessKey, ObjectStorageSecretKey string
+	ObjectStoragePathStyle                         bool
+	ObjectStorageUploadTTL                         time.Duration
+	MediaMaxBytes                                  int64
+	StoreReviewRadiusMeters                        float64
+	SearchLocationDecimals                         int
+	ReportingTimezone                              string
+	SearchAttributionWindow                        time.Duration
 }
 
 func Load() (Config, error) {
@@ -38,6 +43,7 @@ func Load() (Config, error) {
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", "no-reply@example.test"),
 		EmailAPIURL: os.Getenv("EMAIL_API_URL"), EmailAPIKey: os.Getenv("EMAIL_API_KEY"),
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: env("OBJECT_STORAGE_BUCKET", "home-app-dev"),
+		ObjectStorageRegion: env("OBJECT_STORAGE_REGION", "auto"), ObjectStorageEndpoint: os.Getenv("OBJECT_STORAGE_ENDPOINT"), ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"), ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
 		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
 	}
 	var err error
@@ -62,6 +68,16 @@ func Load() (Config, error) {
 	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 500); err != nil {
 		return c, err
 	}
+	if c.ObjectStorageUploadTTL, err = duration("OBJECT_STORAGE_UPLOAD_TTL", 15*time.Minute); err != nil {
+		return c, err
+	}
+	mediaMax, err := integer("MEDIA_MAX_BYTES", 10<<20)
+	if err != nil {
+		return c, err
+	}
+	c.MediaMaxBytes = int64(mediaMax)
+	pathStyle := env("OBJECT_STORAGE_PATH_STYLE", "true")
+	c.ObjectStoragePathStyle = pathStyle == "true"
 	attributionHours, err := integer("SEARCH_ATTRIBUTION_WINDOW_HOURS", 72)
 	if err != nil {
 		return c, err
@@ -95,6 +111,11 @@ func Load() (Config, error) {
 	}
 	if c.SearchLocationDecimals < 0 || c.SearchLocationDecimals > 5 {
 		return c, errors.New("SEARCH_LOCATION_DECIMALS must be 0..5")
+	}
+	if c.ObjectStorageProvider == "s3" || c.ObjectStorageProvider == "r2" {
+		if c.ObjectStorageAccessKey == "" || c.ObjectStorageSecretKey == "" || c.Bucket == "" {
+			return c, errors.New("object storage credentials and bucket are required")
+		}
 	}
 	return c, nil
 }

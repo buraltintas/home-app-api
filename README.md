@@ -20,6 +20,7 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
 - rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
+- verified S3/R2-compatible signed image uploads with declared MIME/size checks
 - request IDs, JSON logs, recovery, size/time limits, security headers and bounded in-process rate limiting
 - realistic Turkish seed data and security/search unit tests
 
@@ -98,6 +99,7 @@ See [.env.example](.env.example). Important groups are:
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, `EMAIL_API_KEY`, optional `EMAIL_API_URL`
 - domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `SEARCH_LOCATION_DECIMALS`
+- media: `OBJECT_STORAGE_PROVIDER=s3|r2`, endpoint/region/credentials/bucket, upload TTL and `MEDIA_MAX_BYTES`
 - reporting: `REPORTING_TIMEZONE`, `SEARCH_ATTRIBUTION_WINDOW_HOURS`
 
 The API never needs OpenAI or Places credentials to boot. Search falls back to deterministic parsing and internal PostgreSQL results when either provider is unavailable.
