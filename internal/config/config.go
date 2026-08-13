@@ -28,6 +28,7 @@ type Config struct {
 	EmailAPIURL, EmailAPIKey                                               string
 	ObjectStorageProvider, Bucket                                          string
 	ObjectStorageRegion, ObjectStorageEndpoint                             string
+	GCSSigningServiceAccount                                               string
 	ObjectStorageLocalDir, ObjectStoragePublicURL                          string
 	ObjectStorageAccessKey, ObjectStorageSecretKey                         string
 	ObjectStoragePathStyle                                                 bool
@@ -58,9 +59,10 @@ func Load() (Config, error) {
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", "no-reply@example.test"),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
-		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: env("OBJECT_STORAGE_BUCKET", "home-app-dev"),
+		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: os.Getenv("OBJECT_STORAGE_BUCKET"),
 		ObjectStorageRegion: env("OBJECT_STORAGE_REGION", "auto"), ObjectStorageEndpoint: os.Getenv("OBJECT_STORAGE_ENDPOINT"), ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"), ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
-		ObjectStorageLocalDir: env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),
+		GCSSigningServiceAccount: os.Getenv("GCS_SIGNING_SERVICE_ACCOUNT"),
+		ObjectStorageLocalDir:    env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),
 		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
 		MetricsToken:      os.Getenv("METRICS_TOKEN"),
 		OTLPEndpoint:      os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
@@ -168,8 +170,11 @@ func Load() (Config, error) {
 			return c, errors.New("object storage credentials and bucket are required")
 		}
 	}
-	if c.ObjectStorageProvider != "development" && c.ObjectStorageProvider != "s3" && c.ObjectStorageProvider != "r2" {
-		return c, errors.New("OBJECT_STORAGE_PROVIDER must be development, s3 or r2")
+	if c.ObjectStorageProvider == "gcs" && c.Bucket == "" {
+		return c, errors.New("OBJECT_STORAGE_BUCKET is required for gcs")
+	}
+	if c.ObjectStorageProvider != "development" && c.ObjectStorageProvider != "s3" && c.ObjectStorageProvider != "r2" && c.ObjectStorageProvider != "gcs" {
+		return c, errors.New("OBJECT_STORAGE_PROVIDER must be development, gcs, s3 or r2")
 	}
 	if c.EmailProvider == "resend" && (c.EmailAPIKey == "" || strings.TrimSpace(c.EmailFrom) == "") {
 		return c, errors.New("RESEND_API_KEY (or EMAIL_API_KEY) and EMAIL_FROM are required for resend")

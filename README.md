@@ -21,7 +21,7 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
 - rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
-- verified S3/R2-compatible signed image uploads and a real local filesystem upload provider with content sniffing
+- native GCS uploads through ADC/IAM, S3/R2-compatible signed uploads, and a real local filesystem upload provider with content sniffing
 - request IDs, route-pattern JSON logs, recovery, size/time limits, security headers and bounded in-process rate limiting
 - protected Prometheus metrics and optional OTLP/OpenTelemetry tracing
 - deterministic four-locale seed data, unit/contract tests and opt-in real PostgreSQL/PostGIS integration tests
@@ -115,7 +115,7 @@ See [.env.example](.env.example). Important groups are:
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, local `EMAIL_DEVELOPMENT_DIR`, `RESEND_API_KEY` (legacy `EMAIL_API_KEY` also works), optional `EMAIL_API_URL`
 - domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `SEARCH_LOCATION_DECIMALS`
-- media: `OBJECT_STORAGE_PROVIDER=development|s3|r2`; local directory/public URL or endpoint/region/credentials/bucket, upload TTL and `MEDIA_MAX_BYTES`
+- media: `OBJECT_STORAGE_PROVIDER=development|gcs|s3|r2`; GCS uses Application Default Credentials plus `OBJECT_STORAGE_BUCKET` and optional `GCS_SIGNING_SERVICE_ACCOUNT`; S3/R2 use endpoint/region/static credentials; all providers use upload TTL and `MEDIA_MAX_BYTES`
 - reporting: `REPORTING_TIMEZONE`, `SEARCH_ATTRIBUTION_WINDOW_HOURS`
 - operations: `METRICS_TOKEN`, `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`
 
@@ -151,8 +151,23 @@ short-lived HMAC-authorized local PUT URL. PUT the exact declared number of byte
 with the declared content type, then call `POST /v1/media/{id}/complete`. The
 local provider sniffs file bytes, rejects MIME spoofing, stores files under
 `.data/uploads`, and serves them from `/uploads/*`. Finalization also verifies
-database ownership, size and MIME. S3 and R2 use the same service contract and
-presigned PUT semantics.
+database ownership, size and MIME. GCS, S3 and R2 use the same service contract
+and V4/presigned PUT semantics.
+
+For production GCS, set `OBJECT_STORAGE_PROVIDER=gcs` and
+`OBJECT_STORAGE_BUCKET`; do not set an access key or secret key. Attach a
+service account to the runtime so Application Default Credentials can resolve
+it. The service account needs object create/read/delete permissions on the
+bucket. V4 upload URL signing additionally requires
+`iam.serviceAccounts.signBlob` (normally via
+`roles/iam.serviceAccountTokenCreator`) and the IAM Service Account Credentials
+API. Grant that role to the runtime principal on the signing service account
+(which may be itself), rather than project-wide. `GCS_SIGNING_SERVICE_ACCOUNT`
+is optional when the client library can detect the attached account and can be
+set to the attached/impersonated service-account email otherwise. Browser-based
+direct uploads also require an explicit bucket CORS policy for the deployed web
+origin; native mobile uploads do not. Local development can use `gcloud auth
+application-default login --impersonate-service-account=SERVICE_ACCOUNT_EMAIL`.
 
 ## Metrics, tracing and logs
 
@@ -191,6 +206,7 @@ Live providers are deliberately opt-in and skipped without credentials:
 make provider-smoke # OPENAI_API_KEY + optional OPENAI_MODEL
 make provider-smoke # GOOGLE_PLACES_API_KEY when present
 make provider-smoke # RESEND_API_KEY, EMAIL_FROM and explicit RESEND_TEST_RECIPIENT
+make provider-smoke # GCS_TEST_BUCKET + ADC/IAM, creates and removes one smoke object
 ```
 
 The suite itself checks the required variables, so `make provider-smoke` is safe

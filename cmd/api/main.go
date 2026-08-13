@@ -68,13 +68,20 @@ func main() {
 	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow, time.Duration(cfg.VisitorRetentionDays)*24*time.Hour)
 	users := userpkg.NewService(db, reportSvc)
 	var storage media.ObjectStorage
-	if cfg.ObjectStorageProvider == "s3" || cfg.ObjectStorageProvider == "r2" {
+	switch cfg.ObjectStorageProvider {
+	case "s3", "r2":
 		storage, e = media.NewS3Storage(ctx, media.S3Config{Region: cfg.ObjectStorageRegion, Endpoint: cfg.ObjectStorageEndpoint, AccessKey: cfg.ObjectStorageAccessKey, SecretKey: cfg.ObjectStorageSecretKey, Bucket: cfg.Bucket, PathStyle: cfg.ObjectStoragePathStyle, UploadTTL: cfg.ObjectStorageUploadTTL})
 		if e != nil {
 			log.Error("object storage unavailable", "error", e)
 			os.Exit(1)
 		}
-	} else {
+	case "gcs":
+		storage, e = media.NewGCSStorage(ctx, media.GCSConfig{Bucket: cfg.Bucket, SigningServiceAccount: cfg.GCSSigningServiceAccount, UploadTTL: cfg.ObjectStorageUploadTTL})
+		if e != nil {
+			log.Error("Google Cloud Storage unavailable", "error", e)
+			os.Exit(1)
+		}
+	default:
 		storage, e = media.NewLocalStorage(cfg.ObjectStorageLocalDir, cfg.ObjectStoragePublicURL, cfg.ObjectStorageUploadTTL, []byte(cfg.OTPHashSecret))
 		if e != nil {
 			log.Error("local object storage unavailable", "error", e)
