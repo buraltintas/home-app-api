@@ -56,6 +56,9 @@ func TestOptionalAndRequiredAuth(t *testing.T) {
 	if w.Code != 204 {
 		t.Fatalf("valid status=%d", w.Code)
 	}
+	if _, ok := PrincipalFrom(valid.Context()); !ok {
+		t.Fatal("resolved principal was not preserved for outer observability middleware")
+	}
 	invalid := httptest.NewRequest("GET", "/v1/feed", nil)
 	invalid.Header.Set("Authorization", "Bearer invalid")
 	w = httptest.NewRecorder()

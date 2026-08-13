@@ -1,0 +1,368 @@
+openapi: 3.1.0
+info:
+  title: home-app API
+  version: 1.0.0
+  description: |
+    Backend contract for the React Native client and a future Next.js BFF.
+    Every `/v1` operation requires `X-BFF-Secret`. A bearer token is optional
+    on discovery reads and required on mutations marked with `bearerAuth`.
+servers:
+  - url: http://localhost:8080
+security:
+  - bffSecret: []
+tags:
+  - {name: System}
+  - {name: Auth}
+  - {name: Discovery}
+  - {name: Social}
+  - {name: Profile}
+  - {name: Media}
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: Liveness probe
+      security: []
+      responses: {'200': {$ref: '#/components/responses/OK'}}
+  /ready:
+    get:
+      tags: [System]
+      summary: Database readiness probe
+      security: []
+      responses: {'200': {$ref: '#/components/responses/OK'}, '503': {$ref: '#/components/responses/Error'}}
+  /metrics:
+    get:
+      tags: [System]
+      summary: Prometheus exposition
+      description: Requires `X-Metrics-Token` when `METRICS_TOKEN` is configured.
+      security: []
+      responses: {'200': {description: Prometheus text format}, '401': {description: Invalid metrics token}}
+  /v1/auth/email/request-code:
+    post:
+      tags: [Auth]
+      summary: Queue an email OTP
+      description: Rate limited by normalized email, remote IP and visitor session.
+      requestBody: {$ref: '#/components/requestBodies/EmailRequest'}
+      responses: {'202': {$ref: '#/components/responses/Accepted'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/auth/email/verify-code:
+    post:
+      tags: [Auth]
+      summary: Verify OTP and create a session
+      requestBody: {$ref: '#/components/requestBodies/EmailVerify'}
+      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/auth/google:
+    post:
+      tags: [Auth]
+      summary: Verify Google ID token and create a session
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [id_token], properties: {id_token: {type: string}}}}}
+      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Rotate a refresh token
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}
+      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the current session family
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'204': {description: Revoked}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoke all user sessions
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'204': {description: Revoked}, '401': {$ref: '#/components/responses/Error'}}
+  /v1/feed:
+    get:
+      tags: [Discovery]
+      summary: Cursor-paginated review feed
+      description: Bearer auth is optional; viewer state is populated when present.
+      parameters:
+        - {$ref: '#/components/parameters/Cursor'}
+        - {$ref: '#/components/parameters/Limit'}
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/search:
+    post:
+      tags: [Discovery]
+      summary: Hybrid internal, OpenAI-intent and Google Places search
+      description: Bearer auth is optional. Anonymous callers should persist `visitor_session_id`.
+      requestBody: {$ref: '#/components/requestBodies/Search'}
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/stores/search:
+    get:
+      tags: [Discovery]
+      summary: Classic internal store search
+      parameters: &storeSearchParameters
+        - {name: q, in: query, schema: {type: string, maxLength: 500}}
+        - {name: latitude, in: query, schema: {type: number, minimum: -90, maximum: 90}}
+        - {name: longitude, in: query, schema: {type: number, minimum: -180, maximum: 180}}
+        - {name: radius_meters, in: query, schema: {type: integer, minimum: 100, maximum: 50000, default: 10000}}
+        - {$ref: '#/components/parameters/Limit'}
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/stores/nearby:
+    get:
+      tags: [Discovery]
+      summary: Nearby internal stores
+      parameters: *storeSearchParameters
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/stores/resolve-external:
+    post:
+      tags: [Discovery]
+      summary: Materialize a verified Google Place as one internal store
+      security: [{bffSecret: [], bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [provider, place_id], properties: {provider: {const: google}, place_id: {type: string}}}}}
+      responses: {'200': {$ref: '#/components/responses/ID'}, '422': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
+  /v1/stores/{id}:
+    get:
+      tags: [Discovery]
+      summary: Store detail and recent reviews
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/stores/{id}/posts:
+    get:
+      tags: [Discovery]
+      summary: Reviews for a store
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}}
+  /v1/stores/{id}/favorite:
+    post:
+      tags: [Social]
+      summary: Favorite a store idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Favorite exists}, '401': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}}
+    delete:
+      tags: [Social]
+      summary: Remove a favorite idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Favorite absent}}
+  /v1/posts:
+    post:
+      tags: [Social]
+      summary: Create a proximity-verified store review
+      security: [{bffSecret: [], bearerAuth: []}]
+      requestBody: {$ref: '#/components/requestBodies/Post'}
+      responses: {'201': {$ref: '#/components/responses/ID'}, '400': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/posts/{id}:
+    get:
+      tags: [Discovery]
+      summary: Review detail
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+    delete:
+      tags: [Social]
+      summary: Soft-delete an owned review
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Deleted}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/posts/{id}/like:
+    post:
+      tags: [Social]
+      summary: Like a review idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Like exists}}
+    delete:
+      tags: [Social]
+      summary: Remove a like idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Like absent}}
+  /v1/posts/{id}/comments:
+    get:
+      tags: [Discovery]
+      summary: Review comments
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}}
+    post:
+      tags: [Social]
+      summary: Add a comment
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [text], properties: {text: {type: string, minLength: 1, maxLength: 2000}}}}}
+      responses: {'201': {$ref: '#/components/responses/ID'}}
+  /v1/comments/{id}:
+    delete:
+      tags: [Social]
+      summary: Soft-delete an owned comment
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Deleted}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/users/{id}:
+    get:
+      tags: [Profile]
+      summary: Public user profile
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/users/{id}/posts:
+    get:
+      tags: [Profile]
+      summary: Public user reviews
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}}
+  /v1/users/{id}/follow:
+    post:
+      tags: [Social]
+      summary: Follow a user idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Follow exists}, '422': {$ref: '#/components/responses/Error'}}
+    delete:
+      tags: [Social]
+      summary: Unfollow a user idempotently
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Follow absent}}
+  /v1/searches/{id}/interactions:
+    post:
+      tags: [Discovery]
+      summary: Record an ownership-bound search interaction
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [event_type]
+              properties:
+                search_result_id: {type: [string, 'null'], format: uuid}
+                event_type: {type: string, enum: [result_impression, result_click, store_open, favorite, unfavorite, review_started, review_created, share]}
+                idempotency_key: {type: string}
+      responses: {'204': {description: Recorded or already present}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/me:
+    get:
+      tags: [Profile]
+      summary: Private profile
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}}
+    patch:
+      tags: [Profile]
+      summary: Update public/private profile fields
+      security: [{bffSecret: [], bearerAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+      responses: {'200': {$ref: '#/components/responses/JSON'}, '409': {$ref: '#/components/responses/Error'}}
+    delete:
+      tags: [Profile]
+      summary: Delete and anonymize the account
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'204': {description: Deleted}}
+  /v1/me/searches:
+    get:
+      tags: [Profile]
+      summary: User search history
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses: {'200': {$ref: '#/components/responses/JSON'}}
+    delete:
+      tags: [Profile]
+      summary: Delete all user search history
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'204': {description: Deleted}}
+  /v1/me/searches/{id}:
+    delete:
+      tags: [Profile]
+      summary: Delete one owned search record
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses: {'204': {description: Deleted}, '404': {$ref: '#/components/responses/Error'}}
+  /v1/media/uploads:
+    post:
+      tags: [Media]
+      summary: Create an authorized image upload
+      security: [{bffSecret: [], bearerAuth: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [mime_type, size_bytes], properties: {mime_type: {type: string, enum: [image/jpeg, image/png, image/webp]}, size_bytes: {type: integer, minimum: 1}}}}}
+      responses: {'201': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/media/{id}/complete:
+    post:
+      tags: [Media]
+      summary: Verify and finalize an owned uploaded image
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [width, height], properties: {width: {type: integer, minimum: 1, maximum: 20000}, height: {type: integer, minimum: 1, maximum: 20000}}}}}
+      responses: {'204': {description: Ready}, '404': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}}
+components:
+  securitySchemes:
+    bffSecret: {type: apiKey, in: header, name: X-BFF-Secret}
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  parameters:
+    ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+    Cursor: {name: cursor, in: query, schema: {type: string}, description: Opaque `created_at + id` cursor}
+  requestBodies:
+    EmailRequest:
+      required: true
+      content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}
+    EmailVerify:
+      required: true
+      content: {application/json: {schema: {type: object, required: [Email, Code], properties: {Email: {type: string, format: email}, Code: {type: string, pattern: '^[0-9]{6}$'}}}}}
+    Search:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [query]
+            properties:
+              query: {type: string, minLength: 2, maxLength: 500}
+              latitude: {type: [number, 'null'], minimum: -90, maximum: 90}
+              longitude: {type: [number, 'null'], minimum: -180, maximum: 180}
+              radius_meters: {type: integer, minimum: 100, maximum: 50000, default: 10000}
+    Post:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [store_id, text, rating, latitude, longitude]
+            properties:
+              store_id: {type: string, format: uuid}
+              text: {type: string, minLength: 3, maxLength: 5000}
+              rating: {type: integer, minimum: 1, maximum: 5}
+              latitude: {type: number, minimum: -90, maximum: 90}
+              longitude: {type: number, minimum: -180, maximum: 180}
+              media_ids: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, format: uuid}}
+              origin_search_id: {type: [string, 'null'], format: uuid}
+              origin_search_result_id: {type: [string, 'null'], format: uuid}
+  schemas:
+    Error:
+      type: object
+      required: [error, request_id]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties: {code: {type: string}, message: {type: string}}
+        request_id: {type: string}
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type, access_expires_at, refresh_expires_at, user_id]
+      properties:
+        access_token: {type: string}
+        refresh_token: {type: string}
+        token_type: {const: Bearer}
+        access_expires_at: {type: string, format: date-time}
+        refresh_expires_at: {type: string, format: date-time}
+        user_id: {type: string, format: uuid}
+  responses:
+    OK: {description: OK, content: {application/json: {schema: {type: object}}}}
+    Accepted: {description: Accepted, content: {application/json: {schema: {type: object}}}}
+    JSON: {description: Success, content: {application/json: {schema: {type: object}}}}
+    ID: {description: Success, content: {application/json: {schema: {type: object, required: [id], properties: {id: {type: string, format: uuid}}}}}}
+    TokenPair: {description: Session created or rotated, content: {application/json: {schema: {$ref: '#/components/schemas/TokenPair'}}}}
+    Error: {description: Domain error; raw database/provider errors are never returned, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
