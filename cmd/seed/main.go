@@ -29,6 +29,11 @@ func main() {
 		log.Fatal(e)
 	}
 	defer tx.Rollback(ctx)
+	mustExec := func(query string, args ...any) {
+		if _, execErr := tx.Exec(ctx, query, args...); execErr != nil {
+			log.Fatalf("seed statement failed (%s): %v", query, execErr)
+		}
+	}
 	type store struct {
 		name, slug, brand, address, city, district string
 		lat, lon                                   float64
@@ -62,13 +67,16 @@ func main() {
 	uids := make([]uuid.UUID, len(users))
 	for i, u := range users {
 		uids[i] = uuid.New()
-		_, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email) VALUES($1,$2) ON CONFLICT(primary_email) DO NOTHING`, uids[i], u.email)
+		// The active-email uniqueness rule is a partial index (deleted users may
+		// retain a tombstoned address), so PostgreSQL cannot infer it from an
+		// ON CONFLICT(primary_email) clause without repeating the predicate.
+		_, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email) VALUES($1,$2) ON CONFLICT DO NOTHING`, uids[i], u.email)
 		if e != nil {
 			log.Fatal(e)
 		}
 		_ = tx.QueryRow(ctx, `SELECT id FROM users WHERE primary_email=$1`, u.email).Scan(&uids[i])
-		_, _ = tx.Exec(ctx, `INSERT INTO user_profiles(user_id,username,display_name,city,bio) VALUES($1,$2,$3,'İstanbul','Ev ve dekorasyon mağazalarını geziyorum.') ON CONFLICT(user_id) DO NOTHING`, uids[i], u.username, u.name)
-		_, _ = tx.Exec(ctx, `INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified) VALUES($1,'email',$2,$2,true) ON CONFLICT DO NOTHING`, uids[i], u.email)
+		mustExec(`INSERT INTO user_profiles(user_id,username,display_name,city,bio) VALUES($1,$2,$3,'İstanbul','Ev ve dekorasyon mağazalarını geziyorum.') ON CONFLICT(user_id) DO NOTHING`, uids[i], u.username, u.name)
+		mustExec(`INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified) VALUES($1,'email',$2::text,$2::text::citext,true) ON CONFLICT DO NOTHING`, uids[i], u.email)
 	}
 	posts := []struct {
 		u, st  int
@@ -81,32 +89,32 @@ func main() {
 		if e != nil {
 			log.Fatal(e)
 		}
-		_, _ = tx.Exec(ctx, `INSERT INTO likes(user_id,post_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, uids[(p.u+1)%len(uids)], id)
-		_, _ = tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body) VALUES($1,$2,$3,'Paylaşım için teşekkürler!') ON CONFLICT(id) DO NOTHING`, seedID("comment", i), id, uids[(p.u+2)%len(uids)])
+		mustExec(`INSERT INTO likes(user_id,post_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, uids[(p.u+1)%len(uids)], id)
+		mustExec(`INSERT INTO comments(id,post_id,user_id,body) VALUES($1,$2,$3,'Paylaşım için teşekkürler!') ON CONFLICT(id) DO NOTHING`, seedID("comment", i), id, uids[(p.u+2)%len(uids)])
 		mediaID := seedID("media", i)
 		storageKey := "seed/reviews/" + mediaID.String() + ".jpg"
-		_, _ = tx.Exec(ctx, `INSERT INTO media(id,owner_user_id,storage_key,mime_type,width,height,size_bytes,status) VALUES($1,$2,$3,'image/jpeg',1200,900,250000,'ready') ON CONFLICT(id) DO NOTHING`, mediaID, uids[p.u], storageKey)
-		_, _ = tx.Exec(ctx, `INSERT INTO post_media(post_id,media_id,position) VALUES($1,$2,0) ON CONFLICT DO NOTHING`, id, mediaID)
+		mustExec(`INSERT INTO media(id,owner_user_id,storage_key,mime_type,width,height,size_bytes,status) VALUES($1,$2,$3,'image/jpeg',1200,900,250000,'ready') ON CONFLICT(id) DO NOTHING`, mediaID, uids[p.u], storageKey)
+		mustExec(`INSERT INTO post_media(post_id,media_id,position) VALUES($1,$2,0) ON CONFLICT DO NOTHING`, id, mediaID)
 	}
 	_, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg FROM (SELECT store_id,count(*)::int n,avg(rating) avg FROM posts WHERE deleted_at IS NULL GROUP BY store_id)x WHERE ss.store_id=x.store_id`)
 	if e != nil {
 		log.Fatal(e)
 	}
 	for i := range users {
-		_, _ = tx.Exec(ctx, `INSERT INTO favorites(user_id,store_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, uids[i], ids[i%len(ids)])
+		mustExec(`INSERT INTO favorites(user_id,store_id) VALUES($1,$2) ON CONFLICT DO NOTHING`, uids[i], ids[i%len(ids)])
 	}
-	_, _ = tx.Exec(ctx, `INSERT INTO follows(follower_id,following_id) VALUES($1,$2),($2,$3),($3,$1) ON CONFLICT DO NOTHING`, uids[0], uids[1], uids[2])
-	_, _ = tx.Exec(ctx, `UPDATE store_stats ss SET favorite_count=(SELECT count(*) FROM favorites f WHERE f.store_id=ss.store_id)`)
+	mustExec(`INSERT INTO follows(follower_id,following_id) VALUES($1,$2),($2,$3),($3,$1) ON CONFLICT DO NOTHING`, uids[0], uids[1], uids[2])
+	mustExec(`UPDATE store_stats ss SET favorite_count=(SELECT count(*) FROM favorites f WHERE f.store_id=ss.store_id)`)
 	visitorID := seedID("visitor", 0)
 	searchID := seedID("search", 0)
-	_, _ = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=excluded.expires_at`, visitorID)
-	_, _ = tx.Exec(ctx, `INSERT INTO searches(id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,location_text,internal_result_count,total_result_count,status) VALUES($1,$2,'Kadıköy modern ev tekstili','kadıköy modern ev tekstili','{"normalized_query":"kadıköy modern ev tekstili","location_text":"kadıköy","categories":["home_textile"],"style_terms":["modern"]}','classic','kadıköy',2,2,'completed') ON CONFLICT(id) DO NOTHING`, searchID, visitorID)
+	mustExec(`INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=excluded.expires_at`, visitorID)
+	mustExec(`INSERT INTO searches(id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,location_text,internal_result_count,total_result_count,status) VALUES($1,$2,'Kadıköy modern ev tekstili','kadıköy modern ev tekstili','{"normalized_query":"kadıköy modern ev tekstili","location_text":"kadıköy","categories":["home_textile"],"style_terms":["modern"]}','classic','kadıköy',2,2,'completed') ON CONFLICT(id) DO NOTHING`, searchID, visitorID)
 	for rank := 1; rank <= 2; rank++ {
 		storeID := ids[rank-1]
 		resultID := seedID("search-result", rank)
-		_, _ = tx.Exec(ctx, `INSERT INTO search_results(id,search_id,rank,store_id,source,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,ranking_reason) SELECT $1,$2,$3,$4,'internal',average_rating,review_count,favorite_count,post_count,'seed_internal' FROM store_stats WHERE store_id=$4 ON CONFLICT(id) DO NOTHING`, resultID, searchID, rank, storeID)
+		mustExec(`INSERT INTO search_results(id,search_id,rank,store_id,source,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,ranking_reason) SELECT $1,$2,$3,$4,'internal',average_rating,review_count,favorite_count,post_count,'seed_internal' FROM store_stats WHERE store_id=$4 ON CONFLICT(id) DO NOTHING`, resultID, searchID, rank, storeID)
 		if rank == 1 {
-			_, _ = tx.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,visitor_session_id,store_id,event_type,idempotency_key) VALUES($1,$2,$3,$4,'result_click','seed-click') ON CONFLICT DO NOTHING`, searchID, resultID, visitorID, storeID)
+			mustExec(`INSERT INTO search_interactions(search_id,search_result_id,visitor_session_id,store_id,event_type,idempotency_key) VALUES($1,$2,$3,$4,'result_click','seed-click') ON CONFLICT DO NOTHING`, searchID, resultID, visitorID, storeID)
 		}
 	}
 	if e = tx.Commit(ctx); e != nil {

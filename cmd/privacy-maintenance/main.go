@@ -26,9 +26,21 @@ func main() {
 		log.Fatal(e)
 	}
 	defer tx.Rollback(ctx)
-	_, e = tx.Exec(ctx, `DELETE FROM searches WHERE created_at<now()-($1::int*interval '1 day');DELETE FROM searches WHERE user_id IS NULL AND visitor_session_id IN(SELECT id FROM visitor_sessions WHERE expires_at<now() OR last_seen_at<now()-($2::int*interval '1 day'));DELETE FROM visitor_sessions WHERE expires_at<now() OR last_seen_at<now()-($2::int*interval '1 day');DELETE FROM email_verification_codes WHERE created_at<now()-interval '30 days';DELETE FROM email_outbox WHERE created_at<now()-interval '90 days' AND status IN('sent','failed');UPDATE searches SET request_latitude=NULL,request_longitude=NULL WHERE created_at<now()-($3::int*interval '1 day')`, c.SearchRetentionDays, c.VisitorRetentionDays, c.SearchLocationRetentionDays)
-	if e != nil {
-		log.Fatal(e)
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`DELETE FROM searches WHERE created_at < now()-($1::int*interval '1 day')`, []any{c.SearchRetentionDays}},
+		{`DELETE FROM searches WHERE user_id IS NULL AND visitor_session_id IN (SELECT id FROM visitor_sessions WHERE expires_at < now() OR last_seen_at < now()-($1::int*interval '1 day'))`, []any{c.VisitorRetentionDays}},
+		{`DELETE FROM visitor_sessions WHERE expires_at < now() OR last_seen_at < now()-($1::int*interval '1 day')`, []any{c.VisitorRetentionDays}},
+		{`DELETE FROM email_verification_codes WHERE created_at < now()-interval '30 days'`, nil},
+		{`DELETE FROM email_outbox WHERE created_at < now()-interval '90 days' AND status IN ('sent','failed')`, nil},
+		{`UPDATE searches SET request_latitude=NULL,request_longitude=NULL WHERE created_at < now()-($1::int*interval '1 day')`, []any{c.SearchLocationRetentionDays}},
+	}
+	for _, statement := range statements {
+		if _, e = tx.Exec(ctx, statement.query, statement.args...); e != nil {
+			log.Fatal(e)
+		}
 	}
 	if e = tx.Commit(ctx); e != nil {
 		log.Fatal(e)
