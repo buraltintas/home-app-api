@@ -42,7 +42,7 @@ func main() {
 	stores := []store{{"IKEA Bayrampaşa", "ikea-bayrampasa", "IKEA", "Kocatepe Mah. Paşa Cad. No:1", "İstanbul", "Bayrampaşa", 41.0451, 28.8972, "furniture", "ChIJ_seed_ikea_bayrampasa"}, {"Akasya Ev Tekstili", "akasya-ev-tekstili", "", "Kadıköy çarşı", "İstanbul", "Kadıköy", 40.9908, 29.0277, "home_textile", ""}, {"Çankaya Modern Mobilya", "cankaya-modern-mobilya", "", "Turan Güneş Bulvarı", "Ankara", "Çankaya", 39.8736, 32.8597, "furniture", ""}, {"Lara Perde & Ev", "lara-perde-ev", "", "Lara Caddesi", "Antalya", "Muratpaşa", 36.8534, 30.7774, "curtain", ""}, {"İzmir Işık Tasarım", "izmir-isik-tasarim", "", "Mithatpaşa Caddesi", "İzmir", "Konak", 38.4089, 27.1177, "lighting", ""}}
 	ids := make([]uuid.UUID, len(stores))
 	for i, x := range stores {
-		ids[i] = uuid.New()
+		ids[i] = seedID("store", i)
 		_, e = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,brand_name,address,city,district,location) VALUES($1,$2,$3,$4,$5,$6,$7,ST_SetSRID(ST_MakePoint($9,$8),4326)::geography) ON CONFLICT(slug) DO UPDATE SET name=excluded.name RETURNING id`, ids[i], x.name, x.slug, x.brand, x.address, x.city, x.district, x.lat, x.lon)
 		if e != nil {
 			log.Fatal(e)
@@ -66,7 +66,7 @@ func main() {
 	users := []struct{ email, username, name string }{{"ayse@example.test", "ayseevde", "Ayşe Yılmaz"}, {"mert@example.test", "mertdekor", "Mert Kaya"}, {"selin@example.test", "selinhome", "Selin Demir"}}
 	uids := make([]uuid.UUID, len(users))
 	for i, u := range users {
-		uids[i] = uuid.New()
+		uids[i] = seedID("user", i)
 		// The active-email uniqueness rule is a partial index (deleted users may
 		// retain a tombstoned address), so PostgreSQL cannot infer it from an
 		// ON CONFLICT(primary_email) clause without repeating the predicate.

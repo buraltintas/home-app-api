@@ -10,6 +10,8 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/observability"
@@ -27,6 +29,21 @@ type DevSender struct{}
 
 func (DevSender) Send(_ context.Context, m Message) (string, error) {
 	return "dev-" + uuid.NewString(), nil
+}
+
+type FileSender struct{ Dir string }
+
+func (s FileSender) Send(_ context.Context, m Message) (string, error) {
+	if err := os.MkdirAll(s.Dir, 0o750); err != nil {
+		return "", err
+	}
+	id := "dev-" + uuid.NewString()
+	body := []byte("To: " + m.To + "\nSubject: " + m.Subject + "\n\n" + m.Text + "\n")
+	path := filepath.Join(s.Dir, id+".eml")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 type ResendSender struct {

@@ -216,7 +216,23 @@ func (s *Service) DeleteAccount(ctx context.Context, user uuid.UUID) error {
 		stores = append(stores, id)
 	}
 	rows.Close()
-	tag, e := tx.Exec(ctx, `UPDATE posts SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL;UPDATE comments SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL;DELETE FROM likes WHERE user_id=$1;DELETE FROM follows WHERE follower_id=$1 OR following_id=$1;DELETE FROM favorites WHERE user_id=$1;DELETE FROM searches WHERE user_id=$1;DELETE FROM auth_identities WHERE user_id=$1;UPDATE auth_sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='account_deleted' WHERE user_id=$1;DELETE FROM user_private_profiles WHERE user_id=$1;UPDATE user_profiles SET username=NULL,display_name='Deleted user',avatar_url=NULL,bio=NULL,city=NULL,updated_at=now() WHERE user_id=$1;UPDATE users SET primary_email=('deleted+'||id::text||'@invalid.local')::citext,status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, user)
+	for _, query := range []string{
+		`UPDATE posts SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
+		`UPDATE comments SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
+		`DELETE FROM likes WHERE user_id=$1`,
+		`DELETE FROM follows WHERE follower_id=$1 OR following_id=$1`,
+		`DELETE FROM favorites WHERE user_id=$1`,
+		`DELETE FROM searches WHERE user_id=$1`,
+		`DELETE FROM auth_identities WHERE user_id=$1`,
+		`UPDATE auth_sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='account_deleted' WHERE user_id=$1`,
+		`DELETE FROM user_private_profiles WHERE user_id=$1`,
+		`UPDATE user_profiles SET username=NULL,display_name='Deleted user',avatar_url=NULL,bio=NULL,city=NULL,updated_at=now() WHERE user_id=$1`,
+	} {
+		if _, e = tx.Exec(ctx, query, user); e != nil {
+			return e
+		}
+	}
+	tag, e := tx.Exec(ctx, `UPDATE users SET primary_email=('deleted+'||id::text||'@invalid.local')::citext,status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, user)
 	if e != nil {
 		return e
 	}

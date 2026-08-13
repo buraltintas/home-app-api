@@ -18,11 +18,13 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/media"
+	"github.com/burakaltintas/home-app-api/internal/notification"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/burakaltintas/home-app-api/internal/social"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
+	userpkg "github.com/burakaltintas/home-app-api/internal/user"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -316,5 +318,63 @@ func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	}
 	if len(post.Media) != 1 || post.Media[0] != created.Upload.StorageKey {
 		t.Fatalf("post media=%v", post.Media)
+	}
+}
+
+func TestAccountDeletionAnonymizesAndRevokes(t *testing.T) {
+	db := database(t)
+	id := user(t, db, "delete-"+uuid.NewString()+"@example.test")
+	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	users := userpkg.NewService(db, report)
+	if err := users.DeleteAccount(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	var status, email, display string
+	var deleted bool
+	if err := db.QueryRow(t.Context(), `SELECT u.status,u.primary_email::text,p.display_name,u.deleted_at IS NOT NULL FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1`, id).Scan(&status, &email, &display, &deleted); err != nil {
+		t.Fatal(err)
+	}
+	if status != "deleted" || !deleted || display != "Deleted user" || email == "" || email[:8] != "deleted+" {
+		t.Fatalf("status=%q email=%q display=%q deleted=%v", status, email, display, deleted)
+	}
+}
+
+func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
+	db := database(t)
+	first := user(t, db, "push-first-"+uuid.NewString()+"@example.test")
+	second := user(t, db, "push-second-"+uuid.NewString()+"@example.test")
+	repo := notification.NewRepository(db, []byte(testHashKey))
+	deviceA, err := repo.RegisterDevice(t.Context(), first, "ios", "shared-device-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceB, err := repo.RegisterDevice(t.Context(), second, "android", "shared-device-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deviceA != deviceB {
+		t.Fatalf("token replacement created a second device: %s != %s", deviceA, deviceB)
+	}
+	deleted, err := repo.DeleteDevice(t.Context(), first, "shared-device-token")
+	if err != nil || deleted {
+		t.Fatalf("old owner deleted replacement device: deleted=%v err=%v", deleted, err)
+	}
+	if err = repo.SetPreferences(t.Context(), second, map[string]bool{"social": true, "marketing": false}); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.Enqueue(t.Context(), second, "social.like", "push-"+deviceA.String(), map[string]any{"post_id": uuid.NewString()})
+	if err != nil || !created {
+		t.Fatalf("enqueue created=%v err=%v", created, err)
+	}
+	created, err = repo.Enqueue(t.Context(), second, "social.like", "push-"+deviceA.String(), map[string]any{})
+	if err != nil || created {
+		t.Fatalf("duplicate enqueue created=%v err=%v", created, err)
+	}
+	job, ok, err := repo.Claim(t.Context())
+	if err != nil || !ok || job.UserID != second {
+		t.Fatalf("claim ok=%v job=%+v err=%v", ok, job, err)
+	}
+	if err = repo.Complete(t.Context(), job.ID, "provider-123"); err != nil {
+		t.Fatal(err)
 	}
 }

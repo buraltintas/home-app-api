@@ -41,7 +41,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer db.Close()
-	var sender email.Sender = email.DevSender{}
+	var sender email.Sender = email.FileSender{Dir: cfg.EmailDevelopmentDir}
 	if cfg.EmailProvider == "resend" {
 		url := cfg.EmailAPIURL
 		if url == "" {

@@ -22,6 +22,7 @@ type Config struct {
 	OpenAIAPIKey, OpenAIModel                                              string
 	OpenAITimeout                                                          time.Duration
 	EmailProvider, EmailFrom                                               string
+	EmailDevelopmentDir                                                    string
 	EmailAPIURL, EmailAPIKey                                               string
 	ObjectStorageProvider, Bucket                                          string
 	ObjectStorageRegion, ObjectStorageEndpoint                             string
@@ -52,7 +53,8 @@ func Load() (Config, error) {
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-5-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", "no-reply@example.test"),
-		EmailAPIURL: os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
+		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
+		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: env("OBJECT_STORAGE_BUCKET", "home-app-dev"),
 		ObjectStorageRegion: env("OBJECT_STORAGE_REGION", "auto"), ObjectStorageEndpoint: os.Getenv("OBJECT_STORAGE_ENDPOINT"), ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"), ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
 		ObjectStorageLocalDir: env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),

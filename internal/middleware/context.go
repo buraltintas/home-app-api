@@ -48,7 +48,12 @@ func OptionalAuth(tokens *security.TokenManager) func(http.Handler) http.Handler
 				httpapi.WriteError(w, httpapi.ErrInvalidToken)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, Principal{u, s})))
+			// Preserve the authenticated context on the original request as well as
+			// for downstream handlers. Outer observability middleware logs after the
+			// handler returns and must see the resolved principal without parsing or
+			// retaining the bearer token itself.
+			*r = *r.WithContext(context.WithValue(r.Context(), principalKey, Principal{u, s}))
+			next.ServeHTTP(w, r)
 		})
 	}
 }
