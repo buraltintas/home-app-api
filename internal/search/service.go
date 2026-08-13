@@ -25,6 +25,7 @@ type Service struct {
 	locationDecimals  int
 	report            *reporting.Service
 	attributionWindow time.Duration
+	visitorTTL        time.Duration
 	now               func() time.Time
 }
 
@@ -116,8 +117,8 @@ func cityFromAddress(address string) string {
 	return "Bilinmiyor"
 }
 
-func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int, report *reporting.Service, attribution time.Duration) *Service {
-	return &Service{db, stores, ai, places, model, decimals, report, attribution, time.Now}
+func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int, report *reporting.Service, attribution, visitorTTL time.Duration) *Service {
+	return &Service{db, stores, ai, places, model, decimals, report, attribution, visitorTTL, time.Now}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
@@ -136,13 +137,13 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	if user == nil && visitor == nil {
 		id := uuid.New()
-		_, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days')`, id)
+		_, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval)`, id, s.visitorTTL.String())
 		if e != nil {
 			return Response{}, e
 		}
 		visitor = &id
 	} else if visitor != nil {
-		_, _ = s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now()`, *visitor)
+		_, _ = s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.visitorTTL.String())
 	}
 	intent := Deterministic(in.Query)
 	aiUsed := false
@@ -319,7 +320,7 @@ func (s *Service) RecordInternalSearch(ctx context.Context, user, visitor *uuid.
 		visitor = &id
 	}
 	if visitor != nil {
-		if _, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now()`, *visitor); e != nil {
+		if _, e := s.db.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.visitorTTL.String()); e != nil {
 			return uuid.Nil, visitor, e
 		}
 	}

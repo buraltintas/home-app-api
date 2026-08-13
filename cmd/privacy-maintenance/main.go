@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"log"
 	"time"
 )
@@ -25,11 +26,18 @@ func main() {
 		log.Fatal(e)
 	}
 	defer tx.Rollback(ctx)
-	_, e = tx.Exec(ctx, `DELETE FROM searches WHERE created_at<now()-($1::int*interval '1 day');DELETE FROM searches WHERE user_id IS NULL AND visitor_session_id IN(SELECT id FROM visitor_sessions WHERE expires_at<now());DELETE FROM visitor_sessions WHERE expires_at<now();DELETE FROM email_verification_codes WHERE created_at<now()-interval '30 days';DELETE FROM email_outbox WHERE created_at<now()-interval '90 days' AND status IN('sent','failed');UPDATE searches SET request_latitude=NULL,request_longitude=NULL WHERE created_at<now()-interval '30 days'`, c.SearchRetentionDays)
+	_, e = tx.Exec(ctx, `DELETE FROM searches WHERE created_at<now()-($1::int*interval '1 day');DELETE FROM searches WHERE user_id IS NULL AND visitor_session_id IN(SELECT id FROM visitor_sessions WHERE expires_at<now() OR last_seen_at<now()-($2::int*interval '1 day'));DELETE FROM visitor_sessions WHERE expires_at<now() OR last_seen_at<now()-($2::int*interval '1 day');DELETE FROM email_verification_codes WHERE created_at<now()-interval '30 days';DELETE FROM email_outbox WHERE created_at<now()-interval '90 days' AND status IN('sent','failed');UPDATE searches SET request_latitude=NULL,request_longitude=NULL WHERE created_at<now()-($3::int*interval '1 day')`, c.SearchRetentionDays, c.VisitorRetentionDays, c.SearchLocationRetentionDays)
 	if e != nil {
 		log.Fatal(e)
 	}
 	if e = tx.Commit(ctx); e != nil {
+		log.Fatal(e)
+	}
+	reportSvc, e := reporting.NewService(db, c.ReportingTimezone, c.SearchAttributionWindow)
+	if e != nil {
+		log.Fatal(e)
+	}
+	if e = reportSvc.RebuildSnapshot(ctx); e != nil {
 		log.Fatal(e)
 	}
 	log.Print("privacy retention completed")

@@ -23,6 +23,7 @@ type Config struct {
 	OTPEmailLimit   int
 	OTPIPLimit      int
 	OTPVisitorLimit int
+	VisitorTTL      time.Duration
 	RefreshTTL      time.Duration
 	HashKey         []byte
 }
@@ -86,7 +87,7 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	}
 	defer tx.Rollback(ctx)
 	if visitor != nil {
-		if _, e = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+interval '180 days') ON CONFLICT(id) DO UPDATE SET last_seen_at=now()`, *visitor); e != nil {
+		if _, e = tx.Exec(ctx, `INSERT INTO visitor_sessions(id,expires_at) VALUES($1,now()+$2::interval) ON CONFLICT(id) DO UPDATE SET last_seen_at=now(),expires_at=greatest(visitor_sessions.expires_at,excluded.expires_at)`, *visitor, s.cfg.VisitorTTL.String()); e != nil {
 			return e
 		}
 	}

@@ -10,30 +10,30 @@ import (
 )
 
 type Config struct {
-	Environment, HTTPAddr, DatabaseURL             string
-	BFFSecrets                                     []string
-	AccessTokenSecret, OTPHashSecret               string
-	AccessTokenTTL, RefreshTokenTTL                time.Duration
-	OTPTTL                                         time.Duration
-	OTPMaxAttempts                                 int
-	OTPEmailRequestLimit, OTPIPRequestLimit        int
-	OTPVisitorRequestLimit                         int
-	GoogleClientID, GooglePlacesAPIKey             string
-	OpenAIAPIKey, OpenAIModel                      string
-	OpenAITimeout                                  time.Duration
-	EmailProvider, EmailFrom                       string
-	EmailAPIURL, EmailAPIKey                       string
-	ObjectStorageProvider, Bucket                  string
-	ObjectStorageRegion, ObjectStorageEndpoint     string
-	ObjectStorageAccessKey, ObjectStorageSecretKey string
-	ObjectStoragePathStyle                         bool
-	ObjectStorageUploadTTL                         time.Duration
-	MediaMaxBytes                                  int64
-	StoreReviewRadiusMeters                        float64
-	SearchLocationDecimals                         int
-	ReportingTimezone                              string
-	SearchAttributionWindow                        time.Duration
-	SearchRetentionDays, VisitorRetentionDays      int
+	Environment, HTTPAddr, DatabaseURL                                     string
+	BFFSecrets                                                             []string
+	AccessTokenSecret, OTPHashSecret                                       string
+	AccessTokenTTL, RefreshTokenTTL                                        time.Duration
+	OTPTTL                                                                 time.Duration
+	OTPMaxAttempts                                                         int
+	OTPEmailRequestLimit, OTPIPRequestLimit                                int
+	OTPVisitorRequestLimit                                                 int
+	GoogleClientID, GooglePlacesAPIKey                                     string
+	OpenAIAPIKey, OpenAIModel                                              string
+	OpenAITimeout                                                          time.Duration
+	EmailProvider, EmailFrom                                               string
+	EmailAPIURL, EmailAPIKey                                               string
+	ObjectStorageProvider, Bucket                                          string
+	ObjectStorageRegion, ObjectStorageEndpoint                             string
+	ObjectStorageAccessKey, ObjectStorageSecretKey                         string
+	ObjectStoragePathStyle                                                 bool
+	ObjectStorageUploadTTL                                                 time.Duration
+	MediaMaxBytes                                                          int64
+	StoreReviewRadiusMeters                                                float64
+	SearchLocationDecimals                                                 int
+	ReportingTimezone                                                      string
+	SearchAttributionWindow                                                time.Duration
+	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
 }
 
 func Load() (Config, error) {
@@ -101,8 +101,14 @@ func Load() (Config, error) {
 	if c.SearchRetentionDays, err = integer("SEARCH_RETENTION_DAYS", 365); err != nil {
 		return c, err
 	}
+	if c.SearchLocationRetentionDays, err = integer("SEARCH_LOCATION_RETENTION_DAYS", 30); err != nil {
+		return c, err
+	}
 	if c.VisitorRetentionDays, err = integer("VISITOR_RETENTION_DAYS", 180); err != nil {
 		return c, err
+	}
+	if c.SearchRetentionDays < 1 || c.SearchLocationRetentionDays < 1 || c.VisitorRetentionDays < 1 {
+		return c, errors.New("retention days must be positive")
 	}
 	if _, err = time.LoadLocation(c.ReportingTimezone); err != nil {
 		return c, fmt.Errorf("REPORTING_TIMEZONE: %w", err)

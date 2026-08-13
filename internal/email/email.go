@@ -32,6 +32,13 @@ type ResendSender struct {
 	Client      *http.Client
 }
 
+type DeliveryError struct {
+	Status    int
+	Retryable bool
+}
+
+func (e *DeliveryError) Error() string { return fmt.Sprintf("email provider status %d", e.Status) }
+
 func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
 	payload := struct {
 		From    string   `json:"from"`
@@ -53,7 +60,7 @@ func (s *ResendSender) Send(ctx context.Context, m Message) (string, error) {
 	}
 	defer r.Body.Close()
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
-		return "", fmt.Errorf("email provider status %d", r.StatusCode)
+		return "", &DeliveryError{Status: r.StatusCode, Retryable: r.StatusCode == http.StatusTooManyRequests || r.StatusCode >= 500}
 	}
 	var out struct {
 		ID string `json:"id"`
@@ -129,12 +136,14 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 		return false, e
 	}
 	msg, e := w.render(j)
+	shouldRetry := false
 	if e == nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		var providerID string
 		providerID, e = w.sender.Send(ctx, msg)
+		shouldRetry = retryable(e)
 		if e == nil {
 			_, e = w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status='sent',sent_at=now(),provider_message_id=$2,last_error=NULL WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,provider_message_id,success) VALUES($1,'configured',$2,true)`, j.ID, providerID)
 			return true, e
@@ -142,15 +151,29 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	}
 	delay := time.Duration(1<<min(j.Attempts, 8)) * time.Minute
 	status := "failed"
-	if j.Attempts+1 >= 10 {
-		delay = 365 * 24 * time.Hour
+	available := any(delay.String())
+	if !shouldRetry || j.Attempts+1 >= 10 {
+		available = "infinity"
 	}
 	safeError := "provider delivery failed"
-	_, dbErr := w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status=$2,available_at=now()+$3::interval,last_error=$4 WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,success,error_code) VALUES($1,'configured',false,'DELIVERY_FAILED')`, j.ID, status, delay.String(), safeError)
+	_, dbErr := w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status=$2,available_at=CASE WHEN $3='infinity' THEN 'infinity'::timestamptz ELSE now()+$3::interval END,last_error=$4 WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,success,error_code) VALUES($1,'configured',false,'DELIVERY_FAILED')`, j.ID, status, available, safeError)
 	if dbErr != nil {
 		return true, dbErr
 	}
 	return true, e
+}
+
+func retryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var delivery *DeliveryError
+	if errors.As(err, &delivery) {
+		return delivery.Retryable
+	}
+	// Network and timeout failures are transient. Rendering/configuration errors are
+	// marked permanent before this helper is consulted.
+	return true
 }
 func (w *Worker) render(j job) (Message, error) {
 	if j.Template != "login_code" {

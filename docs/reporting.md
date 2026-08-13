@@ -32,7 +32,7 @@ Every successful search stores its privacy-rounded location, validated intent, p
 
 Clients should submit the returned `search_result_impression_id` for clicks/opens. Favorite requests may include `X-Origin-Search-ID` and `X-Origin-Search-Result-ID`; review creation may include `origin_search_id` and `origin_search_result_id`. Attribution is ownership checked, store matched, and limited by `SEARCH_ATTRIBUTION_WINDOW_HOURS` (72 by default). Attribution failure never rolls back an already-successful core favorite/review.
 
-Search history is private and owner-only. Deleting retained search history cascades raw impressions/interactions; already aggregated daily metrics remain non-identifying. Anonymous visitor records expire and should be removed by the deployment retention job.
+Search history is private and owner-only. `SEARCH_RETENTION_DAYS`, `SEARCH_LOCATION_RETENTION_DAYS`, and `VISITOR_RETENTION_DAYS` control raw-history deletion, coordinate anonymization, and anonymous-session expiry. Deleting retained search history cascades raw impressions/interactions; already aggregated daily metrics remain non-identifying.
 
 ## Operations
 
