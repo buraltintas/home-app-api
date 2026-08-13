@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,17 +20,22 @@ import (
 type Service struct {
 	db           *pgxpool.Pool
 	reviewRadius float64
+	report       *reporting.Service
 }
 
-func NewService(db *pgxpool.Pool, r float64) *Service { return &Service{db, r} }
+func NewService(db *pgxpool.Pool, r float64, report *reporting.Service) *Service {
+	return &Service{db, r, report}
+}
 
 type CreatePost struct {
-	StoreID   uuid.UUID   `json:"store_id"`
-	Text      string      `json:"text"`
-	Rating    int         `json:"rating"`
-	Latitude  float64     `json:"latitude"`
-	Longitude float64     `json:"longitude"`
-	MediaIDs  []uuid.UUID `json:"media_ids"`
+	StoreID              uuid.UUID   `json:"store_id"`
+	Text                 string      `json:"text"`
+	Rating               int         `json:"rating"`
+	Latitude             float64     `json:"latitude"`
+	Longitude            float64     `json:"longitude"`
+	MediaIDs             []uuid.UUID `json:"media_ids"`
+	OriginSearchID       *uuid.UUID  `json:"origin_search_id"`
+	OriginSearchResultID *uuid.UUID  `json:"origin_search_result_id"`
 }
 type Post struct {
 	ID              uuid.UUID `json:"id"`
@@ -82,6 +88,7 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		return uuid.Nil, e
 	}
 	if distance > s.reviewRadius {
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.PostLocationRejected, IdempotencyKey: "post-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &in.StoreID, Metadata: map[string]any{"distance_meters": distance, "allowed_radius_meters": s.reviewRadius}})
 		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
 	}
 	id := uuid.New()
@@ -100,6 +107,12 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO store_stats(store_id,average_rating,rating_count,review_count,post_count) VALUES($1,$2,1,1,1) ON CONFLICT(store_id) DO UPDATE SET rating_count=store_stats.rating_count+1,review_count=store_stats.review_count+1,post_count=store_stats.post_count+1,average_rating=((store_stats.average_rating*store_stats.rating_count)+$2)/(store_stats.rating_count+1),updated_at=now()`, in.StoreID, in.Rating)
 	if e != nil {
+		return uuid.Nil, e
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostCreated, IdempotencyKey: "post-created:" + id.String(), UserID: &user, StoreID: &in.StoreID, PostID: &id}); e != nil {
+		return uuid.Nil, e
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostVisitVerified, IdempotencyKey: "post-verified:" + id.String(), UserID: &user, StoreID: &in.StoreID, PostID: &id, Metadata: map[string]any{"distance_meters": distance}}); e != nil {
 		return uuid.Nil, e
 	}
 	return id, tx.Commit(ctx)
@@ -221,21 +234,45 @@ func nilUUID(id uuid.UUID) any {
 }
 
 func (s *Service) Like(ctx context.Context, user, post uuid.UUID, add bool) error {
-	return uniqueMutation(ctx, s.db, add, `INSERT INTO likes(user_id,post_id) SELECT $1,id FROM posts WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM likes WHERE user_id=$1 AND post_id=$2`, user, post)
+	event := reporting.LikeRemoved
+	if add {
+		event = reporting.LikeCreated
+	}
+	return s.uniqueMutation(ctx, add, `INSERT INTO likes(user_id,post_id) SELECT $1,id FROM posts WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM likes WHERE user_id=$1 AND post_id=$2`, user, post, event, reporting.Event{UserID: &user, PostID: &post})
 }
 func (s *Service) Follow(ctx context.Context, user, target uuid.UUID, add bool) error {
 	if user == target {
 		return httpapi.E(422, "CANNOT_FOLLOW_SELF", "You cannot follow yourself")
 	}
-	return uniqueMutation(ctx, s.db, add, `INSERT INTO follows(follower_id,following_id) SELECT $1,id FROM users WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM follows WHERE follower_id=$1 AND following_id=$2`, user, target)
+	event := reporting.FollowRemoved
+	if add {
+		event = reporting.FollowCreated
+	}
+	return s.uniqueMutation(ctx, add, `INSERT INTO follows(follower_id,following_id) SELECT $1,id FROM users WHERE id=$2 AND deleted_at IS NULL ON CONFLICT DO NOTHING`, `DELETE FROM follows WHERE follower_id=$1 AND following_id=$2`, user, target, event, reporting.Event{UserID: &user, Metadata: map[string]any{"following_user_id": target.String()}})
 }
-func uniqueMutation(ctx context.Context, db *pgxpool.Pool, add bool, insert, del string, a, b uuid.UUID) error {
+func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del string, a, b uuid.UUID, event string, ev reporting.Event) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
 	q := del
 	if add {
 		q = insert
 	}
-	_, e := db.Exec(ctx, q, a, b)
-	return e
+	tag, e := tx.Exec(ctx, q, a, b)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return tx.Commit(ctx)
+	}
+	ev.Type = event
+	ev.IdempotencyKey = "social:" + uuid.NewString()
+	if _, e = s.report.RecordTx(ctx, tx, ev); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body string) (uuid.UUID, error) {
@@ -244,24 +281,41 @@ func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body str
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	id := uuid.New()
-	tag, e := s.db.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body) SELECT $1,id,$3,$4 FROM posts WHERE id=$2 AND deleted_at IS NULL`, id, post, user, body)
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return uuid.Nil, e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body) SELECT $1,id,$3,$4 FROM posts WHERE id=$2 AND deleted_at IS NULL`, id, post, user, body)
 	if e != nil {
 		return uuid.Nil, e
 	}
 	if tag.RowsAffected() == 0 {
 		return uuid.Nil, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
-	return id, nil
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.CommentCreated, IdempotencyKey: "comment-created:" + id.String(), UserID: &user, PostID: &post}); e != nil {
+		return uuid.Nil, e
+	}
+	return id, tx.Commit(ctx)
 }
 func (s *Service) DeleteComment(ctx context.Context, user, comment uuid.UUID) error {
-	tag, e := s.db.Exec(ctx, `UPDATE comments SET deleted_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL`, comment, user)
+	tx, e := s.db.Begin(ctx)
 	if e != nil {
 		return e
 	}
-	if tag.RowsAffected() == 0 {
-		return httpapi.E(404, "COMMENT_NOT_FOUND", "Comment not found or not owned by you")
+	defer tx.Rollback(ctx)
+	var post uuid.UUID
+	e = tx.QueryRow(ctx, `UPDATE comments SET deleted_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING post_id`, comment, user).Scan(&post)
+	if e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
+			return httpapi.E(404, "COMMENT_NOT_FOUND", "Comment not found or not owned by you")
+		}
+		return e
 	}
-	return nil
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.CommentDeleted, IdempotencyKey: "comment-deleted:" + comment.String(), UserID: &user, PostID: &post}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) error {
 	tx, e := s.db.Begin(ctx)
@@ -280,6 +334,9 @@ func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) error {
 	}
 	_, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg,updated_at=now() FROM (SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL) x WHERE ss.store_id=$1`, store)
 	if e != nil {
+		return e
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostDeleted, IdempotencyKey: "post-deleted:" + post.String(), UserID: &user, StoreID: &store, PostID: &post}); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

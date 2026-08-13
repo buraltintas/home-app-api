@@ -9,6 +9,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/openai/openai-go/v3 v3.50.0
+	github.com/pashagolub/pgxmock/v4 v4.9.0
 	golang.org/x/time v0.15.0
 	google.golang.org/api v0.293.0
 )

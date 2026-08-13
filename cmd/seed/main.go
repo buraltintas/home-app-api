@@ -7,6 +7,7 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 )
 
@@ -92,6 +93,13 @@ func main() {
 	_, _ = tx.Exec(ctx, `UPDATE store_stats ss SET favorite_count=(SELECT count(*) FROM favorites f WHERE f.store_id=ss.store_id)`)
 	if e = tx.Commit(ctx); e != nil {
 		log.Fatal(e)
+	}
+	if reportSvc, re := reporting.NewService(db, cfg.ReportingTimezone); re == nil {
+		if re = reportSvc.Rebuild(ctx); re != nil {
+			log.Fatal(re)
+		}
+	} else {
+		log.Fatal(re)
 	}
 	log.Printf("seeded %d stores and %d users", len(stores), len(users))
 }

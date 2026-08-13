@@ -12,6 +12,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/burakaltintas/home-app-api/internal/server"
@@ -36,15 +37,23 @@ func main() {
 	}
 	defer db.Close()
 	tokens := security.NewTokenManager(cfg.AccessTokenSecret, cfg.AccessTokenTTL, cfg.RefreshTokenTTL)
-	authSvc := auth.NewService(db, auth.Config{OTPTTL: cfg.OTPTTL, OTPMaxAttempts: cfg.OTPMaxAttempts, RefreshTTL: cfg.RefreshTokenTTL, HashKey: []byte(cfg.OTPHashSecret)}, tokens, auth.NewGoogleVerifier(cfg.GoogleClientID))
-	stores := storepkg.NewService(db)
-	socialSvc := social.NewService(db, cfg.StoreReviewRadiusMeters)
+	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone)
+	if e != nil {
+		log.Error("reporting unavailable", "error", e)
+		os.Exit(1)
+	}
+	authSvc := auth.NewService(db, auth.Config{OTPTTL: cfg.OTPTTL, OTPMaxAttempts: cfg.OTPMaxAttempts, RefreshTTL: cfg.RefreshTokenTTL, HashKey: []byte(cfg.OTPHashSecret)}, tokens, auth.NewGoogleVerifier(cfg.GoogleClientID), reportSvc)
+	stores := storepkg.NewService(db, reportSvc)
+	socialSvc := social.NewService(db, cfg.StoreReviewRadiusMeters, reportSvc)
 	var ai searchpkg.IntentParser
 	if cfg.OpenAIAPIKey != "" {
 		ai = searchpkg.NewOpenAIParser(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout)
 	}
-	places := searchpkg.NewGooglePlaces(cfg.GooglePlacesAPIKey)
-	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals)
+	var places searchpkg.PlacesProvider
+	if cfg.GooglePlacesAPIKey != "" {
+		places = searchpkg.NewGooglePlaces(cfg.GooglePlacesAPIKey)
+	}
+	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow)
 	users := userpkg.NewService(db)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}

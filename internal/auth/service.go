@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -27,11 +28,12 @@ type Service struct {
 	cfg    Config
 	tokens *security.TokenManager
 	google GoogleVerifier
+	report *reporting.Service
 	now    func() time.Time
 }
 
-func NewService(db *pgxpool.Pool, c Config, t *security.TokenManager, g GoogleVerifier) *Service {
-	return &Service{db: db, cfg: c, tokens: t, google: g, now: time.Now}
+func NewService(db *pgxpool.Pool, c Config, t *security.TokenManager, g GoogleVerifier, report *reporting.Service) *Service {
+	return &Service{db: db, cfg: c, tokens: t, google: g, report: report, now: time.Now}
 }
 
 type TokenPair struct {
@@ -41,6 +43,7 @@ type TokenPair struct {
 	AccessExpiresAt  time.Time `json:"access_expires_at"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at"`
 	UserID           uuid.UUID `json:"user_id"`
+	SessionID        uuid.UUID `json:"-"`
 }
 type Client struct {
 	Type     string
@@ -92,6 +95,9 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	if e != nil {
 		return e
 	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.OTPRequested, IdempotencyKey: "otp-request:" + id.String(), VisitorSessionID: visitor}); e != nil {
+		return e
+	}
 	return tx.Commit(ctx)
 }
 
@@ -101,6 +107,7 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 		return TokenPair{}, e
 	}
 	if len(code) != 6 {
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.OTPVerificationFailed, IdempotencyKey: "otp-invalid-format:" + uuid.NewString()})
 		return TokenPair{}, httpapi.E(401, "INVALID_CODE", "The verification code is invalid or expired")
 	}
 	tx, e := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
@@ -115,6 +122,7 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 	e = tx.QueryRow(ctx, `SELECT id,code_hash,attempts,max_attempts,expires_at FROM email_verification_codes WHERE normalized_email=$1 AND consumed_at IS NULL AND invalidated_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, norm).Scan(&id, &hash, &attempts, &max, &expires)
 	invalid := httpapi.E(401, "INVALID_CODE", "The verification code is invalid or expired")
 	if errors.Is(e, pgx.ErrNoRows) || s.now().After(expires) || attempts >= max {
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.OTPVerificationFailed, IdempotencyKey: "otp-failed:" + uuid.NewString(), VisitorSessionID: nil})
 		return TokenPair{}, invalid
 	}
 	if e != nil {
@@ -122,6 +130,7 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 	}
 	if !security.EqualHash(hash, security.Hash(s.cfg.HashKey, code)) {
 		_, _ = tx.Exec(ctx, `UPDATE email_verification_codes SET attempts=attempts+1 WHERE id=$1`, id)
+		_, _ = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.OTPVerificationFailed, IdempotencyKey: fmt.Sprintf("otp-failed:%s:%d", id, attempts+1)})
 		if e = tx.Commit(ctx); e != nil {
 			return TokenPair{}, e
 		}
@@ -130,12 +139,20 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 	if _, e = tx.Exec(ctx, `UPDATE email_verification_codes SET consumed_at=$2 WHERE id=$1`, id, s.now()); e != nil {
 		return TokenPair{}, e
 	}
-	user, e := s.resolveIdentity(ctx, tx, "email", norm, norm, true)
+	user, created, e := s.resolveIdentity(ctx, tx, "email", norm, norm, true)
 	if e != nil {
 		return TokenPair{}, e
 	}
 	pair, e := s.createSession(ctx, tx, user, client)
 	if e != nil {
+		return TokenPair{}, e
+	}
+	if created {
+		if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.UserRegistered, IdempotencyKey: "user-registered:" + user.String(), UserID: &user}); e != nil {
+			return TokenPair{}, e
+		}
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.UserLoginSucceeded, IdempotencyKey: "login:" + pair.SessionID.String(), UserID: &user}); e != nil {
 		return TokenPair{}, e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -147,6 +164,7 @@ func (s *Service) VerifyCode(ctx context.Context, email, code string, client Cli
 func (s *Service) Google(ctx context.Context, idToken string, client Client) (TokenPair, error) {
 	g, e := s.google.Verify(ctx, idToken)
 	if e != nil {
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.UserLoginFailed, IdempotencyKey: "google-login-failed:" + uuid.NewString()})
 		return TokenPair{}, httpapi.E(401, "INVALID_GOOGLE_TOKEN", "Invalid Google credential")
 	}
 	norm, e := NormalizeEmail(g.Email)
@@ -158,12 +176,20 @@ func (s *Service) Google(ctx context.Context, idToken string, client Client) (To
 		return TokenPair{}, e
 	}
 	defer tx.Rollback(ctx)
-	user, e := s.resolveIdentity(ctx, tx, "google", g.Subject, norm, g.EmailVerified)
+	user, created, e := s.resolveIdentity(ctx, tx, "google", g.Subject, norm, g.EmailVerified)
 	if e != nil {
 		return TokenPair{}, e
 	}
 	pair, e := s.createSession(ctx, tx, user, client)
 	if e != nil {
+		return TokenPair{}, e
+	}
+	if created {
+		if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.UserRegistered, IdempotencyKey: "user-registered:" + user.String(), UserID: &user}); e != nil {
+			return TokenPair{}, e
+		}
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.UserLoginSucceeded, IdempotencyKey: "login:" + pair.SessionID.String(), UserID: &user}); e != nil {
 		return TokenPair{}, e
 	}
 	if e = tx.Commit(ctx); e != nil {
@@ -172,37 +198,39 @@ func (s *Service) Google(ctx context.Context, idToken string, client Client) (To
 	return pair, nil
 }
 
-func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subject, email string, verified bool) (uuid.UUID, error) {
+func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subject, email string, verified bool) (uuid.UUID, bool, error) {
 	var user uuid.UUID
 	e := tx.QueryRow(ctx, `SELECT user_id FROM auth_identities WHERE provider=$1 AND provider_subject=$2`, provider, subject).Scan(&user)
 	if e == nil {
-		return user, nil
+		return user, false, nil
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
-		return uuid.Nil, e
+		return uuid.Nil, false, e
 	}
 	if !verified {
-		return uuid.Nil, httpapi.E(401, "EMAIL_NOT_VERIFIED", "A verified email is required")
+		return uuid.Nil, false, httpapi.E(401, "EMAIL_NOT_VERIFIED", "A verified email is required")
 	}
 	// One transaction-scoped lock per normalized email serializes cross-provider signup.
 	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, email); e != nil {
-		return uuid.Nil, e
+		return uuid.Nil, false, e
 	}
 	e = tx.QueryRow(ctx, `SELECT id FROM users WHERE primary_email=$1 AND deleted_at IS NULL FOR UPDATE`, email).Scan(&user)
+	created := false
 	if errors.Is(e, pgx.ErrNoRows) {
+		created = true
 		user = uuid.New()
 		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email) VALUES($1,$2)`, user, email); e != nil {
-			return uuid.Nil, e
+			return uuid.Nil, false, e
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO user_profiles(user_id,username,display_name) VALUES($1,$2,$3)`, user, "user_"+strings.ReplaceAll(user.String()[:8], "-", ""), strings.Split(email, "@")[0])
 		if e != nil {
-			return uuid.Nil, e
+			return uuid.Nil, false, e
 		}
 	} else if e != nil {
-		return uuid.Nil, e
+		return uuid.Nil, false, e
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified) VALUES($1,$2,$3,$4,true)`, user, provider, subject, email)
-	return user, e
+	return user, created, e
 }
 
 func (s *Service) createSession(ctx context.Context, tx pgx.Tx, user uuid.UUID, client Client) (TokenPair, error) {
@@ -219,7 +247,7 @@ func (s *Service) createSession(ctx context.Context, tx pgx.Tx, user uuid.UUID, 
 		return TokenPair{}, e
 	}
 	access, aexp, e := s.tokens.Access(user, sid, now)
-	return TokenPair{access, raw, "Bearer", aexp, exp, user}, e
+	return TokenPair{AccessToken: access, RefreshToken: raw, TokenType: "Bearer", AccessExpiresAt: aexp, RefreshExpiresAt: exp, UserID: user, SessionID: sid}, e
 }
 
 func (s *Service) Refresh(ctx context.Context, raw string, client Client) (TokenPair, error) {
@@ -272,7 +300,7 @@ func (s *Service) Refresh(ctx context.Context, raw string, client Client) (Token
 	if e = tx.Commit(ctx); e != nil {
 		return TokenPair{}, e
 	}
-	return TokenPair{access, newRaw, "Bearer", aexp, newExp, user}, nil
+	return TokenPair{AccessToken: access, RefreshToken: newRaw, TokenType: "Bearer", AccessExpiresAt: aexp, RefreshExpiresAt: newExp, UserID: user, SessionID: sid}, nil
 }
 
 func (s *Service) Logout(ctx context.Context, user, session uuid.UUID, all bool) error {

@@ -44,6 +44,7 @@ type Platform struct {
 	AverageRating float64   `json:"average_rating"`
 	ReviewCount   int       `json:"review_count"`
 	FavoriteCount int       `json:"favorite_count"`
+	PostCount     int       `json:"post_count"`
 }
 type External struct {
 	Provider    string  `json:"provider"`
@@ -53,6 +54,7 @@ type External struct {
 }
 type Result struct {
 	ID              *uuid.UUID `json:"id,omitempty"`
+	ImpressionID    uuid.UUID  `json:"search_result_impression_id"`
 	Source          string     `json:"source"`
 	Name            string     `json:"name"`
 	Address         string     `json:"address"`
@@ -150,6 +152,6 @@ func containsAny(s string, terms ...string) bool {
 	return false
 }
 func fromStore(x storepkg.Item) Result {
-	p := &Platform{x.ID, x.Platform.AverageRating, x.Platform.ReviewCount, x.Platform.FavoriteCount}
-	return Result{ID: &x.ID, Source: "platform", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, score: 100 + float64(x.Platform.ReviewCount)}
+	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, score: 100 + float64(x.Platform.ReviewCount)}
 }

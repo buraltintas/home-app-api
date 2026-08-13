@@ -1,4 +1,4 @@
-.PHONY: run worker migrate migrate-down seed test lint build
+.PHONY: run worker migrate migrate-down seed rebuild-admin-metrics test lint build
 
 run:
 	go run ./cmd/api
@@ -14,6 +14,9 @@ migrate-down:
 
 seed:
 	go run ./cmd/seed
+
+rebuild-admin-metrics:
+	go run ./cmd/admin-metrics rebuild
 
 test:
 	go test -race ./...

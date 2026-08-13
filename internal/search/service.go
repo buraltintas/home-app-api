@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -16,19 +17,24 @@ import (
 )
 
 type Service struct {
-	db               *pgxpool.Pool
-	stores           *storepkg.Service
-	ai               IntentParser
-	places           PlacesProvider
-	model            string
-	locationDecimals int
-	now              func() time.Time
+	db                *pgxpool.Pool
+	stores            *storepkg.Service
+	ai                IntentParser
+	places            PlacesProvider
+	model             string
+	locationDecimals  int
+	report            *reporting.Service
+	attributionWindow time.Duration
+	now               func() time.Time
 }
 
 func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (uuid.UUID, error) {
 	placeID = strings.TrimSpace(placeID)
 	if placeID == "" || len(placeID) > 300 {
 		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if s.places == nil {
+		return uuid.Nil, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
 	}
 	p, err := s.places.PlaceDetails(ctx, placeID)
 	if err != nil {
@@ -64,6 +70,9 @@ func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (u
 	}
 	attr, _ := json.Marshal(map[string]any{"provider": "Google", "attributions": p.Attributions})
 	if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) VALUES($1,'google',$2,$3,now())`, id, placeID, attr); err != nil {
+		return uuid.Nil, err
+	}
+	if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreImportedGoogle, IdempotencyKey: "google-store:" + placeID, StoreID: &id}); err != nil {
 		return uuid.Nil, err
 	}
 	return id, tx.Commit(ctx)
@@ -107,8 +116,8 @@ func cityFromAddress(address string) string {
 	return "Bilinmiyor"
 }
 
-func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int) *Service {
-	return &Service{db, stores, ai, places, model, decimals, time.Now}
+func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int, report *reporting.Service, attribution time.Duration) *Service {
+	return &Service{db, stores, ai, places, model, decimals, report, attribution, time.Now}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
@@ -158,10 +167,15 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		results = append(results, r)
 		localIDs[x.ID] = true
 	}
-	external, e := s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters)
-	if e != nil {
-		fallback = joinFallback(fallback, "places_unavailable")
-		external = nil
+	var external []Place
+	googleUsed := false
+	if s.places != nil {
+		googleUsed = true
+		external, e = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters)
+		if e != nil {
+			fallback = joinFallback(fallback, "places_unavailable")
+			external = nil
+		}
 	}
 	mapped, e := s.lookupExternal(ctx, external)
 	if e != nil {
@@ -172,18 +186,18 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			if localIDs[m.StoreID] {
 				for i := range results {
 					if results[i].ID != nil && *results[i].ID == m.StoreID {
-						results[i].Google = &External{"google", p.PlaceID, p.Rating, p.RatingCount}
-						results[i].Source = "platform+google"
+						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}
+						results[i].Source = "google+platform"
 						results[i].externalPlaceID = p.PlaceID
 					}
 				}
 				continue
 			}
 			id := m.StoreID
-			results = append(results, Result{ID: &id, Source: "platform+google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Platform: &m, Google: &External{"google", p.PlaceID, p.Rating, p.RatingCount}, score: 80 + float64(m.ReviewCount), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: 80 + float64(m.ReviewCount), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
-			results = append(results, Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Google: &External{"google", p.PlaceID, p.Rating, p.RatingCount}, score: 50 + p.Rating, externalPlaceID: p.PlaceID})
+			results = append(results, Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: 50 + p.Rating, externalPlaceID: p.PlaceID})
 		}
 	}
 	for i := range results {
@@ -205,27 +219,39 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	defer tx.Rollback(ctx)
 	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
-	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback))
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed')`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed)
 	if e != nil {
 		return Response{}, e
 	}
-	for i, r := range results {
+	for i := range results {
+		r := results[i]
+		impressionID := uuid.New()
+		results[i].ImpressionID = impressionID
 		var rating *float64
-		var reviews, favorites *int
+		var reviews, favorites, posts *int
 		if r.Platform != nil {
 			rating = &r.Platform.AverageRating
 			reviews = &r.Platform.ReviewCount
 			favorites = &r.Platform.FavoriteCount
+			posts = &r.Platform.PostCount
 		}
 		var provider, place any
 		if r.Google != nil {
 			provider = "google"
 			place = r.Google.PlaceID
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO search_results(search_id,rank,store_id,source,external_provider,external_place_id,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, searchID, i+1, r.ID, r.Source, provider, place, rating, reviews, favorites)
+		var distance *int
+		if r.DistanceMeters != nil {
+			v := int(math.Round(*r.DistanceMeters))
+			distance = &v
+		}
+		_, e = tx.Exec(ctx, `INSERT INTO search_results(id,search_id,rank,store_id,source,external_provider,external_place_id,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,distance_meters,ranking_score,ranking_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, impressionID, searchID, i+1, r.ID, r.Source, provider, place, rating, reviews, favorites, posts, distance, r.score, "source="+r.Source)
 		if e != nil {
 			return Response{}, e
 		}
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + searchID.String(), UserID: user, VisitorSessionID: visitor, SearchID: &searchID, Metadata: map[string]any{"ai_used": aiUsed, "google_places_used": googleUsed, "zero_results": len(results) == 0}}); e != nil {
+		return Response{}, e
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return Response{}, e
@@ -241,7 +267,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
+	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
 	if e != nil {
 		return nil, e
 	}
@@ -249,7 +275,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	for rows.Next() {
 		var id string
 		var p Platform
-		if e = rows.Scan(&id, &p.StoreID, &p.AverageRating, &p.ReviewCount, &p.FavoriteCount); e != nil {
+		if e = rows.Scan(&id, &p.StoreID, &p.AverageRating, &p.ReviewCount, &p.FavoriteCount, &p.PostCount); e != nil {
 			return nil, e
 		}
 		out[id] = p
@@ -257,16 +283,30 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	return out, rows.Err()
 }
 func (s *Service) Interaction(ctx context.Context, searchID uuid.UUID, user, visitor *uuid.UUID, resultID *uuid.UUID, event, key string) error {
-	allowed := map[string]bool{"impression": true, "click": true, "store_open": true, "favorite": true, "review": true, "share": true}
+	allowed := map[string]bool{"result_impression": true, "result_click": true, "store_open": true, "favorite": true, "unfavorite": true, "review_started": true, "review_created": true, "share": true}
 	if !allowed[event] {
 		return httpapi.ErrInvalidInput
 	}
-	tag, e := s.db.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,user_id,visitor_session_id,event_type,idempotency_key) SELECT s.id,$4,$2,$3,$5,$6 FROM searches s WHERE s.id=$1 AND (($2::uuid IS NOT NULL AND s.user_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND s.visitor_session_id=$3)) ON CONFLICT DO NOTHING`, searchID, user, visitor, resultID, event, key)
+	tag, e := s.db.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,user_id,visitor_session_id,store_id,event_type,idempotency_key) SELECT s.id,r.id,$2,$3,r.store_id,$5,nullif($6,'') FROM searches s LEFT JOIN search_results r ON r.id=$4 AND r.search_id=s.id WHERE s.id=$1 AND (($2::uuid IS NOT NULL AND s.user_id=$2) OR ($2::uuid IS NULL AND $3::uuid IS NOT NULL AND s.visitor_session_id=$3)) AND ($4::uuid IS NULL OR r.id IS NOT NULL) ON CONFLICT DO NOTHING`, searchID, user, visitor, resultID, event, key)
 	if e != nil {
 		return e
 	}
 	if tag.RowsAffected() == 0 && key == "" {
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
+	}
+	return nil
+}
+
+func (s *Service) Attribute(ctx context.Context, searchID, resultID, user, store uuid.UUID, event, key string) error {
+	if event != "favorite" && event != "unfavorite" && event != "review_created" && event != "review_started" {
+		return httpapi.ErrInvalidInput
+	}
+	tag, e := s.db.Exec(ctx, `INSERT INTO search_interactions(search_id,search_result_id,user_id,store_id,event_type,idempotency_key) SELECT s.id,r.id,$3,$4,$5,$6 FROM searches s JOIN search_results r ON r.id=$2 AND r.search_id=s.id WHERE s.id=$1 AND s.user_id=$3 AND r.store_id=$4 AND s.created_at>=now()-$7::interval ON CONFLICT DO NOTHING`, searchID, resultID, user, store, event, key, s.attributionWindow.String())
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(422, "SEARCH_ATTRIBUTION_INVALID", "Search attribution is invalid or expired")
 	}
 	return nil
 }

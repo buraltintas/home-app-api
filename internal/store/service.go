@@ -8,15 +8,19 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Service struct{ db *pgxpool.Pool }
+type Service struct {
+	db     *pgxpool.Pool
+	report *reporting.Service
+}
 
-func NewService(db *pgxpool.Pool) *Service { return &Service{db} }
+func NewService(db *pgxpool.Pool, report *reporting.Service) *Service { return &Service{db, report} }
 
 type Stats struct {
 	AverageRating float64 `json:"average_rating"`
@@ -85,10 +89,10 @@ func (s *Service) Search(ctx context.Context, q string, lat, lon *float64, radiu
 	return out, rows.Err()
 }
 
-func (s *Service) Favorite(ctx context.Context, user, store uuid.UUID, add bool) error {
+func (s *Service) Favorite(ctx context.Context, user, store uuid.UUID, add bool) (bool, error) {
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
-		return e
+		return false, e
 	}
 	defer tx.Rollback(ctx)
 	var tag pgconn.CommandTag
@@ -98,18 +102,21 @@ func (s *Service) Favorite(ctx context.Context, user, store uuid.UUID, add bool)
 		tag, e = tx.Exec(ctx, `DELETE FROM favorites WHERE user_id=$1 AND store_id=$2`, user, store)
 	}
 	if e != nil {
-		return e
+		return false, e
 	}
 	if tag.RowsAffected() == 0 && add {
 		var exists bool
 		e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stores WHERE id=$1 AND deleted_at IS NULL)`, store).Scan(&exists)
 		if e != nil {
-			return e
+			return false, e
 		}
 		if !exists {
-			return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+			return false, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 		}
-		return tx.Commit(ctx)
+		return false, tx.Commit(ctx)
+	}
+	if tag.RowsAffected() == 0 {
+		return false, tx.Commit(ctx)
 	}
 	delta := -1
 	if add {
@@ -117,9 +124,16 @@ func (s *Service) Favorite(ctx context.Context, user, store uuid.UUID, add bool)
 	}
 	_, e = tx.Exec(ctx, `UPDATE store_stats SET favorite_count=greatest(0,favorite_count+$2),updated_at=now() WHERE store_id=$1`, store, delta)
 	if e != nil {
-		return e
+		return false, e
 	}
-	return tx.Commit(ctx)
+	event := reporting.FavoriteRemoved
+	if add {
+		event = reporting.FavoriteCreated
+	}
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: event, IdempotencyKey: "favorite:" + uuid.NewString(), UserID: &user, StoreID: &store}); e != nil {
+		return false, e
+	}
+	return true, tx.Commit(ctx)
 }
 
 func ValidCoordinates(lat, lon float64) bool {

@@ -19,6 +19,7 @@ internal/
   middleware/           request ID, logging, recovery, BFF, auth, limits
   media/                object-storage boundary and upload metadata
   notification/         push boundary and outbox foundation
+  reporting/            idempotent events, snapshots, daily aggregation, rebuilds
   search/               intent, providers, merge/rank/persistence
   security/             hashing and token primitives
   social/               posts, feed, likes, comments, follows
@@ -125,4 +126,3 @@ Infrastructure-only `GET /health` and `GET /ready` do not require BFF or user au
 | Spam/social abuse | auth, body limits, write limits, ownership checks, soft deletion; moderation is a later layer |
 | Search/OpenAI abuse | BFF gate, IP/user/session quotas, timeout, bounded inputs/outputs, deterministic fallback and cost metrics |
 | Sensitive data exposure | public/private profile split, derived visit data, rounded search locations, deletion and retention hooks, redacted logs |
-

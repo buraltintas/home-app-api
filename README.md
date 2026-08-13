@@ -18,11 +18,13 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - proximity-verified 1–5 star reviews, media metadata links, feed cursor pagination, likes, comments and follows
 - deterministic Turkish search, optional official OpenAI Go SDK/Responses API structured enrichment, Google Places (New), explicit source-separated ratings, deduplication, ranking and fallback
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
+- rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
 - request IDs, JSON logs, recovery, size/time limits, security headers and bounded in-process rate limiting
 - realistic Turkish seed data and security/search unit tests
 
 The detailed schema, route matrix, identity concurrency strategy, threat model and search flow are in [docs/architecture.md](docs/architecture.md).
+Metric semantics and reporting operations are in [docs/reporting.md](docs/reporting.md).
 
 ## Requirements
 
@@ -54,6 +56,7 @@ Useful checks:
 make test
 make lint
 make build
+make rebuild-admin-metrics
 ```
 
 All example secrets are intentionally development-only. Replace them before using any shared environment.
@@ -95,6 +98,7 @@ See [.env.example](.env.example). Important groups are:
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, `EMAIL_API_KEY`, optional `EMAIL_API_URL`
 - domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `SEARCH_LOCATION_DECIMALS`
+- reporting: `REPORTING_TIMEZONE`, `SEARCH_ATTRIBUTION_WINDOW_HOURS`
 
 The API never needs OpenAI or Places credentials to boot. Search falls back to deterministic parsing and internal PostgreSQL results when either provider is unavailable.
 

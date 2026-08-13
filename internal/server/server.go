@@ -431,6 +431,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e)
 		return
 	}
+	if in.OriginSearchID != nil && in.OriginSearchResultID != nil {
+		_ = s.search.Attribute(r.Context(), *in.OriginSearchID, *in.OriginSearchResultID, p.UserID, in.StoreID, "review_created", "review:"+id.String())
+	}
 	JSON(w, 201, map[string]any{"id": id})
 }
 func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
@@ -449,10 +452,32 @@ func (s *Server) unfollow(w http.ResponseWriter, r *http.Request) {
 	s.idAction(w, r, func(p, id uuid.UUID) error { return s.social.Follow(r.Context(), p, id, false) })
 }
 func (s *Server) favorite(w http.ResponseWriter, r *http.Request) {
-	s.idAction(w, r, func(p, id uuid.UUID) error { return s.stores.Favorite(r.Context(), p, id, true) })
+	s.favoriteAction(w, r, true)
 }
 func (s *Server) unfavorite(w http.ResponseWriter, r *http.Request) {
-	s.idAction(w, r, func(p, id uuid.UUID) error { return s.stores.Favorite(r.Context(), p, id, false) })
+	s.favoriteAction(w, r, false)
+}
+func (s *Server) favoriteAction(w http.ResponseWriter, r *http.Request, add bool) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	storeID, e := parseID(r)
+	changed := false
+	if e == nil {
+		changed, e = s.stores.Favorite(r.Context(), p.UserID, storeID, add)
+	}
+	if e != nil {
+		WriteError(w, e)
+		return
+	}
+	searchID, se := uuid.Parse(r.Header.Get("X-Origin-Search-ID"))
+	resultID, re := uuid.Parse(r.Header.Get("X-Origin-Search-Result-ID"))
+	if changed && se == nil && re == nil {
+		event := "unfavorite"
+		if add {
+			event = "favorite"
+		}
+		_ = s.search.Attribute(r.Context(), searchID, resultID, p.UserID, storeID, event, event+":"+p.UserID.String()+":"+storeID.String())
+	}
+	w.WriteHeader(204)
 }
 func (s *Server) deleteComment(w http.ResponseWriter, r *http.Request) {
 	s.idAction(w, r, func(p, id uuid.UUID) error { return s.social.DeleteComment(r.Context(), p, id) })

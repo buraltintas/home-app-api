@@ -24,6 +24,8 @@ type Config struct {
 	ObjectStorageProvider, Bucket      string
 	StoreReviewRadiusMeters            float64
 	SearchLocationDecimals             int
+	ReportingTimezone                  string
+	SearchAttributionWindow            time.Duration
 }
 
 func Load() (Config, error) {
@@ -36,6 +38,7 @@ func Load() (Config, error) {
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", "no-reply@example.test"),
 		EmailAPIURL: os.Getenv("EMAIL_API_URL"), EmailAPIKey: os.Getenv("EMAIL_API_KEY"),
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: env("OBJECT_STORAGE_BUCKET", "home-app-dev"),
+		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
 	}
 	var err error
 	if c.AccessTokenTTL, err = duration("ACCESS_TOKEN_TTL", 15*time.Minute); err != nil {
@@ -58,6 +61,17 @@ func Load() (Config, error) {
 	}
 	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 500); err != nil {
 		return c, err
+	}
+	attributionHours, err := integer("SEARCH_ATTRIBUTION_WINDOW_HOURS", 72)
+	if err != nil {
+		return c, err
+	}
+	if attributionHours < 1 || attributionHours > 24*30 {
+		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
+	}
+	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
+	if _, err = time.LoadLocation(c.ReportingTimezone); err != nil {
+		return c, fmt.Errorf("REPORTING_TIMEZONE: %w", err)
 	}
 	if len(c.BFFSecrets) == 0 {
 		if legacy := os.Getenv("BFF_SECRET"); legacy != "" {
