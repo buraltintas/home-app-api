@@ -30,3 +30,14 @@ func TestValidateUpdateNormalizesProfileData(t *testing.T) {
 		t.Fatalf("not normalized: %+v", in)
 	}
 }
+
+func TestValidateUpdateCountsUnicodeCharactersNotBytes(t *testing.T) {
+	accepted := Update{Bio: ptr(strings.Repeat("ä", 500))}
+	if err := validateUpdate(&accepted); err != nil {
+		t.Fatalf("500 Unicode characters rejected: %v", err)
+	}
+	rejected := Update{Bio: ptr(strings.Repeat("ä", 501))}
+	if err := validateUpdate(&rejected); err == nil {
+		t.Fatal("501 Unicode characters accepted")
+	}
+}

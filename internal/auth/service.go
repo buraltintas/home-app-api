@@ -126,6 +126,19 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 }
 
 func (s *Service) VerifyCode(ctx context.Context, email, code string, client Client) (TokenPair, error) {
+	for attempt := 0; attempt < 3; attempt++ {
+		pair, err := s.verifyCodeOnce(ctx, email, code, client)
+		if err == nil {
+			return pair, nil
+		}
+		if !identityRace(err) || attempt == 2 {
+			return TokenPair{}, err
+		}
+	}
+	return TokenPair{}, httpapi.E(500, "INTERNAL_ERROR", "Unexpected authentication failure")
+}
+
+func (s *Service) verifyCodeOnce(ctx context.Context, email, code string, client Client) (TokenPair, error) {
 	norm, e := NormalizeEmail(email)
 	if e != nil {
 		return TokenPair{}, e

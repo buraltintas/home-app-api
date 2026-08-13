@@ -70,6 +70,14 @@ Optional auth accepts no token or a valid access token; an invalid supplied toke
 
 A mobile-embedded BFF secret can be extracted and is only a coarse client gate. The middleware is deliberately replaceable by a client-verifier interface so App Attest, Play Integrity, or short-lived gateway credentials can replace it.
 
+The API emits no permissive CORS headers, so browsers deny cross-origin calls by
+default; a deployment gateway may add an explicit origin allowlist when the web
+BFF origin is known. Client identity and rate limiting deliberately use the
+socket peer address and do not trust `X-Forwarded-For` from arbitrary callers.
+When deployed behind a trusted proxy, normalize the peer address at that edge or
+add a narrowly configured trusted-proxy layer rather than accepting forwarded
+headers globally.
+
 ## E. Search architecture
 
 ```text

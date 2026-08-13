@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -110,8 +111,8 @@ func cityFromAddress(address string) string {
 		v := strings.TrimSpace(parts[i])
 		low := strings.ToLower(v)
 		if v != "" && strings.ToUpper(v) != "TR" && low != "türkiye" && low != "turkey" {
-			if len(v) > 100 {
-				v = v[:100]
+			if utf8.RuneCountInString(v) > 100 {
+				v = string([]rune(v)[:100])
 			}
 			return v
 		}
@@ -132,7 +133,8 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
 	in.Query = strings.TrimSpace(in.Query)
-	if len(in.Query) < 2 || len(in.Query) > 500 || (in.Latitude == nil) != (in.Longitude == nil) {
+	queryLength := utf8.RuneCountInString(in.Query)
+	if queryLength < 2 || queryLength > 500 || (in.Latitude == nil) != (in.Longitude == nil) {
 		return Response{}, httpapi.ErrInvalidInput
 	}
 	if in.Latitude != nil && !storepkg.ValidCoordinates(*in.Latitude, *in.Longitude) {
@@ -339,6 +341,17 @@ func (s *Service) RecordInternalSearch(ctx context.Context, user, visitor *uuid.
 }
 
 func (s *Service) recordInternalSearch(ctx context.Context, user, visitor *uuid.UUID, in Request, items []storepkg.Item, elapsed time.Duration) (uuid.UUID, *uuid.UUID, error) {
+	in.Query = strings.TrimSpace(in.Query)
+	queryLength := utf8.RuneCountInString(in.Query)
+	if queryLength > 500 || (queryLength == 1) || (in.Latitude == nil) != (in.Longitude == nil) {
+		return uuid.Nil, visitor, httpapi.ErrInvalidInput
+	}
+	if in.Latitude != nil && !storepkg.ValidCoordinates(*in.Latitude, *in.Longitude) {
+		return uuid.Nil, visitor, httpapi.ErrInvalidInput
+	}
+	if in.RadiusMeters < 0 || in.RadiusMeters > 50000 {
+		return uuid.Nil, visitor, httpapi.ErrInvalidInput
+	}
 	if user == nil && visitor == nil {
 		id := uuid.New()
 		visitor = &id

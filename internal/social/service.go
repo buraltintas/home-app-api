@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -75,7 +76,8 @@ type Comment struct {
 
 func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost) (uuid.UUID, error) {
 	in.Text = strings.TrimSpace(in.Text)
-	if in.StoreID == uuid.Nil || len(in.Text) < 3 || len(in.Text) > 5000 || in.Rating < 1 || in.Rating > 5 || !storepkg.ValidCoordinates(in.Latitude, in.Longitude) || len(in.MediaIDs) > 10 {
+	textLength := utf8.RuneCountInString(in.Text)
+	if in.StoreID == uuid.Nil || textLength < 3 || textLength > 5000 || in.Rating < 1 || in.Rating > 5 || !storepkg.ValidCoordinates(in.Latitude, in.Longitude) || len(in.MediaIDs) > 10 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))
@@ -318,7 +320,7 @@ func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body str
 
 func (s *Service) AddCommentLocalized(ctx context.Context, user, post uuid.UUID, body string, language *string) (uuid.UUID, error) {
 	body = strings.TrimSpace(body)
-	if len(body) < 1 || len(body) > 2000 {
+	if utf8.RuneCountInString(body) < 1 || utf8.RuneCountInString(body) > 2000 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	if language != nil {

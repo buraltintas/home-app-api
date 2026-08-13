@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
+	"github.com/burakaltintas/home-app-api/internal/email"
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
@@ -203,6 +206,93 @@ func TestConcurrentIdentityCreationProducesOneUser(t *testing.T) {
 	}
 }
 
+func TestConcurrentEmailAndGoogleIdentityMergeProducesOneUser(t *testing.T) {
+	db := database(t)
+	emailAddress := "cross-provider-" + uuid.NewString() + "@example.test"
+	code := "246810"
+	google := googleStub{map[string]auth.GoogleIdentity{"google-concurrent": {Subject: "subject-" + uuid.NewString(), Email: emailAddress, EmailVerified: true}}}
+	authSvc, _, _, _, _ := services(t, db, google, nil)
+	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at,locale) VALUES($1,$2,5,now()+interval '10 minutes','en')`, emailAddress, security.Hash([]byte(testHashKey), code)); err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	pairs := make(chan auth.TokenPair, 2)
+	errs := make(chan error, 2)
+	go func() {
+		<-start
+		pair, err := authSvc.VerifyCode(context.Background(), emailAddress, code, auth.Client{Type: "email-concurrent"})
+		pairs <- pair
+		errs <- err
+	}()
+	go func() {
+		<-start
+		pair, err := authSvc.Google(context.Background(), "google-concurrent", auth.Client{Type: "google-concurrent"})
+		pairs <- pair
+		errs <- err
+	}()
+	close(start)
+	var got []auth.TokenPair
+	for i := 0; i < 2; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, <-pairs)
+	}
+	if got[0].UserID == uuid.Nil || got[0].UserID != got[1].UserID {
+		t.Fatalf("cross-provider user IDs differ: %s %s", got[0].UserID, got[1].UserID)
+	}
+	var users, identities int
+	if err := db.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM users WHERE primary_email=$1),(SELECT count(*) FROM auth_identities WHERE normalized_email=$1 AND email_verified)`, emailAddress).Scan(&users, &identities); err != nil || users != 1 || identities != 2 {
+		t.Fatalf("users=%d identities=%d err=%v", users, identities, err)
+	}
+}
+
+func TestOTPExpiryAttemptsLimitsAndHashedStorage(t *testing.T) {
+	db := database(t)
+	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
+	authSvc := auth.NewService(db, auth.Config{OTPTTL: 10 * time.Minute, OTPMaxAttempts: 2, OTPEmailLimit: 2, OTPIPLimit: 10, OTPVisitorLimit: 10, VisitorTTL: 24 * time.Hour, RefreshTTL: 24 * time.Hour, HashKey: []byte(testHashKey)}, tokens, googleStub{}, report)
+
+	expiredEmail := "expired-" + uuid.NewString() + "@example.test"
+	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at,locale) VALUES($1,$2,2,now()-interval '1 second','tr')`, expiredEmail, security.Hash([]byte(testHashKey), "123456")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := authSvc.VerifyCode(t.Context(), expiredEmail, "123456", auth.Client{}); appCode(err) != "INVALID_CODE" {
+		t.Fatalf("expired OTP: %v", err)
+	}
+
+	attemptEmail := "attempt-" + uuid.NewString() + "@example.test"
+	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at,locale) VALUES($1,$2,2,now()+interval '10 minutes','tr')`, attemptEmail, security.Hash([]byte(testHashKey), "123456")); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if _, err := authSvc.VerifyCode(t.Context(), attemptEmail, "000000", auth.Client{}); appCode(err) != "INVALID_CODE" {
+			t.Fatalf("wrong OTP: %v", err)
+		}
+	}
+	if _, err := authSvc.VerifyCode(t.Context(), attemptEmail, "123456", auth.Client{}); appCode(err) != "INVALID_CODE" {
+		t.Fatalf("attempt-limited OTP: %v", err)
+	}
+
+	limitedEmail := "limited-" + uuid.NewString() + "@example.test"
+	for i := 0; i < 2; i++ {
+		if err := authSvc.RequestCode(i18n.WithLocale(t.Context(), i18n.LocaleDE), limitedEmail, nil, []byte("same-ip")); err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+	}
+	if err := authSvc.RequestCode(t.Context(), limitedEmail, nil, []byte("same-ip")); appCode(err) != "RATE_LIMITED" {
+		t.Fatalf("OTP request limit: %v", err)
+	}
+	var hash []byte
+	var payload string
+	if err := db.QueryRow(t.Context(), `SELECT c.code_hash,o.payload::text FROM email_verification_codes c JOIN email_outbox o ON o.idempotency_key='otp:'||c.id::text WHERE c.normalized_email=$1 ORDER BY c.created_at DESC LIMIT 1`, limitedEmail).Scan(&hash, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(hash) != 32 || strings.Contains(payload, `"code"`) {
+		t.Fatalf("OTP storage hash_len=%d payload=%s", len(hash), payload)
+	}
+}
+
 func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	db := database(t)
 	author := user(t, db, "author-"+uuid.NewString()+"@example.test")
@@ -265,6 +355,13 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	}
 	if err = searchSvc.Attribute(t.Context(), searchID, resultID, viewer, items[0].ID, "favorite", "favorite-1"); err != nil {
 		t.Fatal(err)
+	}
+	if err = searchSvc.Attribute(t.Context(), searchID, resultID, viewer, items[0].ID, "review_created", "review-1"); err != nil {
+		t.Fatalf("review attribution: %v", err)
+	}
+	var attributedReviews int
+	if err = db.QueryRow(t.Context(), `SELECT count(*) FROM search_interactions WHERE search_id=$1 AND search_result_id=$2 AND event_type='review_created'`, searchID, resultID).Scan(&attributedReviews); err != nil || attributedReviews != 1 {
+		t.Fatalf("attributed reviews=%d err=%v", attributedReviews, err)
 	}
 	if _, err = db.Exec(t.Context(), `UPDATE searches SET created_at=now()-interval '73 hours' WHERE id=$1`, searchID); err != nil {
 		t.Fatal(err)
@@ -368,6 +465,51 @@ func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
 	}
 }
 
+func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
+	db := database(t)
+	searcher := user(t, db, "search-enrichment-"+uuid.NewString()+"@example.test")
+	placeID := "enrichment-place-" + uuid.NewString()
+	place := search.Place{PlaceID: placeID, Name: "External Locale Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03, Rating: 4.8, RatingCount: 321}
+	_, _, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
+
+	first, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleEN), &searcher, nil, search.Request{Query: "External Locale Store"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var googleOnly *search.Result
+	for i := range first.Results {
+		if first.Results[i].Google != nil && first.Results[i].Google.PlaceID == placeID {
+			googleOnly = &first.Results[i]
+			break
+		}
+	}
+	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil || googleOnly.Google.Rating != 4.8 || googleOnly.Google.RatingCount != 321 {
+		t.Fatalf("google-only result=%+v", googleOnly)
+	}
+
+	storeID, err := searchSvc.MaterializeGoogleStore(i18n.WithLocale(t.Context(), i18n.LocaleDE), placeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `UPDATE store_stats SET average_rating=3.25,rating_count=4,review_count=4,favorite_count=2,post_count=4 WHERE store_id=$1`, storeID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleRU), &searcher, nil, search.Request{Query: "External Locale Store"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var enriched *search.Result
+	for i := range second.Results {
+		if second.Results[i].Google != nil && second.Results[i].Google.PlaceID == placeID {
+			enriched = &second.Results[i]
+			break
+		}
+	}
+	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 4.8 || enriched.Google.RatingCount != 321 {
+		t.Fatalf("enriched result=%+v", enriched)
+	}
+}
+
 func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	db := database(t)
 	owner := user(t, db, "media-owner-"+uuid.NewString()+"@example.test")
@@ -411,6 +553,146 @@ func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	}
 	if len(post.Media) != 1 || post.Media[0] != created.Upload.StorageKey {
 		t.Fatalf("post media=%v", post.Media)
+	}
+}
+
+func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
+	db := database(t)
+	author := user(t, db, "social-author-"+uuid.NewString()+"@example.test")
+	other := user(t, db, "social-other-"+uuid.NewString()+"@example.test")
+	storeID := store(t, db, 41, 29)
+	_, stores, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	longGermanPost := strings.Repeat("ä", 5000)
+	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Rating: 5, Latitude: 41, Longitude: 29})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i := 0; i < 2; i++ {
+		if _, err = stores.Favorite(t.Context(), other, storeID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err = socialSvc.Like(t.Context(), other, postID, true); err != nil {
+			t.Fatal(err)
+		}
+		if err = socialSvc.Follow(t.Context(), other, author, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = stores.Favorite(t.Context(), other, storeID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = stores.Favorite(t.Context(), other, storeID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = socialSvc.Like(t.Context(), other, postID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = socialSvc.Like(t.Context(), other, postID, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = socialSvc.Follow(t.Context(), other, author, false); err != nil {
+		t.Fatal(err)
+	}
+	if err = socialSvc.Follow(t.Context(), other, author, false); err != nil {
+		t.Fatal(err)
+	}
+	post, err := socialSvc.GetPost(t.Context(), postID, &other)
+	if err != nil || post.ViewerLiked || post.ViewerFollows || post.ViewerFavorited || post.LikeCount != 0 {
+		t.Fatalf("post after removals=%+v err=%v", post, err)
+	}
+
+	longRussianComment := strings.Repeat("Ж", 2000)
+	commentID, err := socialSvc.AddComment(t.Context(), author, postID, longRussianComment)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = socialSvc.DeleteComment(t.Context(), other, commentID); appCode(err) != "COMMENT_NOT_FOUND" {
+		t.Fatalf("non-owner comment delete: %v", err)
+	}
+	if err = socialSvc.DeleteComment(t.Context(), author, commentID); err != nil {
+		t.Fatal(err)
+	}
+	comments, err := socialSvc.Comments(t.Context(), postID, 20)
+	if err != nil || len(comments) != 0 {
+		t.Fatalf("deleted comments=%+v err=%v", comments, err)
+	}
+
+	if err = socialSvc.DeletePost(t.Context(), other, postID); appCode(err) != "POST_NOT_FOUND" {
+		t.Fatalf("non-owner post delete: %v", err)
+	}
+	if err = socialSvc.DeletePost(t.Context(), author, postID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = socialSvc.GetPost(t.Context(), postID, nil); appCode(err) != "POST_NOT_FOUND" {
+		t.Fatalf("soft-deleted post retrieval: %v", err)
+	}
+	feed, _, err := socialSvc.Feed(t.Context(), nil, "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range feed {
+		if item.ID == postID {
+			t.Fatal("soft-deleted post remained in feed")
+		}
+	}
+}
+
+func TestSearchHistoryOwnershipAndDeletion(t *testing.T) {
+	db := database(t)
+	owner := user(t, db, "history-owner-"+uuid.NewString()+"@example.test")
+	other := user(t, db, "history-other-"+uuid.NewString()+"@example.test")
+	_, stores, _, searchSvc, report := services(t, db, googleStub{}, nil)
+	users := userpkg.NewService(db, report)
+	items, err := stores.Search(t.Context(), "", nil, "", nil, nil, 10000, 20, &owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchID, _, err := searchSvc.RecordInternalSearch(t.Context(), &owner, nil, search.Request{Query: "owned history"}, items, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = users.DeleteSearches(t.Context(), other, &searchID); appCode(err) != "SEARCH_NOT_FOUND" {
+		t.Fatalf("non-owner search deletion: %v", err)
+	}
+	if err = users.DeleteSearches(t.Context(), owner, &searchID); err != nil {
+		t.Fatal(err)
+	}
+	history, err := users.Searches(t.Context(), owner, 20)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+}
+
+func TestReportingReadModelsExecuteAgainstAggregates(t *testing.T) {
+	db := database(t)
+	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	if err := report.Rebuild(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	from, to := time.Now().AddDate(0, 0, -30), time.Now()
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{"daily", func() error { _, err := report.GetDailyMetrics(t.Context(), from, to); return err }},
+		{"overview", func() error { _, err := report.GetSearchOverview(t.Context(), from, to); return err }},
+		{"queries", func() error { _, err := report.GetTopSearchQueries(t.Context(), from, to, 20, false); return err }},
+		{"zero queries", func() error { _, err := report.GetZeroResultQueries(t.Context(), from, to, 20); return err }},
+		{"categories", func() error { _, err := report.GetTopSearchCategories(t.Context(), from, to, 20); return err }},
+		{"locations", func() error { _, err := report.GetTopSearchLocations(t.Context(), from, to, 20); return err }},
+		{"funnel", func() error { _, err := report.GetSearchConversionFunnel(t.Context(), from, to); return err }},
+		{"high demand", func() error { _, err := report.GetHighDemandLowReviewStores(t.Context(), from, to, 20); return err }},
+		{"impressed", func() error { _, err := report.GetMostImpressedStores(t.Context(), from, to, 20); return err }},
+		{"clicked", func() error { _, err := report.GetMostClickedStores(t.Context(), from, to, 20); return err }},
+		{"user growth", func() error { _, err := report.GetUserGrowth(t.Context(), from, to); return err }},
+		{"review growth", func() error { _, err := report.GetReviewGrowth(t.Context(), from, to); return err }},
+		{"search metrics", func() error { _, err := report.GetSearchMetrics(t.Context(), from, to); return err }},
+	}
+	for _, check := range checks {
+		if err := check.call(); err != nil {
+			t.Fatalf("%s: %v", check.name, err)
+		}
 	}
 }
 
@@ -474,6 +756,56 @@ func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
 	}
 	if err = repo.Complete(t.Context(), job.ID, "provider-123"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConcurrentEmailWorkersDeliverOutboxOnce(t *testing.T) {
+	db := database(t)
+	authSvc, _, _, _, _ := services(t, db, googleStub{}, nil)
+	recipient := "worker-once-" + uuid.NewString() + "@example.test"
+	if err := authSvc.RequestCode(i18n.WithLocale(t.Context(), i18n.LocaleRU), recipient, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var outboxID uuid.UUID
+	if err := db.QueryRow(t.Context(), `SELECT id FROM email_outbox WHERE recipient=$1 ORDER BY created_at DESC LIMIT 1`, recipient).Scan(&outboxID); err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(t.Context())
+	workers := []*email.Worker{
+		email.NewWorker(db, email.FileSender{Dir: dir}, "no-reply@example.test", []byte(testHashKey), logger),
+		email.NewWorker(db, email.FileSender{Dir: dir}, "no-reply@example.test", []byte(testHashKey), logger),
+	}
+	done := make(chan error, len(workers))
+	for _, worker := range workers {
+		go func(worker *email.Worker) { done <- worker.Run(ctx) }(worker)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var status string
+		if err := db.QueryRow(t.Context(), `SELECT status FROM email_outbox WHERE id=$1`, outboxID).Scan(&status); err != nil {
+			cancel()
+			t.Fatal(err)
+		}
+		if status == "sent" {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("email outbox was not delivered")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	for range workers {
+		if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatal(err)
+		}
+	}
+	var deliveries int
+	if err := db.QueryRow(t.Context(), `SELECT count(*) FROM email_deliveries WHERE outbox_id=$1 AND success`, outboxID).Scan(&deliveries); err != nil || deliveries != 1 {
+		t.Fatalf("deliveries=%d err=%v", deliveries, err)
 	}
 }
 

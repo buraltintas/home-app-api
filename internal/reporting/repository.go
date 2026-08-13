@@ -109,7 +109,7 @@ func (s *Service) GetHighDemandLowReviewStores(ctx context.Context, from, to tim
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	rows, e := s.db.Query(ctx, `SELECT result_key,max(store_id),max(external_provider),max(external_place_id),sum(impression_count),sum(click_count),sum(open_count),sum(favorite_count),sum(review_count),max(platform_review_count_latest) FROM store_search_daily_metrics WHERE metric_date BETWEEN $1 AND $2 GROUP BY result_key HAVING coalesce(max(platform_review_count_latest),0)<3 ORDER BY sum(impression_count) DESC LIMIT $3`, from, to, limit)
+	rows, e := s.db.Query(ctx, `SELECT result_key,(array_agg(store_id) FILTER(WHERE store_id IS NOT NULL))[1],max(external_provider),max(external_place_id),sum(impression_count),sum(click_count),sum(open_count),sum(favorite_count),sum(review_count),max(platform_review_count_latest) FROM store_search_daily_metrics WHERE metric_date BETWEEN $1 AND $2 GROUP BY result_key HAVING coalesce(max(platform_review_count_latest),0)<3 ORDER BY sum(impression_count) DESC LIMIT $3`, from, to, limit)
 	if e != nil {
 		return nil, e
 	}

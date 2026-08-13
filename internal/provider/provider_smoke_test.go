@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/email"
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/search"
 )
 
@@ -19,14 +20,18 @@ func TestOpenAIIntentSmoke(t *testing.T) {
 		t.Skip("OPENAI_API_KEY is not available")
 	}
 	parser := search.NewOpenAIParser(key, env("OPENAI_MODEL", "gpt-5-mini"), 15*time.Second)
-	queries := []string{
-		"Kadıköy'de modern avize bakabileceğim mağazalar",
-		"Antalya'da uygun fiyatlı perde mağazası arıyorum",
-		"Yeni ev kuruyorum, Ankara'da modern ama çok pahalı olmayan mobilya mağazaları",
+	queries := []struct {
+		query  string
+		locale string
+	}{
+		{"Antalya'da uygun fiyatlı perde mağazası arıyorum", "tr"},
+		{"Affordable curtain stores in Antalya", "en"},
+		{"Günstige Gardinengeschäfte in Antalya", "de"},
+		{"Недорогие магазины штор в Анталии", "ru"},
 	}
-	for _, query := range queries {
-		t.Run(query, func(t *testing.T) {
-			intent, err := parser.ParseSearchIntent(context.Background(), query, search.Context{Locale: "tr-TR"})
+	for _, test := range queries {
+		t.Run(test.locale, func(t *testing.T) {
+			intent, err := parser.ParseSearchIntent(context.Background(), test.query, search.Context{Locale: i18n.Locale(test.locale)})
 			if err != nil {
 				t.Fatal(err)
 			}

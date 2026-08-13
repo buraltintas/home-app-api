@@ -55,6 +55,15 @@ func TestIntentRejectsOversizedOrMalformedValues(t *testing.T) {
 		t.Fatal("control character accepted")
 	}
 }
+
+func TestIntentCountsUnicodeCharactersNotBytes(t *testing.T) {
+	if err := Validate(Intent{NormalizedQuery: strings.Repeat("Ж", 500)}); err != nil {
+		t.Fatalf("500 Unicode characters rejected: %v", err)
+	}
+	if err := Validate(Intent{NormalizedQuery: strings.Repeat("Ж", 501)}); err == nil {
+		t.Fatal("501 Unicode characters accepted")
+	}
+}
 func TestInternalQueryUsesParsedDemandTerms(t *testing.T) {
 	got := internalQuery(Intent{NormalizedQuery: "uzun doğal cümle", ProductTerms: []string{"avize", "lamba"}})
 	if got != "avize OR lamba" {

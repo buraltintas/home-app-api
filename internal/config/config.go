@@ -168,6 +168,9 @@ func Load() (Config, error) {
 			return c, errors.New("object storage credentials and bucket are required")
 		}
 	}
+	if c.ObjectStorageProvider != "development" && c.ObjectStorageProvider != "s3" && c.ObjectStorageProvider != "r2" {
+		return c, errors.New("OBJECT_STORAGE_PROVIDER must be development, s3 or r2")
+	}
 	if c.EmailProvider == "resend" && (c.EmailAPIKey == "" || strings.TrimSpace(c.EmailFrom) == "") {
 		return c, errors.New("RESEND_API_KEY (or EMAIL_API_KEY) and EMAIL_FROM are required for resend")
 	}

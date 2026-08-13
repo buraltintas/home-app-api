@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -108,7 +109,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 func validateUpdate(in *Update) error {
 	if in.Username != nil {
 		v := strings.TrimSpace(*in.Username)
-		if len(v) < 3 || len(v) > 30 {
+		if utf8.RuneCountInString(v) < 3 || utf8.RuneCountInString(v) > 30 {
 			return httpapi.ErrInvalidInput
 		}
 		in.Username = &v
@@ -119,7 +120,7 @@ func validateUpdate(in *Update) error {
 	}{{in.DisplayName, 100}, {in.Bio, 500}, {in.City, 100}, {in.RelationshipStatus, 40}, {in.Occupation, 100}, {in.AgeRange, 40}} {
 		if field.value != nil {
 			v := strings.TrimSpace(*field.value)
-			if len(v) > field.max || strings.ContainsRune(v, '\x00') {
+			if utf8.RuneCountInString(v) > field.max || strings.ContainsRune(v, '\x00') {
 				return httpapi.ErrInvalidInput
 			}
 			*field.value = v
@@ -162,7 +163,7 @@ func validateUpdate(in *Update) error {
 		}
 		for i := range *values {
 			(*values)[i] = strings.TrimSpace((*values)[i])
-			if (*values)[i] == "" || len((*values)[i]) > 50 || strings.ContainsRune((*values)[i], '\x00') {
+			if (*values)[i] == "" || utf8.RuneCountInString((*values)[i]) > 50 || strings.ContainsRune((*values)[i], '\x00') {
 				return httpapi.ErrInvalidInput
 			}
 		}

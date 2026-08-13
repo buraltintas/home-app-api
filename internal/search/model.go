@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
@@ -203,7 +204,7 @@ func Validate(i Intent) error {
 		return fmt.Errorf("unsupported query language")
 	}
 	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "storage": true, "home_accessories": true, "household": true}
-	if len(i.NormalizedQuery) > 500 || len(i.LocationText) > 120 {
+	if utf8.RuneCountInString(i.NormalizedQuery) > 500 || utf8.RuneCountInString(i.LocationText) > 120 {
 		return fmt.Errorf("intent text too long")
 	}
 	if len(i.Categories) > 8 || len(i.ProductTerms) > 12 || len(i.StyleTerms) > 8 || len(i.Attributes) > 8 || len(i.SemanticTerms) > 12 {
@@ -213,13 +214,13 @@ func Validate(i Intent) error {
 		if !allowedCat[c] {
 			return fmt.Errorf("unknown category")
 		}
-		if len(c) > 40 {
+		if utf8.RuneCountInString(c) > 40 {
 			return fmt.Errorf("category too long")
 		}
 	}
 	for _, values := range [][]string{i.ProductTerms, i.StyleTerms, i.Attributes, i.SemanticTerms} {
 		for _, value := range values {
-			if strings.TrimSpace(value) == "" || len(value) > 80 || strings.ContainsAny(value, "\x00\r\n") {
+			if strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > 80 || strings.ContainsAny(value, "\x00\r\n") {
 				return fmt.Errorf("invalid intent value")
 			}
 		}

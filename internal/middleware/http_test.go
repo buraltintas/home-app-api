@@ -60,6 +60,19 @@ func TestBFFAllowsAnonymousBrowse(t *testing.T) {
 		t.Fatalf("status=%d", w.Code)
 	}
 }
+
+func TestBFFAllowsEveryConfiguredRotationSecret(t *testing.T) {
+	h := BFF([]string{"current-secret", "previous-secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	for _, secret := range []string{"current-secret", "previous-secret"} {
+		r := httptest.NewRequest(http.MethodGet, "/v1/feed", nil)
+		r.Header.Set("X-BFF-Secret", secret)
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("configured secret %q status=%d", secret, w.Code)
+		}
+	}
+}
 func TestOptionalAndRequiredAuth(t *testing.T) {
 	m := security.NewTokenManager("an-access-secret-that-is-at-least-32-bytes", time.Minute, time.Hour)
 	raw, _, _ := m.Access(uuid.New(), uuid.New(), time.Now())

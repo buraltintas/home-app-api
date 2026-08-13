@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
@@ -180,7 +181,10 @@ func client(r *http.Request) auth.Client {
 	return auth.Client{Type: strings.TrimSpace(r.Header.Get("X-Client-Type")), Metadata: map[string]any{"version": strings.TrimSpace(r.Header.Get("X-Client-Version"))}}
 }
 func (s *Server) verifyCode(w http.ResponseWriter, r *http.Request) {
-	var in struct{ Email, Code string }
+	var in struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
 	if e := Decode(w, r, &in, 16<<10); e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -296,7 +300,7 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	lat, e := queryFloat(r, "latitude")
 	lon, lonErr := queryFloat(r, "longitude")
 	radius := queryInt(r, "radius_meters", 10000)
-	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) || radius < 100 || radius > 50000 || len(r.URL.Query().Get("q")) > 500 {
+	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) || radius < 100 || radius > 50000 || utf8.RuneCountInString(r.URL.Query().Get("q")) > 500 {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}

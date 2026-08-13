@@ -267,9 +267,17 @@ paths:
                 bio_language: {$ref: '#/components/schemas/Locale'}
                 username: {type: string, minLength: 3, maxLength: 30}
                 display_name: {type: string, maxLength: 100}
+                avatar_url: {type: string, format: uri, maxLength: 2048}
                 bio: {type: string, maxLength: 500, description: Original user content; never automatically translated.}
                 city: {type: string, maxLength: 100}
-              additionalProperties: true
+                relationship_status: {type: [string, 'null'], maxLength: 40}
+                has_children: {type: [boolean, 'null']}
+                children_age_ranges: {type: array, maxItems: 20, items: {type: string, maxLength: 50}}
+                housing_status: {type: [string, 'null'], enum: [owner, renter, living_with_family, other, null]}
+                occupation: {type: [string, 'null'], maxLength: 100}
+                age_range: {type: [string, 'null'], maxLength: 40}
+                home_style_interests: {type: array, maxItems: 20, items: {type: string, maxLength: 50}}
+              additionalProperties: false
       responses: {'200': {$ref: '#/components/responses/JSON'}, '409': {$ref: '#/components/responses/Error'}}
     delete:
       tags: [Profile]
@@ -329,7 +337,7 @@ components:
       content: {application/json: {schema: {type: object, required: [email], properties: {email: {type: string, format: email}}}}}
     EmailVerify:
       required: true
-      content: {application/json: {schema: {type: object, required: [Email, Code], properties: {Email: {type: string, format: email}, Code: {type: string, pattern: '^[0-9]{6}$'}}}}}
+      content: {application/json: {schema: {type: object, additionalProperties: false, required: [email, code], properties: {email: {type: string, format: email}, code: {type: string, pattern: '^[0-9]{6}$'}}}}}
     Search:
       required: true
       content:
