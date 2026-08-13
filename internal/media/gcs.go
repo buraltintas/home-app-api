@@ -63,6 +63,15 @@ func (s *GCSStorage) CreateUpload(_ context.Context, key, mime string, _ int64) 
 	return Upload{StorageKey: key, UploadURL: u, Headers: map[string]string{"Content-Type": mime}, ExpiresAt: expires}, nil
 }
 
+func (s *GCSStorage) ReadURL(_ context.Context, key string) (string, error) {
+	return s.signedURL(key, &storage.SignedURLOptions{
+		Scheme:         storage.SigningSchemeV4,
+		Method:         http.MethodGet,
+		Expires:        s.now().Add(s.ttl),
+		GoogleAccessID: s.signingServiceAccount,
+	})
+}
+
 func (s *GCSStorage) Stat(ctx context.Context, key string) (ObjectInfo, error) {
 	attrs, err := s.bucket.Object(key).Attrs(ctx)
 	if err != nil {

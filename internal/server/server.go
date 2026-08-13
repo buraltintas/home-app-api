@@ -66,6 +66,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		JSON(w, 200, map[string]string{"status": "ready"})
 	})
 	r.Handle("/metrics", observability.MetricsHandler(metricsToken))
+	r.Get("/media/{id}", s.publicMedia)
 	if uploads := s.media.UploadHandler(); uploads != nil {
 		r.Mount("/uploads", http.StripPrefix("/uploads", uploads))
 	}
@@ -121,6 +122,19 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Post("/searches/{id}/interactions", s.interaction)
 	})
 	return r
+}
+func (s *Server) publicMedia(w http.ResponseWriter, r *http.Request) {
+	id, e := parseID(r)
+	if e == nil {
+		var target string
+		target, e = s.media.PublicURL(r.Context(), id)
+		if e == nil {
+			w.Header().Set("Cache-Control", "private, max-age=300")
+			http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+			return
+		}
+	}
+	WriteError(w, e, r.Context())
 }
 func (s *Server) createMediaUpload(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())

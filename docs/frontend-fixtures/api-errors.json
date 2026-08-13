@@ -1,0 +1,18 @@
+{
+  "auth_required": {
+    "error": {"code": "AUTH_REQUIRED", "message": "Authentication is required"},
+    "request_id": "01K2J8A6V7ZQF8N4K3P2M1T0RS"
+  },
+  "rate_limited": {
+    "error": {"code": "RATE_LIMITED", "message": "Too many requests"},
+    "request_id": "01K2J8B2T1H9M5D7R4X6C3V0NP"
+  },
+  "visit_not_verified": {
+    "error": {"code": "STORE_VISIT_NOT_VERIFIED", "message": "You need to be near this store to review it."},
+    "request_id": "01K2J8C4M6N8P0R2T4V6X8Z0AB"
+  },
+  "invalid_refresh": {
+    "error": {"code": "INVALID_REFRESH_TOKEN", "message": "Refresh token is invalid or expired"},
+    "request_id": "01K2J8D5Q7S9U1W3Y5A7C9E1GH"
+  }
+}

@@ -34,6 +34,26 @@ func TestGCSUploadUsesADCBackedV4SigningContract(t *testing.T) {
 	}
 }
 
+func TestGCSReadURLUsesShortLivedGetSignature(t *testing.T) {
+	now := time.Date(2026, time.August, 13, 12, 0, 0, 0, time.UTC)
+	var options *storage.SignedURLOptions
+	s := &GCSStorage{
+		signingServiceAccount: "home-app@example-project.iam.gserviceaccount.com",
+		ttl:                   15 * time.Minute,
+		now:                   func() time.Time { return now },
+		signedURL: func(_ string, got *storage.SignedURLOptions) (string, error) {
+			options = got
+			return "https://storage.googleapis.com/bucket/image.webp?X-Goog-Signature=test", nil
+		},
+	}
+	if _, err := s.ReadURL(context.Background(), "users/u/image.webp"); err != nil {
+		t.Fatal(err)
+	}
+	if options.Method != http.MethodGet || options.ContentType != "" || !options.Expires.Equal(now.Add(15*time.Minute)) {
+		t.Fatalf("options=%+v", options)
+	}
+}
+
 func TestNewGCSStorageValidatesConfigurationBeforeADC(t *testing.T) {
 	for _, cfg := range []GCSConfig{
 		{UploadTTL: time.Minute},

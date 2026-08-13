@@ -152,7 +152,10 @@ with the declared content type, then call `POST /v1/media/{id}/complete`. The
 local provider sniffs file bytes, rejects MIME spoofing, stores files under
 `.data/uploads`, and serves them from `/uploads/*`. Finalization also verifies
 database ownership, size and MIME. GCS, S3 and R2 use the same service contract
-and V4/presigned PUT semantics.
+and V4/presigned PUT semantics. Published post responses expose media objects
+with stable API-relative `/media/{id}` URLs; that public route only resolves
+ready media attached to visible posts and redirects to a local or short-lived
+signed private-object URL.
 
 For production GCS, set `OBJECT_STORAGE_PROVIDER=gcs` and
 `OBJECT_STORAGE_BUCKET`; do not set an access key or secret key. Attach a

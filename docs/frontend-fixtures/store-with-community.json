@@ -1,0 +1,35 @@
+{
+  "store": {
+    "id": "4ea6429b-81b8-4a64-a8cd-1d5b045bf3b2",
+    "name": "Luma Aydınlatma Kadıköy",
+    "slug": "luma-aydinlatma-kadikoy",
+    "brand_name": "Luma Aydınlatma",
+    "address": "Caferağa Mah. Moda Cad. No: 42",
+    "city": "İstanbul",
+    "district": "Kadıköy",
+    "latitude": 40.98781,
+    "longitude": 29.02762,
+    "distance_meters": 312.4,
+    "categories": ["lighting", "decoration"],
+    "category_labels": ["Aydınlatma", "Dekorasyon"],
+    "localized_description": "Modern ve klasik ev aydınlatma ürünleri.",
+    "platform": {
+      "average_rating": 4.6,
+      "rating_count": 38,
+      "review_count": 38,
+      "favorite_count": 126,
+      "post_count": 38
+    },
+    "viewer_has_favorited": true,
+    "viewer_has_reviewed": false,
+    "external_sources": [
+      {
+        "provider": "google",
+        "external_id": "ChIJLumaKadikoyExample",
+        "attribution": {"name": "Google Maps"},
+        "refreshed_at": "2026-08-12T08:30:00Z"
+      }
+    ]
+  },
+  "recent_posts": []
+}

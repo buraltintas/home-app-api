@@ -2,10 +2,24 @@ package media
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestUploadJSONContractUsesSnakeCase(t *testing.T) {
+	b, err := json.Marshal(Upload{StorageKey: "users/u/x.jpg", UploadURL: "https://upload.example", Headers: map[string]string{"Content-Type": "image/jpeg"}, ExpiresAt: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`"storage_key"`, `"upload_url"`, `"headers"`, `"expires_at"`}
+	for _, field := range want {
+		if !strings.Contains(string(b), field) {
+			t.Fatalf("missing %s in %s", field, b)
+		}
+	}
+}
 
 func TestDevStorageLifecycle(t *testing.T) {
 	s := NewDevStorage(time.Minute)

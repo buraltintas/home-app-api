@@ -1,0 +1,60 @@
+{
+  "search_id": "ca9f4ce3-f264-4b52-85f5-5f9469aa1249",
+  "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
+  "intent": {
+    "query_language": "tr",
+    "normalized_query": "kadıköy'de modern avize mağazaları",
+    "location_text": "Kadikoy",
+    "categories": ["lighting"],
+    "product_terms": ["chandelier"],
+    "style_terms": ["modern"],
+    "price_intent": "",
+    "attributes": [],
+    "sort_preference": "relevance",
+    "semantic_terms": ["modern chandelier"]
+  },
+  "results": [
+    {
+      "id": "4ea6429b-81b8-4a64-a8cd-1d5b045bf3b2",
+      "search_result_impression_id": "a4c79fc5-94ac-436c-b180-963e19bc28ca",
+      "source": "google+platform",
+      "name": "Luma Aydınlatma Kadıköy",
+      "address": "Caferağa Mah. Moda Cad. No: 42",
+      "city": "İstanbul",
+      "district": "Kadıköy",
+      "latitude": 40.98781,
+      "longitude": 29.02762,
+      "distance_meters": 312.4,
+      "categories": ["lighting"],
+      "platform": {
+        "store_id": "4ea6429b-81b8-4a64-a8cd-1d5b045bf3b2",
+        "average_rating": 4.6,
+        "review_count": 38,
+        "favorite_count": 126,
+        "post_count": 38
+      },
+      "google": {
+        "provider": "google",
+        "place_id": "ChIJLumaKadikoyExample",
+        "rating": 4.3,
+        "rating_count": 214
+      }
+    },
+    {
+      "search_result_impression_id": "6b8a69af-9b85-436b-973a-d6dabd668a98",
+      "source": "google",
+      "name": "Moda Işık Tasarım",
+      "address": "Osmanağa Mah. Söğütlü Çeşme Cad. No: 18, Kadıköy",
+      "latitude": 40.99137,
+      "longitude": 29.02584,
+      "distance_meters": 528.1,
+      "categories": ["lighting"],
+      "google": {
+        "provider": "google",
+        "place_id": "ChIJModaIsikExample",
+        "rating": 4.7,
+        "rating_count": 89
+      }
+    }
+  ]
+}

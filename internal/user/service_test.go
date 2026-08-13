@@ -13,6 +13,7 @@ func TestValidateUpdateRejectsUnsafeOrOversizedProfileData(t *testing.T) {
 		{Bio: ptr(strings.Repeat("x", 501))},
 		{HousingStatus: ptr("spaceship")},
 		{HomeStyleInterests: ptr([]string{""})},
+		{Username: ptr("not-valid!")},
 	}
 	for i := range bad {
 		if validateUpdate(&bad[i]) == nil {

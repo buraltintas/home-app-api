@@ -1,0 +1,18 @@
+{
+  "search_id": "80f799f0-e25f-4c1e-a344-3862338182af",
+  "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
+  "intent": {
+    "query_language": "de",
+    "normalized_query": "rustikale teppiche in kadıköy",
+    "location_text": "Kadikoy",
+    "categories": ["carpet"],
+    "product_terms": ["carpet"],
+    "style_terms": ["rustic"],
+    "price_intent": "",
+    "attributes": [],
+    "sort_preference": "relevance",
+    "semantic_terms": []
+  },
+  "results": [],
+  "fallback_state": "places_unavailable"
+}

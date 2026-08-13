@@ -42,6 +42,16 @@ paths:
       description: Requires `X-Metrics-Token` when `METRICS_TOKEN` is configured.
       security: []
       responses: {'200': {description: Prometheus text format}, '401': {description: Invalid metrics token}}
+  /media/{id}:
+    get:
+      tags: [Media]
+      summary: Resolve public post media
+      description: Redirects to a local URL or a short-lived signed private-object URL. Only ready media attached to a non-deleted post is resolvable. This route does not require the BFF secret.
+      security: []
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses:
+        '307': {description: Temporary redirect, headers: {Location: {schema: {type: string, format: uri}}}}
+        '404': {$ref: '#/components/responses/Error'}
   /v1/auth/email/request-code:
     post:
       tags: [Auth]
@@ -90,32 +100,32 @@ paths:
       description: Bearer auth is optional; viewer state is populated when present.
       parameters:
         - {$ref: '#/components/parameters/Cursor'}
-        - {$ref: '#/components/parameters/Limit'}
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+        - {$ref: '#/components/parameters/PageLimit50'}
+      responses: {'200': {$ref: '#/components/responses/Feed'}, '400': {$ref: '#/components/responses/Error'}}
   /v1/search:
     post:
       tags: [Discovery]
       summary: Hybrid internal, OpenAI-intent and Google Places search
       description: Bearer auth is optional. Anonymous callers should persist `visitor_session_id`.
       requestBody: {$ref: '#/components/requestBodies/Search'}
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/Search'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
   /v1/stores/search:
     get:
       tags: [Discovery]
       summary: Classic internal store search
       parameters: &storeSearchParameters
-        - {name: q, in: query, schema: {type: string, maxLength: 500}}
+        - {name: q, in: query, description: Empty means nearby/all; otherwise at least two Unicode characters., schema: {type: string, maxLength: 500}}
         - {name: latitude, in: query, schema: {type: number, minimum: -90, maximum: 90}}
         - {name: longitude, in: query, schema: {type: number, minimum: -180, maximum: 180}}
         - {name: radius_meters, in: query, schema: {type: integer, minimum: 100, maximum: 50000, default: 10000}}
-        - {$ref: '#/components/parameters/Limit'}
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+        - {$ref: '#/components/parameters/PageLimit50'}
+      responses: {'200': {$ref: '#/components/responses/StoreSearch'}, '400': {$ref: '#/components/responses/Error'}}
   /v1/stores/nearby:
     get:
       tags: [Discovery]
       summary: Nearby internal stores
       parameters: *storeSearchParameters
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/StoreSearch'}, '400': {$ref: '#/components/responses/Error'}}
   /v1/stores/resolve-external:
     post:
       tags: [Discovery]
@@ -129,14 +139,17 @@ paths:
     get:
       tags: [Discovery]
       summary: Store detail and recent reviews
-      parameters: [{$ref: '#/components/parameters/ID'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+      parameters:
+        - {$ref: '#/components/parameters/ID'}
+        - {name: latitude, in: query, schema: {type: number, minimum: -90, maximum: 90}}
+        - {name: longitude, in: query, schema: {type: number, minimum: -180, maximum: 180}}
+      responses: {'200': {$ref: '#/components/responses/StoreDetail'}, '404': {$ref: '#/components/responses/Error'}}
   /v1/stores/{id}/posts:
     get:
       tags: [Discovery]
       summary: Reviews for a store
-      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}}
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PageLimit50'}]
+      responses: {'200': {$ref: '#/components/responses/PostList'}}
   /v1/stores/{id}/favorite:
     post:
       tags: [Social]
@@ -162,7 +175,7 @@ paths:
       tags: [Discovery]
       summary: Review detail
       parameters: [{$ref: '#/components/parameters/ID'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/Post'}, '404': {$ref: '#/components/responses/Error'}}
     delete:
       tags: [Social]
       summary: Soft-delete an owned review
@@ -187,7 +200,7 @@ paths:
       tags: [Discovery]
       summary: Review comments
       parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}}
+      responses: {'200': {$ref: '#/components/responses/CommentList'}}
     post:
       tags: [Social]
       summary: Add a comment
@@ -209,13 +222,13 @@ paths:
       tags: [Profile]
       summary: Public user profile
       parameters: [{$ref: '#/components/parameters/ID'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '404': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/PublicProfile'}, '404': {$ref: '#/components/responses/Error'}}
   /v1/users/{id}/posts:
     get:
       tags: [Profile]
       summary: Public user reviews
-      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/Limit'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}}
+      parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PageLimit50'}]
+      responses: {'200': {$ref: '#/components/responses/PostList'}}
   /v1/users/{id}/follow:
     post:
       tags: [Social]
@@ -251,7 +264,7 @@ paths:
       tags: [Profile]
       summary: Private profile
       security: [{bffSecret: [], bearerAuth: []}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}}
+      responses: {'200': {$ref: '#/components/responses/Me'}}
     patch:
       tags: [Profile]
       summary: Update public/private profile fields
@@ -265,7 +278,7 @@ paths:
               properties:
                 preferred_locale: {$ref: '#/components/schemas/Locale'}
                 bio_language: {$ref: '#/components/schemas/Locale'}
-                username: {type: string, minLength: 3, maxLength: 30}
+                username: {type: string, minLength: 3, maxLength: 30, pattern: '^[A-Za-z0-9_]+$'}
                 display_name: {type: string, maxLength: 100}
                 avatar_url: {type: string, format: uri, maxLength: 2048}
                 bio: {type: string, maxLength: 500, description: Original user content; never automatically translated.}
@@ -278,7 +291,7 @@ paths:
                 age_range: {type: [string, 'null'], maxLength: 40}
                 home_style_interests: {type: array, maxItems: 20, items: {type: string, maxLength: 50}}
               additionalProperties: false
-      responses: {'200': {$ref: '#/components/responses/JSON'}, '409': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/Me'}, '400': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
     delete:
       tags: [Profile]
       summary: Delete and anonymize the account
@@ -290,7 +303,7 @@ paths:
       summary: User search history
       security: [{bffSecret: [], bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/Limit'}]
-      responses: {'200': {$ref: '#/components/responses/JSON'}}
+      responses: {'200': {$ref: '#/components/responses/SearchHistory'}}
     delete:
       tags: [Profile]
       summary: Delete all user search history
@@ -311,7 +324,7 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {type: object, required: [mime_type, size_bytes], properties: {mime_type: {type: string, enum: [image/jpeg, image/png, image/webp]}, size_bytes: {type: integer, minimum: 1}}}}}
-      responses: {'201': {$ref: '#/components/responses/JSON'}, '400': {$ref: '#/components/responses/Error'}}
+      responses: {'201': {$ref: '#/components/responses/MediaUpload'}, '400': {$ref: '#/components/responses/Error'}}
   /v1/media/{id}/complete:
     post:
       tags: [Media]
@@ -329,6 +342,7 @@ components:
   parameters:
     ID: {name: id, in: path, required: true, schema: {type: string, format: uuid}}
     Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+    PageLimit50: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
     Cursor: {name: cursor, in: query, schema: {type: string}, description: Opaque `created_at + id` cursor}
     LocaleHeader: {name: X-Locale, in: header, required: false, schema: {$ref: '#/components/schemas/Locale'}, description: Explicit presentation locale; overrides authenticated preference and Accept-Language.}
   requestBodies:
@@ -388,10 +402,218 @@ components:
         access_expires_at: {type: string, format: date-time}
         refresh_expires_at: {type: string, format: date-time}
         user_id: {type: string, format: uuid}
+    MediaAsset:
+      type: object
+      required: [id, url, mime_type, width, height]
+      properties:
+        id: {type: string, format: uuid}
+        url: {type: string, description: API-relative stable media URL; resolve against the backend origin.}
+        mime_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+    Post:
+      type: object
+      required: [id, user_id, store_id, text, rating, visit_verified, distance_meters, created_at, username, display_name, avatar_url, store_name, store_city, store_district, media, like_count, comment_count, viewer_has_liked, viewer_follows_author, viewer_has_favorited_store]
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        store_id: {type: string, format: uuid}
+        text: {type: string}
+        content_language: {$ref: '#/components/schemas/Locale'}
+        rating: {type: integer, minimum: 1, maximum: 5}
+        visit_verified: {type: boolean, const: true}
+        distance_meters: {type: number, minimum: 0}
+        created_at: {type: string, format: date-time}
+        username: {type: string}
+        display_name: {type: string}
+        avatar_url: {type: string}
+        store_name: {type: string}
+        store_city: {type: string}
+        store_district: {type: string}
+        media: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/MediaAsset'}}
+        like_count: {type: integer, minimum: 0}
+        comment_count: {type: integer, minimum: 0}
+        viewer_has_liked: {type: boolean}
+        viewer_follows_author: {type: boolean}
+        viewer_has_favorited_store: {type: boolean}
+    Comment:
+      type: object
+      required: [id, user_id, body, username, display_name, avatar_url, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        user_id: {type: string, format: uuid}
+        body: {type: string}
+        content_language: {$ref: '#/components/schemas/Locale'}
+        username: {type: string}
+        display_name: {type: string}
+        avatar_url: {type: string}
+        created_at: {type: string, format: date-time}
+    StoreStats:
+      type: object
+      required: [average_rating, rating_count, review_count, favorite_count, post_count]
+      properties:
+        average_rating: {type: number, minimum: 0, maximum: 5}
+        rating_count: {type: integer, minimum: 0}
+        review_count: {type: integer, minimum: 0}
+        favorite_count: {type: integer, minimum: 0}
+        post_count: {type: integer, minimum: 0}
+    ExternalSource:
+      type: object
+      required: [provider, external_id, attribution]
+      properties:
+        provider: {type: string, enum: [google]}
+        external_id: {type: string}
+        attribution: {type: object, additionalProperties: true}
+        refreshed_at: {type: string, format: date-time}
+    Store:
+      type: object
+      required: [id, name, slug, address, city, district, latitude, longitude, categories, category_labels, platform, viewer_has_favorited, viewer_has_reviewed]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        brand_name: {type: string}
+        address: {type: string}
+        city: {type: string}
+        district: {type: string}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        distance_meters: {type: number, minimum: 0}
+        categories: {type: array, items: {type: string}}
+        category_labels: {type: array, items: {type: string}}
+        localized_description: {type: string}
+        platform: {$ref: '#/components/schemas/StoreStats'}
+        viewer_has_favorited: {type: boolean}
+        viewer_has_reviewed: {type: boolean}
+        external_sources: {type: array, items: {$ref: '#/components/schemas/ExternalSource'}}
+    SearchIntent:
+      type: object
+      required: [query_language, normalized_query, location_text, categories, product_terms, style_terms, price_intent, attributes, sort_preference, semantic_terms]
+      properties:
+        query_language: {$ref: '#/components/schemas/Locale'}
+        normalized_query: {type: string}
+        location_text: {type: string}
+        categories: {type: array, items: {type: string}}
+        product_terms: {type: array, items: {type: string}}
+        style_terms: {type: array, items: {type: string}}
+        price_intent: {type: string, enum: ['', budget, midrange, premium]}
+        attributes: {type: array, items: {type: string}}
+        sort_preference: {type: string, enum: ['', relevance, distance, rating, popularity]}
+        semantic_terms: {type: array, items: {type: string}}
+    SearchResult:
+      type: object
+      required: [search_result_impression_id, source, name, address, latitude, longitude, categories]
+      properties:
+        id: {type: string, format: uuid, description: Missing for a google-only result.}
+        search_result_impression_id: {type: string, format: uuid}
+        source: {type: string, enum: [internal, google, google+platform]}
+        name: {type: string}
+        address: {type: string}
+        city: {type: string}
+        district: {type: string}
+        latitude: {type: number}
+        longitude: {type: number}
+        distance_meters: {type: number, minimum: 0}
+        categories: {type: array, items: {type: string}}
+        platform:
+          type: object
+          required: [store_id, average_rating, review_count, favorite_count, post_count]
+          properties:
+            store_id: {type: string, format: uuid}
+            average_rating: {type: number}
+            review_count: {type: integer}
+            favorite_count: {type: integer}
+            post_count: {type: integer}
+        google:
+          type: object
+          required: [provider, place_id, rating, rating_count]
+          properties:
+            provider: {const: google}
+            place_id: {type: string}
+            rating: {type: number}
+            rating_count: {type: integer}
+    SearchResponse:
+      type: object
+      required: [search_id, intent, results]
+      properties:
+        search_id: {type: string, format: uuid}
+        visitor_session_id: {type: string, format: uuid}
+        intent: {$ref: '#/components/schemas/SearchIntent'}
+        results: {type: array, maxItems: 30, items: {$ref: '#/components/schemas/SearchResult'}}
+        fallback_state: {type: string, description: Comma-joined provider degradation markers., examples: [ai_unavailable_or_invalid, places_unavailable, 'ai_unavailable_or_invalid,places_unavailable']}
+    StoreSearchResponse:
+      type: object
+      required: [search_id, items]
+      properties:
+        search_id: {type: string, format: uuid}
+        visitor_session_id: {type: string, format: uuid}
+        items: {type: array, items: {$ref: '#/components/schemas/Store'}}
+    SearchHistoryItem:
+      type: object
+      required: [id, raw_query, intent, created_at, result_count]
+      properties:
+        id: {type: string, format: uuid}
+        raw_query: {type: string}
+        intent: {$ref: '#/components/schemas/SearchIntent'}
+        created_at: {type: string, format: date-time}
+        result_count: {type: integer, minimum: 0}
+    PublicProfile:
+      type: object
+      required: [id, username, display_name, avatar_url, bio, city, follower_count, following_count, post_count]
+      properties:
+        id: {type: string, format: uuid}
+        username: {type: string}
+        display_name: {type: string}
+        avatar_url: {type: string}
+        bio: {type: string}
+        bio_language: {$ref: '#/components/schemas/Locale'}
+        city: {type: string}
+        follower_count: {type: integer, minimum: 0}
+        following_count: {type: integer, minimum: 0}
+        post_count: {type: integer, minimum: 0}
+    Me:
+      allOf:
+        - {$ref: '#/components/schemas/PublicProfile'}
+        - type: object
+          required: [email, relationship_status, has_children, children_age_ranges, housing_status, occupation, age_range, home_style_interests, preferred_locale]
+          properties:
+            email: {type: string, format: email}
+            relationship_status: {type: [string, 'null']}
+            has_children: {type: [boolean, 'null']}
+            children_age_ranges: {type: array, items: {type: string}}
+            housing_status: {type: [string, 'null'], enum: [owner, renter, living_with_family, other, null]}
+            occupation: {type: [string, 'null']}
+            age_range: {type: [string, 'null']}
+            home_style_interests: {type: array, items: {type: string}}
+            preferred_locale: {$ref: '#/components/schemas/Locale'}
+    MediaUpload:
+      type: object
+      required: [id, upload]
+      properties:
+        id: {type: string, format: uuid}
+        upload:
+          type: object
+          required: [storage_key, upload_url, headers, expires_at]
+          properties:
+            storage_key: {type: string}
+            upload_url: {type: string, format: uri}
+            headers: {type: object, additionalProperties: {type: string}}
+            expires_at: {type: string, format: date-time}
   responses:
     OK: {description: OK, content: {application/json: {schema: {type: object}}}}
     Accepted: {description: Accepted, content: {application/json: {schema: {type: object}}}}
     JSON: {description: Success, content: {application/json: {schema: {type: object}}}}
     ID: {description: Success, content: {application/json: {schema: {type: object, required: [id], properties: {id: {type: string, format: uuid}}}}}}
     TokenPair: {description: Session created or rotated, content: {application/json: {schema: {$ref: '#/components/schemas/TokenPair'}}}}
+    Feed: {description: Feed page, content: {application/json: {schema: {type: object, required: [items, next_cursor], properties: {items: {type: array, items: {$ref: '#/components/schemas/Post'}}, next_cursor: {type: string}}}}}}
+    PostList: {description: Post list, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Post'}}}}}}}
+    Post: {description: Post detail, content: {application/json: {schema: {$ref: '#/components/schemas/Post'}}}}
+    CommentList: {description: Comment list ordered oldest first, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Comment'}}}}}}}
+    StoreDetail: {description: Store detail, content: {application/json: {schema: {type: object, required: [store, recent_posts], properties: {store: {$ref: '#/components/schemas/Store'}, recent_posts: {type: array, maxItems: 5, items: {$ref: '#/components/schemas/Post'}}}}}}}
+    Search: {description: Hybrid search response, content: {application/json: {schema: {$ref: '#/components/schemas/SearchResponse'}}}}
+    StoreSearch: {description: Classic internal search response, content: {application/json: {schema: {$ref: '#/components/schemas/StoreSearchResponse'}}}}
+    SearchHistory: {description: Private search history, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/SearchHistoryItem'}}}}}}}
+    PublicProfile: {description: Public profile, content: {application/json: {schema: {$ref: '#/components/schemas/PublicProfile'}}}}
+    Me: {description: Private profile, content: {application/json: {schema: {$ref: '#/components/schemas/Me'}}}}
+    MediaUpload: {description: Authorized direct upload, content: {application/json: {schema: {$ref: '#/components/schemas/MediaUpload'}}}}
     Error: {description: Domain error; raw database/provider errors are never returned, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}

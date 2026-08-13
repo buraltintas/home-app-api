@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -22,6 +23,8 @@ type Service struct {
 	report *reporting.Service
 }
 
+var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
+
 func NewService(db *pgxpool.Pool, report *reporting.Service) *Service { return &Service{db, report} }
 
 type PublicProfile struct {
@@ -30,6 +33,7 @@ type PublicProfile struct {
 	DisplayName    string    `json:"display_name"`
 	AvatarURL      string    `json:"avatar_url"`
 	Bio            string    `json:"bio"`
+	BioLanguage    string    `json:"bio_language,omitempty"`
 	City           string    `json:"city"`
 	FollowerCount  int       `json:"follower_count"`
 	FollowingCount int       `json:"following_count"`
@@ -66,7 +70,7 @@ type Update struct {
 
 func (s *Service) Public(ctx context.Context, id uuid.UUID) (PublicProfile, error) {
 	var p PublicProfile
-	e := s.db.QueryRow(ctx, `SELECT u.id,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL) FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&p.ID, &p.Username, &p.DisplayName, &p.AvatarURL, &p.Bio, &p.City, &p.FollowerCount, &p.FollowingCount, &p.PostCount)
+	e := s.db.QueryRow(ctx, `SELECT u.id,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.bio_language::text,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL) FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&p.ID, &p.Username, &p.DisplayName, &p.AvatarURL, &p.Bio, &p.BioLanguage, &p.City, &p.FollowerCount, &p.FollowingCount, &p.PostCount)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "USER_NOT_FOUND", "User not found")
 	}
@@ -74,7 +78,7 @@ func (s *Service) Public(ctx context.Context, id uuid.UUID) (PublicProfile, erro
 }
 func (s *Service) Me(ctx context.Context, id uuid.UUID) (Me, error) {
 	var m Me
-	e := s.db.QueryRow(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL),x.relationship_status,x.has_children,coalesce(x.children_age_ranges,'{}'),x.housing_status,x.occupation,x.age_range,coalesce(x.home_style_interests,'{}'),u.preferred_locale::text FROM users u JOIN user_profiles p ON p.user_id=u.id LEFT JOIN user_private_profiles x ON x.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&m.ID, &m.Email, &m.Username, &m.DisplayName, &m.AvatarURL, &m.Bio, &m.City, &m.FollowerCount, &m.FollowingCount, &m.PostCount, &m.RelationshipStatus, &m.HasChildren, &m.ChildrenAgeRanges, &m.HousingStatus, &m.Occupation, &m.AgeRange, &m.HomeStyleInterests, &m.PreferredLocale)
+	e := s.db.QueryRow(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.bio_language::text,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL),x.relationship_status,x.has_children,coalesce(x.children_age_ranges,'{}'),x.housing_status,x.occupation,x.age_range,coalesce(x.home_style_interests,'{}'),u.preferred_locale::text FROM users u JOIN user_profiles p ON p.user_id=u.id LEFT JOIN user_private_profiles x ON x.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&m.ID, &m.Email, &m.Username, &m.DisplayName, &m.AvatarURL, &m.Bio, &m.BioLanguage, &m.City, &m.FollowerCount, &m.FollowingCount, &m.PostCount, &m.RelationshipStatus, &m.HasChildren, &m.ChildrenAgeRanges, &m.HousingStatus, &m.Occupation, &m.AgeRange, &m.HomeStyleInterests, &m.PreferredLocale)
 	return m, e
 }
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
@@ -109,7 +113,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 func validateUpdate(in *Update) error {
 	if in.Username != nil {
 		v := strings.TrimSpace(*in.Username)
-		if utf8.RuneCountInString(v) < 3 || utf8.RuneCountInString(v) > 30 {
+		if utf8.RuneCountInString(v) < 3 || utf8.RuneCountInString(v) > 30 || !usernamePattern.MatchString(v) {
 			return httpapi.ErrInvalidInput
 		}
 		in.Username = &v

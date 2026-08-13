@@ -1,0 +1,34 @@
+{
+  "search_id": "1a06171a-5d43-44e6-9288-d3791d80a63f",
+  "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
+  "intent": {
+    "query_language": "en",
+    "normalized_query": "lighting stores near me",
+    "location_text": "",
+    "categories": ["lighting"],
+    "product_terms": ["chandelier"],
+    "style_terms": [],
+    "price_intent": "",
+    "attributes": [],
+    "sort_preference": "distance",
+    "semantic_terms": []
+  },
+  "results": [
+    {
+      "search_result_impression_id": "c3af9f72-6387-4540-8ca0-e59fdb557538",
+      "source": "google",
+      "name": "Moda Işık Tasarım",
+      "address": "Osmanağa Mah. Söğütlü Çeşme Cad. No: 18, Kadıköy",
+      "latitude": 40.99137,
+      "longitude": 29.02584,
+      "distance_meters": 528.1,
+      "categories": ["lighting"],
+      "google": {
+        "provider": "google",
+        "place_id": "ChIJModaIsikExample",
+        "rating": 4.7,
+        "rating_count": 89
+      }
+    }
+  ]
+}

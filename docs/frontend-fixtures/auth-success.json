@@ -1,0 +1,8 @@
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.fixture.signature",
+  "refresh_token": "6xC5o5xF7p_fixture_opaque_refresh_token_Q9r",
+  "token_type": "Bearer",
+  "access_expires_at": "2026-08-13T09:37:50Z",
+  "refresh_expires_at": "2026-09-12T09:22:50Z",
+  "user_id": "79f233cf-774a-4ee4-b343-448aaed36bd4"
+}

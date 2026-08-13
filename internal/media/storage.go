@@ -13,9 +13,10 @@ import (
 )
 
 type Upload struct {
-	StorageKey, UploadURL string
-	Headers               map[string]string
-	ExpiresAt             time.Time
+	StorageKey string            `json:"storage_key"`
+	UploadURL  string            `json:"upload_url"`
+	Headers    map[string]string `json:"headers"`
+	ExpiresAt  time.Time         `json:"expires_at"`
 }
 type ObjectInfo struct {
 	Size        int64
@@ -23,8 +24,17 @@ type ObjectInfo struct {
 }
 type ObjectStorage interface {
 	CreateUpload(context.Context, string, string, int64) (Upload, error)
+	ReadURL(context.Context, string) (string, error)
 	Stat(context.Context, string) (ObjectInfo, error)
 	Delete(context.Context, string) error
+}
+
+func (s *S3Storage) ReadURL(ctx context.Context, key string) (string, error) {
+	out, e := s.presign.PresignGetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: &key}, func(o *s3.PresignOptions) { o.Expires = s.ttl })
+	if e != nil {
+		return "", e
+	}
+	return out.URL, nil
 }
 
 type S3Config struct {
@@ -96,6 +106,9 @@ func (d *DevStorage) Stat(_ context.Context, key string) (ObjectInfo, error) {
 		return x, fmt.Errorf("object not found")
 	}
 	return x, nil
+}
+func (d *DevStorage) ReadURL(_ context.Context, key string) (string, error) {
+	return "http://localhost.invalid/uploads/" + key, nil
 }
 func (d *DevStorage) Delete(_ context.Context, key string) error {
 	d.mu.Lock()

@@ -41,27 +41,34 @@ type CreatePost struct {
 	ContentLanguage      *string     `json:"content_language"`
 }
 type Post struct {
-	ID              uuid.UUID `json:"id"`
-	UserID          uuid.UUID `json:"user_id"`
-	StoreID         uuid.UUID `json:"store_id"`
-	Text            string    `json:"text"`
-	ContentLanguage string    `json:"content_language,omitempty"`
-	Rating          int       `json:"rating"`
-	VisitVerified   bool      `json:"visit_verified"`
-	DistanceMeters  float64   `json:"distance_meters"`
-	CreatedAt       time.Time `json:"created_at"`
-	Username        string    `json:"username"`
-	DisplayName     string    `json:"display_name"`
-	AvatarURL       string    `json:"avatar_url"`
-	StoreName       string    `json:"store_name"`
-	StoreCity       string    `json:"store_city"`
-	StoreDistrict   string    `json:"store_district"`
-	Media           []string  `json:"media"`
-	LikeCount       int       `json:"like_count"`
-	CommentCount    int       `json:"comment_count"`
-	ViewerLiked     bool      `json:"viewer_has_liked"`
-	ViewerFollows   bool      `json:"viewer_follows_author"`
-	ViewerFavorited bool      `json:"viewer_has_favorited_store"`
+	ID              uuid.UUID    `json:"id"`
+	UserID          uuid.UUID    `json:"user_id"`
+	StoreID         uuid.UUID    `json:"store_id"`
+	Text            string       `json:"text"`
+	ContentLanguage string       `json:"content_language,omitempty"`
+	Rating          int          `json:"rating"`
+	VisitVerified   bool         `json:"visit_verified"`
+	DistanceMeters  float64      `json:"distance_meters"`
+	CreatedAt       time.Time    `json:"created_at"`
+	Username        string       `json:"username"`
+	DisplayName     string       `json:"display_name"`
+	AvatarURL       string       `json:"avatar_url"`
+	StoreName       string       `json:"store_name"`
+	StoreCity       string       `json:"store_city"`
+	StoreDistrict   string       `json:"store_district"`
+	Media           []MediaAsset `json:"media"`
+	LikeCount       int          `json:"like_count"`
+	CommentCount    int          `json:"comment_count"`
+	ViewerLiked     bool         `json:"viewer_has_liked"`
+	ViewerFollows   bool         `json:"viewer_follows_author"`
+	ViewerFavorited bool         `json:"viewer_has_favorited_store"`
+}
+type MediaAsset struct {
+	ID       uuid.UUID `json:"id"`
+	URL      string    `json:"url"`
+	MimeType string    `json:"mime_type"`
+	Width    int       `json:"width"`
+	Height   int       `json:"height"`
 }
 type Comment struct {
 	ID              uuid.UUID `json:"id"`
@@ -172,7 +179,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
  coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),
  (SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),
  EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$1),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$1),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$1),
- coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}')
+ coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb)
  FROM posts p JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL JOIN user_profiles up ON up.user_id=u.id JOIN stores st ON st.id=p.store_id AND st.deleted_at IS NULL
  WHERE p.deleted_at IS NULL AND ($2::timestamptz IS NULL OR (p.created_at,p.id)<($2,$3)) ORDER BY p.created_at DESC,p.id DESC LIMIT $4`, viewer, nilTime(before), nilUUID(beforeID), limit+1)
 	if e != nil {
@@ -202,7 +209,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 
 func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) (Post, error) {
 	var p Post
-	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media)
+	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
@@ -234,7 +241,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),coalesce((SELECT array_agg(m.storage_key ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'{}') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e

@@ -79,6 +79,13 @@ func (s *LocalStorage) Stat(_ context.Context, key string) (ObjectInfo, error) {
 	return ObjectInfo{Size: info.Size(), ContentType: http.DetectContentType(buf[:n])}, nil
 }
 
+func (s *LocalStorage) ReadURL(_ context.Context, key string) (string, error) {
+	if _, err := s.path(key); err != nil {
+		return "", err
+	}
+	return s.publicURL + "/" + key, nil
+}
+
 func (s *LocalStorage) Delete(_ context.Context, key string) error {
 	path, err := s.path(key)
 	if err != nil {

@@ -34,6 +34,21 @@ func (s *Service) UploadHandler() http.Handler {
 	return nil
 }
 
+// PublicURL returns a short-lived provider URL only for ready media attached to
+// a visible post. Storage objects remain private and unattached uploads cannot
+// be enumerated through the public media endpoint.
+func (s *Service) PublicURL(ctx context.Context, id uuid.UUID) (string, error) {
+	var key string
+	err := s.db.QueryRow(ctx, `SELECT m.storage_key FROM media m JOIN post_media pm ON pm.media_id=m.id JOIN posts p ON p.id=pm.post_id WHERE m.id=$1 AND m.status='ready' AND p.deleted_at IS NULL LIMIT 1`, id).Scan(&key)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", httpapi.E(http.StatusNotFound, "MEDIA_NOT_FOUND", "Media not found")
+	}
+	if err != nil {
+		return "", err
+	}
+	return s.storage.ReadURL(ctx, key)
+}
+
 type CreateRequest struct {
 	MimeType  string `json:"mime_type"`
 	SizeBytes int64  `json:"size_bytes"`
