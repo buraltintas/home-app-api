@@ -246,6 +246,7 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 		if e != nil {
 			return uuid.Nil, false, e
 		}
+		created = true
 	} else if e != nil {
 		return uuid.Nil, false, e
 	}

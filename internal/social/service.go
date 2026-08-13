@@ -98,6 +98,12 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		return uuid.Nil, e
 	}
 	if distance > s.reviewRadius {
+		// Release the store row lock before recording the rejected attempt. The
+		// reporting event uses a separate transaction whose foreign-key check
+		// otherwise waits on this transaction's FOR UPDATE lock indefinitely.
+		if e = tx.Rollback(ctx); e != nil {
+			return uuid.Nil, e
+		}
 		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.PostLocationRejected, IdempotencyKey: "post-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &in.StoreID, Metadata: map[string]any{"distance_meters": distance, "allowed_radius_meters": s.reviewRadius}})
 		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
 	}
