@@ -1,0 +1,4 @@
+interface:
+  display_name: "Home App Design"
+  short_description: "Shared Home App product design authority"
+  default_prompt: "Use $home-app-design to design and implement a coherent Home App experience."
