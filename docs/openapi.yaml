@@ -1,9 +1,10 @@
 openapi: 3.1.0
 info:
-  title: home-app API
+  title: Boşa Gezme! API
   version: 1.0.0
   description: |
-    Backend contract for the React Native client and a future Next.js BFF.
+    Backend contract for the Boşa Gezme! React Native client and a future Next.js BFF.
+    Canonical product domain: https://bosagezme.com
     Every `/v1` operation requires `X-BFF-Secret`. A bearer token is optional
     on discovery reads and required on mutations marked with `bearerAuth`.
     Supported locales are `tr`, `en`, `de`, and `ru`. Resolution order is a valid
@@ -11,6 +12,9 @@ info:
     `Accept-Language`, then configured default (`tr`). Regional variants are
     normalized and unsupported values safely fall back. Domain error codes are
     stable; messages are localized.
+externalDocs:
+  description: Boşa Gezme! product website
+  url: https://bosagezme.com
 servers:
   - url: http://localhost:8080
 security:

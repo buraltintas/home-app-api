@@ -1,8 +1,8 @@
-# home-app backend architecture
+# Boşa Gezme! backend architecture
 
 ## Product boundary and decisions
 
-`home-app` is a modular Go monolith for discovering and reviewing real home/living store locations. PostgreSQL is the system of record; PostGIS provides indexed geographic filtering and distance checks. External systems sit behind narrow interfaces. Stores exist independently of users, so a later claim/merchant model can reference `stores` without changing store identity.
+Boşa Gezme! is a modular Go monolith for discovering and reviewing real home/living store locations. Its canonical product domain is `bosagezme.com`. PostgreSQL is the system of record; PostGIS provides indexed geographic filtering and distance checks. External systems sit behind narrow interfaces. Stores exist independently of users, so a later claim/merchant model can reference `stores` without changing store identity.
 
 The first feed is keyset-paginated reverse chronology. Search intent is parsed deterministically first and optionally enriched by AI; only validated domain fields reach SQL. Aggregates are transactionally updated in `store_stats`, while normalized social tables remain authoritative and a recalculation command repairs drift.
 
@@ -60,7 +60,7 @@ Verification locks the code row. Identity creation runs in one serializable tran
 
 Google ID tokens are verified server-side for signature, issuer, audience, expiry and verified email. Unverified Google emails are never used for linking. Provider subject remains the durable identity key.
 
-Access JWTs are short-lived and include user/session IDs, issuer, audience and token type. Opaque random refresh tokens are stored only as keyed hashes. Rotation locks the current session, revokes it, and creates a replacement in the same family. Reuse of a revoked/replaced token revokes the whole family. Logout revokes one family/session; logout-all revokes all active sessions for the user.
+Access JWTs are short-lived and include user/session IDs, issuer `https://bosagezme.com`, audience `bosagezme-clients`, and token type. Opaque random refresh tokens are stored only as keyed hashes. Rotation locks the current session, revokes it, and creates a replacement in the same family. Reuse of a revoked/replaced token revokes the whole family. Logout revokes one family/session; logout-all revokes all active sessions for the user. The brand migration changes the issuer/audience, so access tokens minted before deployment are rejected; their normal lifetime is 15 minutes by default and valid refresh sessions mint the new token identity.
 
 ## D. Security design
 

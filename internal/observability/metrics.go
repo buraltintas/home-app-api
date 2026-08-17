@@ -8,23 +8,24 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/go-chi/chi/v5"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	httpRequests     = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_http_requests_total", Help: "HTTP requests by stable route, method and status."}, []string{"route", "method", "status"})
-	httpDuration     = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "home_app_http_request_duration_seconds", Help: "HTTP request latency by stable route and method.", Buckets: prometheus.DefBuckets}, []string{"route", "method"})
-	httpInFlight     = prometheus.NewGauge(prometheus.GaugeOpts{Name: "home_app_http_requests_in_flight", Help: "HTTP requests currently being served."})
-	authEvents       = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_auth_events_total", Help: "Authentication outcomes by bounded operation."}, []string{"operation", "outcome"})
-	searches         = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_searches_total", Help: "Search requests by mode and outcome."}, []string{"mode", "outcome"})
-	searchDuration   = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "home_app_search_duration_seconds", Help: "Search request latency.", Buckets: prometheus.DefBuckets}, []string{"mode"})
-	zeroResults      = prometheus.NewCounter(prometheus.CounterOpts{Name: "home_app_search_zero_results_total", Help: "Completed searches with no results."})
-	providerRequests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_provider_requests_total", Help: "External provider calls by bounded provider and outcome."}, []string{"provider", "outcome"})
-	providerDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: "home_app_provider_request_duration_seconds", Help: "External provider call latency.", Buckets: prometheus.DefBuckets}, []string{"provider"})
-	workerJobs       = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_worker_jobs_total", Help: "Background jobs by worker and outcome."}, []string{"worker", "outcome"})
-	workerRetries    = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "home_app_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
+	httpRequests     = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_http_requests_total", Help: "HTTP requests by stable route, method and status."}, []string{"route", "method", "status"})
+	httpDuration     = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: brand.MetricsNamespace + "_http_request_duration_seconds", Help: "HTTP request latency by stable route and method.", Buckets: prometheus.DefBuckets}, []string{"route", "method"})
+	httpInFlight     = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_http_requests_in_flight", Help: "HTTP requests currently being served."})
+	authEvents       = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_auth_events_total", Help: "Authentication outcomes by bounded operation."}, []string{"operation", "outcome"})
+	searches         = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_searches_total", Help: "Search requests by mode and outcome."}, []string{"mode", "outcome"})
+	searchDuration   = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: brand.MetricsNamespace + "_search_duration_seconds", Help: "Search request latency.", Buckets: prometheus.DefBuckets}, []string{"mode"})
+	zeroResults      = prometheus.NewCounter(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_search_zero_results_total", Help: "Completed searches with no results."})
+	providerRequests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_provider_requests_total", Help: "External provider calls by bounded provider and outcome."}, []string{"provider", "outcome"})
+	providerDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: brand.MetricsNamespace + "_provider_request_duration_seconds", Help: "External provider call latency.", Buckets: prometheus.DefBuckets}, []string{"provider"})
+	workerJobs       = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_jobs_total", Help: "Background jobs by worker and outcome."}, []string{"worker", "outcome"})
+	workerRetries    = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
 )
 
 func init() {

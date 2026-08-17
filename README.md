@@ -1,6 +1,6 @@
-# home-app API
+# Boşa Gezme! API
 
-Production-oriented Go backend foundation for a multilingual social discovery product about real, physical home/living stores.
+Production-oriented Go backend for [Boşa Gezme!](https://bosagezme.com), a multilingual social discovery product about real, physical home/living stores.
 
 The product loop is deliberately narrow: **discover → visit → review → help the next person discover**. Stores do not need an owner or platform membership.
 
@@ -28,6 +28,18 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 
 The detailed schema, route matrix, identity concurrency strategy, threat model and search flow are in [docs/architecture.md](docs/architecture.md).
 Metric semantics and reporting operations are in [docs/reporting.md](docs/reporting.md).
+Approved brand assets and usage notes are in [docs/brand/](docs/brand/).
+
+## Brand identity
+
+- Display name: **Boşa Gezme!**
+- Canonical product domain: [bosagezme.com](https://bosagezme.com)
+- Runtime identity constants: [`internal/brand`](internal/brand)
+
+The Go module/repository path, local PostgreSQL identifiers, migration history,
+and `$home-app-design` command remain stable technical identifiers. Renaming
+them without moving the repository and infrastructure would break imports,
+existing local volumes, or deterministic seed identity.
 
 ## Requirements
 

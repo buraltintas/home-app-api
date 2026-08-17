@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/google/uuid"
 )
 
@@ -35,6 +36,9 @@ func TestSealAndHashDoNotPersistPlaintext(t *testing.T) {
 }
 func TestAccessTokenValidation(t *testing.T) {
 	m := NewTokenManager("an-access-secret-that-is-at-least-32-bytes", time.Minute, time.Hour)
+	if m.issuer != brand.JWTIssuer || m.audience != brand.JWTAudience {
+		t.Fatalf("unexpected token identity: issuer=%q audience=%q", m.issuer, m.audience)
+	}
 	u, s := uuid.New(), uuid.New()
 	raw, _, e := m.Access(u, s, time.Now())
 	if e != nil {

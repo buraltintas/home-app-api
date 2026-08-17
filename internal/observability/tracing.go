@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -25,7 +26,7 @@ func SetupTracing(ctx context.Context, enabled bool, endpoint, environment strin
 	if err != nil {
 		return nil, err
 	}
-	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes("", attribute.String("service.name", "home-app-api"), attribute.String("deployment.environment", environment)))
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes("", attribute.String("service.name", brand.ServiceName), attribute.String("deployment.environment", environment)))
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +36,7 @@ func SetupTracing(ctx context.Context, enabled bool, endpoint, environment strin
 }
 
 func StartSpan(ctx context.Context, name string) (context.Context, func(error)) {
-	ctx, span := otel.Tracer("github.com/burakaltintas/home-app-api").Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient))
+	ctx, span := otel.Tracer(brand.TracerName).Start(ctx, name, trace.WithSpanKind(trace.SpanKindClient))
 	return ctx, func(err error) {
 		if err != nil {
 			span.RecordError(err)

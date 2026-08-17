@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -253,8 +254,8 @@ func RenderLoginCode(locale i18n.Locale, code string, minutes int) (Message, err
 type localizedEmailTemplate struct{ Subject, HTML, Text string }
 
 var loginCodeTemplates = map[i18n.Locale]localizedEmailTemplate{
-	i18n.LocaleTR: {"home-app giriş kodunuz", `<h1>Giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`, "Giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın."},
-	i18n.LocaleEN: {"Your home-app sign-in code", `<h1>Your sign-in code</h1><p><strong>{{.Code}}</strong></p><p>This code is valid for {{.Minutes}} minutes. Do not share it with anyone.</p>`, "Your sign-in code: {{.Code}}\nThis code is valid for {{.Minutes}} minutes. Do not share it with anyone."},
-	i18n.LocaleDE: {"Ihr home-app Anmeldecode", `<h1>Ihr Anmeldecode</h1><p><strong>{{.Code}}</strong></p><p>Dieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter.</p>`, "Ihr Anmeldecode: {{.Code}}\nDieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter."},
-	i18n.LocaleRU: {"Ваш код входа в home-app", `<h1>Ваш код входа</h1><p><strong>{{.Code}}</strong></p><p>Код действителен {{.Minutes}} минут. Никому его не сообщайте.</p>`, "Ваш код входа: {{.Code}}\nКод действителен {{.Minutes}} минут. Никому его не сообщайте."},
+	i18n.LocaleTR: {brand.ProductName + " giriş kodunuz", `<h1>` + brand.ProductName + ` giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`, brand.ProductName + " giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın."},
+	i18n.LocaleEN: {"Your " + brand.ProductName + " sign-in code", `<h1>Your ` + brand.ProductName + ` sign-in code</h1><p><strong>{{.Code}}</strong></p><p>This code is valid for {{.Minutes}} minutes. Do not share it with anyone.</p>`, "Your " + brand.ProductName + " sign-in code: {{.Code}}\nThis code is valid for {{.Minutes}} minutes. Do not share it with anyone."},
+	i18n.LocaleDE: {"Ihr " + brand.ProductName + " Anmeldecode", `<h1>Ihr ` + brand.ProductName + ` Anmeldecode</h1><p><strong>{{.Code}}</strong></p><p>Dieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter.</p>`, "Ihr " + brand.ProductName + " Anmeldecode: {{.Code}}\nDieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter."},
+	i18n.LocaleRU: {"Код входа в " + brand.ProductName, `<h1>Код входа в ` + brand.ProductName + `</h1><p><strong>{{.Code}}</strong></p><p>Код действителен {{.Minutes}} минут. Никому его не сообщайте.</p>`, "Код входа в " + brand.ProductName + ": {{.Code}}\nКод действителен {{.Minutes}} минут. Никому его не сообщайте."},
 }

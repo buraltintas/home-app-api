@@ -1,5 +1,9 @@
 # Reporting and search analytics definitions
 
+Runtime Prometheus metrics use the `bosagezme_` prefix and OpenTelemetry uses
+the `bosagezme-api` service name. Dashboards and alerts created against the
+legacy metric prefix must be updated during the brand deployment.
+
 Reporting uses UTC source timestamps and calendar days in `REPORTING_TIMEZONE` (`Europe/Istanbul` by default). A day is converted to explicit UTC `[start,end)` bounds in Go; server-local time is never used.
 
 Locale is a dimension rather than a fixed set of language columns.

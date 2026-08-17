@@ -1,15 +1,15 @@
 ---
 name: home-app-design
-description: Shared visual, interaction, content, accessibility, and responsive design authority for the Home App consumer social-discovery product. Use whenever designing, implementing, reviewing, or polishing Home App web or mobile screens, components, tokens, navigation, localization, imagery, loading/empty/error states, or user flows.
+description: Shared visual, interaction, content, accessibility, and responsive design authority for the Boşa Gezme! consumer social-discovery product. Use whenever designing, implementing, reviewing, or polishing Boşa Gezme! web or mobile screens, components, tokens, navigation, localization, imagery, loading/empty/error states, or user flows.
 ---
 
-# Home App design authority
+# Boşa Gezme! design authority
 
 Use this skill for both `ui` and `mobile`. Keep one conceptual design system; implement it with platform-native primitives. Read the backend handoff, OpenAPI, and canonical fixtures before designing data-backed states. Never invent DTO fields or backend capability.
 
 ## Product thesis
 
-Help people decide which real home/living store is worth visiting. Make the loop obvious: discover, visit, review, help someone else discover. Treat Home App as a visual consumer social product—not ecommerce, a marketplace, a merchant dashboard, or a generic review directory.
+Help people decide which real home/living store is worth visiting. Make the loop obvious: discover, visit, review, help someone else discover. Treat Boşa Gezme! as a visual consumer social product—not ecommerce, a marketplace, a merchant dashboard, or a generic review directory.
 
 Prioritize three experiences above all others: home feed, natural-language search, and store detail. A user should understand within three seconds that real people share real visits to physical home stores.
 
@@ -19,7 +19,7 @@ Create a warm, quiet, editorial composition where photography and authored conte
 
 Avoid generic AI/SaaS styling: no giant gradients, decorative glassmorphism, glowing cards, corporate blue, excessive pills, excessive shadows, dashboard grids, or bordered cards around every section. A floating navigation rail may use one restrained platform-native material blur when it improves spatial separation; do not repeat that glass treatment across content. Prefer generous space, strong type, large imagery, fine separators, and restrained surfaces.
 
-Use a simple temporary text wordmark: `Home App`.
+Use the approved `Boşa Gezme!` product name and the supplied square logo in `docs/brand/bosa-gezme-logo.png`. Preserve the Turkish diacritics and exclamation mark in display copy. Do not redraw, recolor, stretch, or crop essential lettering/mascot details. The source PNG has an opaque white background; do not simulate transparency with blend modes. Use the text name when the full illustrated mark would be illegible at small sizes.
 
 ## Shared tokens
 
@@ -57,7 +57,7 @@ Lead with people and places. Compose each post with author, store/location, subt
 
 Make natural-language search unmistakable without presenting a chatbot. Use a prominent, conventional search field, examples, recent searches, a small category set, and contextual nearby discovery. Render interpreted intent as removable/editable chips only when useful.
 
-On results, show store identity, category, address/distance, Home App community data, favorites, and optional Google data. Label the two sources independently. For Google-only stores, explicitly say there are no community reviews and invite the first visit review; never fabricate or blend scores.
+On results, show store identity, category, address/distance, Boşa Gezme! community data, favorites, and optional Google data. Label the two sources independently. For Google-only stores, explicitly say there are no community reviews and invite the first visit review; never fabricate or blend scores.
 
 ### Store detail
 
@@ -79,7 +79,7 @@ Mobile is the explicit exception because it cannot rely on the web BFF deploymen
 
 ## Navigation
 
-- Mobile primary tabs: Home, Search, Create, Favorites, Profile. Present them on Home App's floating platform-material navigation rail with fixed-width destinations, one restrained raised accent Create orb, and a softly springing compact translucent lens that travels between destinations but fades behind Create. The rail uses real native blur, a translucent warm tint, a quiet perimeter edge, and one soft shadow so it feels integrated rather than like a white card. Avoid drawn gloss stripes or highlight lines across the rail and Create orb; material depth should come from blur, opacity, and elevation. Mirror that material with `backdrop-filter` on responsive web. Use recognizable label-free icons with mandatory screen-reader labels, stable placement, and distinct restrained colors for destination identity. The Create orb is one uninterrupted accent surface without a contrasting border. Let the active icon lift and scale subtly; add press feedback and respect reduced motion. Pair a tab change with a 180–220 ms direction-aware content cross-fade, no more than 18 px of horizontal travel, and at most a 1–2% scale change; disable the entire scene transition when Reduce Motion is enabled. Use one professional outline icon family with consistent optical size and stroke. Preserve platform semantics, safe areas, and 44-point targets; do not use Unicode glyphs or a stock tab bar.
+- Mobile primary tabs: Home, Search, Create, Favorites, Profile. Present them on Boşa Gezme!'s floating platform-material navigation rail with fixed-width destinations, one restrained raised accent Create orb, and a softly springing compact translucent lens that travels between destinations but fades behind Create. The rail uses real native blur, a translucent warm tint, a quiet perimeter edge, and one soft shadow so it feels integrated rather than like a white card. Avoid drawn gloss stripes or highlight lines across the rail and Create orb; material depth should come from blur, opacity, and elevation. Mirror that material with `backdrop-filter` on responsive web. Use recognizable label-free icons with mandatory screen-reader labels, stable placement, and distinct restrained colors for destination identity. The Create orb is one uninterrupted accent surface without a contrasting border. Let the active icon lift and scale subtly; add press feedback and respect reduced motion. Pair a tab change with a 180–220 ms direction-aware content cross-fade, no more than 18 px of horizontal travel, and at most a 1–2% scale change; disable the entire scene transition when Reduce Motion is enabled. Use one professional outline icon family with consistent optical size and stroke. Preserve platform semantics, safe areas, and 44-point targets; do not use Unicode glyphs or a stock tab bar.
 - Web primary navigation: Home, Discover, Favorites, Profile, Create Review. Use a restrained header/sidebar hybrid only when it improves desktop composition; do not mimic X/Twitter.
 
 Use platform-native sharing, modals/sheets, back behavior, keyboard handling, and safe areas.

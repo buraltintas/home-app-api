@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/burakaltintas/home-app-api/internal/email"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
@@ -67,7 +68,7 @@ func TestResendSmoke(t *testing.T) {
 		t.Skip("RESEND_API_KEY and explicit RESEND_TEST_RECIPIENT are required")
 	}
 	sender := &email.ResendSender{URL: env("EMAIL_API_URL", "https://api.resend.com/emails"), APIKey: key, Client: &http.Client{Timeout: 10 * time.Second}}
-	id, err := sender.Send(context.Background(), email.Message{From: os.Getenv("EMAIL_FROM"), To: recipient, Subject: "home-app provider smoke test", Text: "This is an explicitly requested home-app provider smoke test.", HTML: "<p>This is an explicitly requested home-app provider smoke test.</p>"})
+	id, err := sender.Send(context.Background(), email.Message{From: os.Getenv("EMAIL_FROM"), To: recipient, Subject: brand.ProductName + " provider smoke test", Text: "This is an explicitly requested " + brand.ProductName + " provider smoke test.", HTML: "<p>This is an explicitly requested " + brand.ProductName + " provider smoke test.</p>"})
 	if err != nil || id == "" {
 		t.Fatalf("provider id=%q err=%v", id, err)
 	}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
@@ -56,7 +57,7 @@ func Load() (Config, error) {
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-5-mini"),
-		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", "no-reply@example.test"),
+		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: os.Getenv("OBJECT_STORAGE_BUCKET"),

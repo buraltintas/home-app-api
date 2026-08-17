@@ -11,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/auth"
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
@@ -54,7 +55,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		}
 	}
 	r := chi.NewRouter()
-	r.Use(appmw.RequestID, appmw.Recover(log), otelhttp.NewMiddleware("home-app-api"), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders, appmw.RequestLocale(defaultLocale))
+	r.Use(appmw.RequestID, appmw.Recover(log), otelhttp.NewMiddleware(brand.ServiceName), observability.HTTPMiddleware, appmw.Logging(log), appmw.SecurityHeaders, appmw.RequestLocale(defaultLocale))
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) { JSON(w, 200, map[string]string{"status": "ok"}) })
 	r.Get("/ready", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), time.Second)

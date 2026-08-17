@@ -1,10 +1,10 @@
-# Frontend handoff: Home App API
+# Frontend handoff: Boşa Gezme! API
 
 This document is the implementation contract for React Native and Next.js clients. It was cross-checked against the router, middleware, DTOs, services, migrations, providers, and [`openapi.yaml`](./openapi.yaml). Fixtures in [`frontend-fixtures/`](./frontend-fixtures/) are valid API payloads, not proposed view models.
 
 ## 1. Product and primary loop
 
-Home App is a social discovery and physical-store review platform focused on home/living stores.
+Boşa Gezme! is a social discovery and physical-store review platform focused on home/living stores. The canonical product domain is `bosagezme.com`; the approved source logo is [`docs/brand/bosa-gezme-logo.png`](./brand/bosa-gezme-logo.png).
 
 `Discover → Search → Open Store → Visit Physically → Review → Social Interaction`
 
@@ -16,7 +16,7 @@ Stores do not need to be platform members. Browsing is anonymous; login is requi
 |---|---|
 | Local | `http://localhost:8080` with default `HTTP_ADDR=:8080` |
 | Staging | Not configured in this repository; inject a frontend server/runtime environment variable. |
-| Production | Not configured in this repository; inject a frontend server/runtime environment variable. |
+| Production | Product/web domain is `https://bosagezme.com`; the Go API deployment origin is not assigned in this repository and must be injected server-side. |
 
 Frontend-relevant backend configuration includes `BFF_SECRETS`, `DEFAULT_LOCALE`, token/OTP TTLs, `GOOGLE_CLIENT_ID`, `MEDIA_MAX_BYTES`, `OBJECT_STORAGE_UPLOAD_TTL`, `STORE_REVIEW_RADIUS_METERS`, and `VISITOR_RETENTION_DAYS`. Never copy backend provider keys or secrets into public frontend variables.
 
@@ -70,7 +70,7 @@ Obtain a Google ID token for the configured backend audience, then call `POST /v
 
 ### Token lifecycle
 
-Auth success is shaped exactly like [`auth-success.json`](./frontend-fixtures/auth-success.json). Access tokens are HS256 bearer JWTs (default 15 minutes). Refresh tokens are opaque (default 720 hours) and rotate on every `POST /v1/auth/refresh`; atomically replace both stored tokens. Reuse of an already-rotated refresh token revokes its entire session family and returns `INVALID_REFRESH_TOKEN`. `POST /v1/auth/logout` revokes the current family; `/logout-all` revokes all user sessions. Both return 204.
+Auth success is shaped exactly like [`auth-success.json`](./frontend-fixtures/auth-success.json). Access tokens are HS256 bearer JWTs (default 15 minutes) with issuer `https://bosagezme.com` and audience `bosagezme-clients`. Refresh tokens are opaque (default 720 hours) and rotate on every `POST /v1/auth/refresh`; atomically replace both stored tokens. Reuse of an already-rotated refresh token revokes its entire session family and returns `INVALID_REFRESH_TOKEN`. `POST /v1/auth/logout` revokes the current family; `/logout-all` revokes all user sessions. Both return 204.
 
 Recommended lifecycle: login → store tokens in OS secure storage/server-only session → send access token → on an authentication failure attempt one serialized refresh → replace refresh token → if refresh returns `INVALID_REFRESH_TOKEN`, clear session and show sign-in. Do not log tokens or OTPs.
 
@@ -186,7 +186,7 @@ Platform statistics are distinct from Google statistics:
 
 | Data | Meaning |
 |---|---|
-| `platform.average_rating`, `rating_count`, `review_count`, `favorite_count`, `post_count` | Home App community only. Rating/review/post counts currently advance together for created reviews. |
+| `platform.average_rating`, `rating_count`, `review_count`, `favorite_count`, `post_count` | Boşa Gezme! community only. Rating/review/post counts currently advance together for created reviews. |
 | `google.rating`, `rating_count` | Google provider only; never merged into platform rating. |
 
 Hybrid search `source` is `internal`, `google`, or `google+platform`. An internal/platform result has `id` and `platform`; a Google-only result omits `id` and has `google`; an enriched result has both. Before opening a platform detail/favoriting/reviewing a Google-only result, authenticated clients call `/stores/resolve-external`, then use the returned internal ID. [`store-google-only.json`](./frontend-fixtures/store-google-only.json) is intentionally a search response fragment because no Google-only store-detail endpoint exists.

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
@@ -39,7 +40,7 @@ func TestLoginCodeTemplatesCoverSupportedLocales(t *testing.T) {
 			t.Fatalf("incomplete login_code template for %s", locale)
 		}
 		message, err := RenderLoginCode(locale, "123456", 10)
-		if err != nil || !strings.Contains(message.HTML, "123456") || !strings.Contains(message.Text, "123456") || message.Subject == "" {
+		if err != nil || !strings.Contains(message.HTML, "123456") || !strings.Contains(message.Text, "123456") || !strings.Contains(message.Subject, brand.ProductName) || !strings.Contains(message.HTML, brand.ProductName) || !strings.Contains(message.Text, brand.ProductName) {
 			t.Fatalf("render %s: message=%+v err=%v", locale, message, err)
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -106,7 +107,7 @@ type TokenManager struct {
 }
 
 func NewTokenManager(secret string, accessTTL, refreshTTL time.Duration) *TokenManager {
-	return &TokenManager{[]byte(secret), accessTTL, refreshTTL, "home-app", "home-app-clients"}
+	return &TokenManager{[]byte(secret), accessTTL, refreshTTL, brand.JWTIssuer, brand.JWTAudience}
 }
 
 func (m *TokenManager) Access(userID, sessionID uuid.UUID, now time.Time) (string, time.Time, error) {
