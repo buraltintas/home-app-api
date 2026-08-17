@@ -146,6 +146,7 @@ Production OTP email can be sent from the Workspace mailbox `no-reply@bosagezme.
 7. Start/redeploy the worker. Domain-wide delegation can take time to propagate; a configuration/permission error is treated as permanent, while Gmail quota and server failures use the existing bounded outbox retry policy.
 
 The worker sends an RFC-compliant multipart text/HTML message through `users.messages.send`. It requests no Gmail read, modify, compose, or full-mailbox scope.
+The OTP template follows the Boşa Gezme! warm editorial palette and includes explicit light/dark mailbox styles, responsive email-safe table layout, high-contrast code presentation, localized `tr`/`en`/`de`/`ru` content, hidden preview text, and a complete plain-text alternative.
 
 ## Operational and privacy notes
 

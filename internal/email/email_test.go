@@ -38,12 +38,34 @@ func TestResendSenderClassifiesProviderFailures(t *testing.T) {
 func TestLoginCodeTemplatesCoverSupportedLocales(t *testing.T) {
 	for _, locale := range i18n.Supported() {
 		tpl, ok := loginCodeTemplates[locale]
-		if !ok || tpl.Subject == "" || tpl.HTML == "" || tpl.Text == "" {
+		if !ok || tpl.Subject == "" || tpl.Preheader == "" || tpl.Eyebrow == "" || tpl.Title == "" || tpl.Intro == "" || tpl.CodeLabel == "" || tpl.Expiry == "" || tpl.Security == "" || tpl.Ignore == "" || tpl.Footer == "" {
 			t.Fatalf("incomplete login_code template for %s", locale)
 		}
 		message, err := RenderLoginCode(locale, "123456", 10)
-		if err != nil || !strings.Contains(message.HTML, "123456") || !strings.Contains(message.Text, "123456") || !strings.Contains(message.Subject, brand.ProductName) || !strings.Contains(message.HTML, brand.ProductName) || !strings.Contains(message.Text, brand.ProductName) {
+		if err != nil || !strings.Contains(message.HTML, "123456") || !strings.Contains(message.Text, "123456") || strings.Contains(message.HTML, "{{.") || strings.Contains(message.Text, "{{.") || !strings.Contains(message.Subject, brand.ProductName) || !strings.Contains(message.HTML, brand.ProductName) || !strings.Contains(message.Text, brand.ProductName) {
 			t.Fatalf("render %s: message=%+v err=%v", locale, message, err)
+		}
+	}
+}
+
+func TestLoginCodeTemplatePreservesBrandInLightAndDarkMailboxes(t *testing.T) {
+	message, err := RenderLoginCode(i18n.LocaleTR, "123456", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		`name="color-scheme" content="light dark"`,
+		`@media (prefers-color-scheme: dark)`,
+		`[data-ogsc] .email-surface`,
+		`background-color:#FFFEFB`,
+		`background-color: #24231F`,
+		`role="presentation"`,
+		`font-family:Georgia`,
+		`font-family:'Courier New'`,
+		`bosagezme.com`,
+	} {
+		if !strings.Contains(message.HTML, expected) {
+			t.Fatalf("email template missing %q", expected)
 		}
 	}
 }

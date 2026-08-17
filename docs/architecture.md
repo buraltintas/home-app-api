@@ -55,6 +55,8 @@ Email request creates a six-digit code with `crypto/rand`, stores only an HMAC-S
 
 Production delivery uses the Gmail API through a dedicated Google Workspace service account with domain-wide delegation limited to `gmail.send`. The worker impersonates only the configured Workspace sender, builds RFC-compliant multipart text/HTML, and sends through `users.messages.send`; it has no mailbox read permission. Service-account credentials are secret-manager material and never stored in PostgreSQL or the repository. Development keeps using private local `.eml` files, and the transactional outbox/retry semantics remain provider-independent.
 
+Transactional email uses the shared Boşa Gezme! warm editorial tokens with email-safe system fonts, table layout, inline light-mode fallbacks, standard dark-mode color-scheme overrides, Outlook dark-mode selectors, a single accessible OTP block, and an equivalent plain-text part. The compact text wordmark is used because the illustrated square logo is not reliably legible or theme-safe at email-header size without a hosted immutable asset.
+
 Verification locks the code row. Identity creation runs in one serializable transaction:
 
 1. Look up the trusted identity by `(provider, subject)`.

@@ -401,29 +401,169 @@ func (w *Worker) render(j job) (Message, error) {
 }
 
 func RenderLoginCode(locale i18n.Locale, code string, minutes int) (Message, error) {
-	data := struct {
-		Code    string
-		Minutes int
-	}{code, minutes}
-	tpl, ok := loginCodeTemplates[locale]
+	copy, ok := loginCodeTemplates[locale]
 	if !ok {
-		tpl = loginCodeTemplates[i18n.DefaultLocale]
+		locale = i18n.DefaultLocale
+		copy = loginCodeTemplates[locale]
 	}
+	copy = resolveLoginCodeCopy(copy, code, minutes)
+	data := loginCodeTemplateData{Locale: string(locale), Brand: brand.ProductName, Code: code, Minutes: minutes, Copy: copy}
 	var html, text bytes.Buffer
-	if e := template.Must(template.New("html").Parse(tpl.HTML)).Execute(&html, data); e != nil {
+	if e := loginCodeHTMLTemplate.Execute(&html, data); e != nil {
 		return Message{}, e
 	}
-	if e := template.Must(template.New("text").Parse(tpl.Text)).Execute(&text, data); e != nil {
+	if e := loginCodeTextTemplate.Execute(&text, data); e != nil {
 		return Message{}, e
 	}
-	return Message{Subject: tpl.Subject, HTML: html.String(), Text: text.String()}, nil
+	return Message{Subject: copy.Subject, HTML: html.String(), Text: text.String()}, nil
 }
 
-type localizedEmailTemplate struct{ Subject, HTML, Text string }
+func resolveLoginCodeCopy(copy localizedEmailTemplate, code string, minutes int) localizedEmailTemplate {
+	values := []*string{&copy.Subject, &copy.Preheader, &copy.Eyebrow, &copy.Title, &copy.Intro, &copy.CodeLabel, &copy.Expiry, &copy.Security, &copy.Ignore, &copy.Footer}
+	for _, value := range values {
+		*value = strings.ReplaceAll(*value, "{{.Code}}", code)
+		*value = strings.ReplaceAll(*value, "{{.Minutes}}", fmt.Sprint(minutes))
+	}
+	return copy
+}
+
+type localizedEmailTemplate struct {
+	Subject, Preheader, Eyebrow, Title, Intro, CodeLabel, Expiry, Security, Ignore, Footer string
+}
+
+type loginCodeTemplateData struct {
+	Locale  string
+	Brand   string
+	Code    string
+	Minutes int
+	Copy    localizedEmailTemplate
+}
 
 var loginCodeTemplates = map[i18n.Locale]localizedEmailTemplate{
-	i18n.LocaleTR: {brand.ProductName + " giriş kodunuz", `<h1>` + brand.ProductName + ` giriş kodunuz</h1><p><strong>{{.Code}}</strong></p><p>Bu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın.</p>`, brand.ProductName + " giriş kodunuz: {{.Code}}\nBu kod {{.Minutes}} dakika geçerlidir. Kodu kimseyle paylaşmayın."},
-	i18n.LocaleEN: {"Your " + brand.ProductName + " sign-in code", `<h1>Your ` + brand.ProductName + ` sign-in code</h1><p><strong>{{.Code}}</strong></p><p>This code is valid for {{.Minutes}} minutes. Do not share it with anyone.</p>`, "Your " + brand.ProductName + " sign-in code: {{.Code}}\nThis code is valid for {{.Minutes}} minutes. Do not share it with anyone."},
-	i18n.LocaleDE: {"Ihr " + brand.ProductName + " Anmeldecode", `<h1>Ihr ` + brand.ProductName + ` Anmeldecode</h1><p><strong>{{.Code}}</strong></p><p>Dieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter.</p>`, "Ihr " + brand.ProductName + " Anmeldecode: {{.Code}}\nDieser Code ist {{.Minutes}} Minuten gültig. Geben Sie ihn nicht weiter."},
-	i18n.LocaleRU: {"Код входа в " + brand.ProductName, `<h1>Код входа в ` + brand.ProductName + `</h1><p><strong>{{.Code}}</strong></p><p>Код действителен {{.Minutes}} минут. Никому его не сообщайте.</p>`, "Код входа в " + brand.ProductName + ": {{.Code}}\nКод действителен {{.Minutes}} минут. Никому его не сообщайте."},
+	i18n.LocaleTR: {
+		Subject: brand.ProductName + " giriş kodunuz", Preheader: "Giriş kodunuz {{.Code}}. {{.Minutes}} dakika geçerlidir.", Eyebrow: "GÜVENLİ GİRİŞ", Title: "Giriş kodunuz hazır", Intro: brand.ProductName + " hesabınıza giriş yapmak için aşağıdaki kodu kullanın.", CodeLabel: "TEK KULLANIMLIK KOD", Expiry: "Bu kod {{.Minutes}} dakika geçerlidir.", Security: "Kodu kimseyle paylaşmayın. Ekibimiz sizden bu kodu asla istemez.", Ignore: "Bu girişi siz istemediyseniz bu e-postayı yok sayabilirsiniz.", Footer: "Gerçek mağazaları, gerçek ziyaretlerle keşfedin.",
+	},
+	i18n.LocaleEN: {
+		Subject: "Your " + brand.ProductName + " sign-in code", Preheader: "Your sign-in code is {{.Code}}. It is valid for {{.Minutes}} minutes.", Eyebrow: "SECURE SIGN-IN", Title: "Your sign-in code is ready", Intro: "Use the code below to sign in to your " + brand.ProductName + " account.", CodeLabel: "ONE-TIME CODE", Expiry: "This code is valid for {{.Minutes}} minutes.", Security: "Do not share this code. Our team will never ask you for it.", Ignore: "If you did not request this sign-in, you can safely ignore this email.", Footer: "Discover real stores through real visits.",
+	},
+	i18n.LocaleDE: {
+		Subject: "Ihr " + brand.ProductName + " Anmeldecode", Preheader: "Ihr Anmeldecode lautet {{.Code}} und ist {{.Minutes}} Minuten gültig.", Eyebrow: "SICHERE ANMELDUNG", Title: "Ihr Anmeldecode ist bereit", Intro: "Verwenden Sie den folgenden Code, um sich bei Ihrem " + brand.ProductName + " Konto anzumelden.", CodeLabel: "EINMALCODE", Expiry: "Dieser Code ist {{.Minutes}} Minuten gültig.", Security: "Geben Sie diesen Code nicht weiter. Unser Team wird Sie niemals danach fragen.", Ignore: "Wenn Sie diese Anmeldung nicht angefordert haben, können Sie diese E-Mail ignorieren.", Footer: "Entdecken Sie echte Geschäfte durch echte Besuche.",
+	},
+	i18n.LocaleRU: {
+		Subject: "Код входа в " + brand.ProductName, Preheader: "Ваш код входа: {{.Code}}. Он действует {{.Minutes}} минут.", Eyebrow: "БЕЗОПАСНЫЙ ВХОД", Title: "Ваш код для входа готов", Intro: "Используйте код ниже, чтобы войти в аккаунт " + brand.ProductName + ".", CodeLabel: "ОДНОРАЗОВЫЙ КОД", Expiry: "Код действует {{.Minutes}} минут.", Security: "Никому не сообщайте этот код. Наша команда никогда не попросит его назвать.", Ignore: "Если вы не запрашивали вход, просто проигнорируйте это письмо.", Footer: "Открывайте настоящие магазины благодаря реальным посещениям.",
+	},
 }
+
+var loginCodeHTMLTemplate = template.Must(template.New("login-code-html").Parse(`<!doctype html>
+<html lang="{{.Locale}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="supported-color-schemes" content="light dark">
+  <title>{{.Copy.Subject}}</title>
+  <style>
+    :root { color-scheme: light dark; supported-color-schemes: light dark; }
+    body, table, td, p, h1 { margin: 0; padding: 0; }
+    table { border-collapse: collapse; border-spacing: 0; }
+    img { border: 0; display: block; }
+    .email-canvas { background-color: #F7F5F0 !important; }
+    .email-surface { background-color: #FFFEFB !important; border-color: #D9D5CC !important; }
+    .email-ink { color: #262521 !important; }
+    .email-muted { color: #706D65 !important; }
+    .email-line { border-color: #D9D5CC !important; }
+    .email-code { background-color: #EFECE5 !important; border-color: #D9D5CC !important; }
+    .email-code-value { color: #833522 !important; }
+    .email-accent { color: #A34A32 !important; }
+    @media (prefers-color-scheme: dark) {
+      .email-canvas { background-color: #171714 !important; }
+      .email-surface { background-color: #24231F !important; border-color: #48463F !important; }
+      .email-ink { color: #F7F5F0 !important; }
+      .email-muted { color: #C5C0B6 !important; }
+      .email-line { border-color: #48463F !important; }
+      .email-code { background-color: #302521 !important; border-color: #68463B !important; }
+      .email-code-value { color: #F0A58F !important; }
+      .email-accent { color: #F0A58F !important; }
+    }
+    [data-ogsc] .email-canvas { background-color: #171714 !important; }
+    [data-ogsc] .email-surface { background-color: #24231F !important; border-color: #48463F !important; }
+    [data-ogsc] .email-ink { color: #F7F5F0 !important; }
+    [data-ogsc] .email-muted { color: #C5C0B6 !important; }
+    [data-ogsc] .email-line { border-color: #48463F !important; }
+    [data-ogsc] .email-code { background-color: #302521 !important; border-color: #68463B !important; }
+    [data-ogsc] .email-code-value { color: #F0A58F !important; }
+    [data-ogsc] .email-accent { color: #F0A58F !important; }
+    @media only screen and (max-width: 620px) {
+      .email-shell { width: 100% !important; }
+      .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }
+      .email-card { padding: 32px 24px !important; }
+      .email-title { font-size: 27px !important; line-height: 34px !important; }
+      .email-code-value { font-size: 30px !important; letter-spacing: 7px !important; }
+    }
+  </style>
+</head>
+<body class="email-canvas" style="margin:0; padding:0; width:100%; background-color:#F7F5F0; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%;">
+  <div style="display:none; max-height:0; overflow:hidden; opacity:0; color:transparent; mso-hide:all;">{{.Copy.Preheader}}</div>
+  <table role="presentation" width="100%" class="email-canvas" bgcolor="#F7F5F0" style="width:100%; background-color:#F7F5F0;">
+    <tr>
+      <td align="center" class="email-gutter" style="padding:40px 24px;">
+        <table role="presentation" width="600" class="email-shell" style="width:600px; max-width:600px;">
+          <tr>
+            <td style="padding:0 0 20px 0;">
+              <table role="presentation">
+                <tr>
+                  <td width="4" bgcolor="#A34A32" style="width:4px; background-color:#A34A32; font-size:0; line-height:0;">&nbsp;</td>
+                  <td class="email-ink" style="padding-left:12px; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:20px; line-height:26px; font-weight:700; letter-spacing:-0.2px;">{{.Brand}}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td class="email-surface email-card" bgcolor="#FFFEFB" style="padding:48px 48px 44px 48px; background-color:#FFFEFB; border:1px solid #D9D5CC;">
+              <p class="email-accent" style="margin:0 0 12px 0; color:#A34A32; font-family:Arial,'Helvetica Neue',sans-serif; font-size:12px; line-height:16px; font-weight:700; letter-spacing:1.4px;">{{.Copy.Eyebrow}}</p>
+              <h1 class="email-ink email-title" style="margin:0; color:#262521; font-family:Georgia,'Times New Roman',serif; font-size:32px; line-height:39px; font-weight:700; letter-spacing:-0.4px;">{{.Copy.Title}}</h1>
+              <p class="email-muted" style="margin:16px 0 0 0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:16px; line-height:25px;">{{.Copy.Intro}}</p>
+              <table role="presentation" width="100%" style="width:100%; margin-top:32px;">
+                <tr>
+                  <td class="email-code" align="center" bgcolor="#EFECE5" style="padding:22px 16px; background-color:#EFECE5; border:1px solid #D9D5CC; border-radius:6px;">
+                    <p class="email-muted" style="margin:0 0 8px 0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:11px; line-height:16px; font-weight:700; letter-spacing:1.2px;">{{.Copy.CodeLabel}}</p>
+                    <p class="email-code-value" style="margin:0; color:#833522; font-family:'Courier New',Courier,monospace; font-size:34px; line-height:42px; font-weight:700; letter-spacing:9px; white-space:nowrap;">{{.Code}}</p>
+                  </td>
+                </tr>
+              </table>
+              <p class="email-ink" style="margin:24px 0 0 0; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:15px; line-height:23px; font-weight:700;">{{.Copy.Expiry}}</p>
+              <p class="email-muted" style="margin:8px 0 0 0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:14px; line-height:22px;">{{.Copy.Security}}</p>
+              <table role="presentation" width="100%" style="width:100%; margin-top:28px;">
+                <tr><td class="email-line" style="border-top:1px solid #D9D5CC; font-size:0; line-height:0;">&nbsp;</td></tr>
+              </table>
+              <p class="email-muted" style="margin:20px 0 0 0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:13px; line-height:20px;">{{.Copy.Ignore}}</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:22px 20px 0 20px;">
+              <p class="email-muted" style="margin:0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:12px; line-height:18px;">{{.Copy.Footer}}</p>
+              <p class="email-muted" style="margin:4px 0 0 0; color:#706D65; font-family:Arial,'Helvetica Neue',sans-serif; font-size:12px; line-height:18px;">bosagezme.com</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`))
+
+var loginCodeTextTemplate = template.Must(template.New("login-code-text").Parse(`{{.Brand}}
+
+{{.Copy.Title}}
+{{.Copy.Intro}}
+
+{{.Copy.CodeLabel}}
+{{.Code}}
+
+{{.Copy.Expiry}}
+{{.Copy.Security}}
+
+{{.Copy.Ignore}}
+
+{{.Copy.Footer}}
+bosagezme.com`))
