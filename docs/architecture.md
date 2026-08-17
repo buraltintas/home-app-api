@@ -81,18 +81,24 @@ headers globally.
 ## E. Search architecture
 
 ```text
-raw query -> deterministic parser -> optional OpenAI enrichment -> validated SearchIntent
-                                                        |
-                        internal Postgres search --------+-------- Google Places
-                                                        |
-                                  match by provider ID, conservative dedupe
-                                                        |
-                                    platform stats enrichment -> explicit rank
-                                                        |
+raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
+                                      |
+                    +-----------------+-------------------+
+                    |                                     |
+          out_of_scope / unclear                    home_living
+          localized guidance only                         |
+                                          +---------------+---------------+
+                                          |                               |
+                             internal Postgres search             Google Places
+                                          |                               |
+                                          +---------------+---------------+
+                                                          |
+                               provider-ID match, conservative dedupe, ranking
+                                                          |
                                       persist search + impressions -> response
 ```
 
-Internal and external ratings remain separate. A Google-only result is materialized only after the backend refetches provider details; `(provider,external_id)` uniqueness makes this concurrency-safe. Provider retention is configuration-driven and raw Places payloads are not stored.
+The two home/living providers run concurrently. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above Google-only results; community and Google rating snapshots remain separate. Out-of-scope and unclear requests do not invoke either store provider. A Google-only result is materialized only after the backend refetches provider details; `(provider,external_id)` uniqueness makes this concurrency-safe. Provider retention is configuration-driven and raw Places payloads are not stored.
 
 Search accepts Turkish, English, German and Russian through one pipeline.
 Unicode-aware normalization preserves Cyrillic and performs only targeted accent

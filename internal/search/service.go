@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/errgroup"
 )
 
 type Service struct {
@@ -172,36 +173,52 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	if !i18n.IsSupported(intent.QueryLanguage) {
 		intent.QueryLanguage = requestLocale
 	}
-	internal, e := s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
-	if e != nil {
-		return Response{}, e
+	var guidance *Guidance
+	var internal []storepkg.Item
+	var external []Place
+	googleUsed := false
+	if intent.Scope == ScopeHomeLiving {
+		group, providerContext := errgroup.WithContext(ctx)
+		group.Go(func() error {
+			var providerErr error
+			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
+			return providerErr
+		})
+		if s.places != nil {
+			googleUsed = true
+			group.Go(func() error {
+				query := placesQuery(intent, in.Query)
+				var providerErr error
+				if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+					external, providerErr = localized.TextSearchLocalized(providerContext, query, in.Latitude, in.Longitude, in.RadiusMeters, requestLocale)
+				} else {
+					external, providerErr = s.places.TextSearch(providerContext, query, in.Latitude, in.Longitude, in.RadiusMeters)
+				}
+				if providerErr != nil {
+					fallback = joinFallback(fallback, "places_unavailable")
+					external = nil
+				}
+				return nil
+			})
+		}
+		if e := group.Wait(); e != nil {
+			return Response{}, e
+		}
+	} else {
+		guidance = guidanceFor(requestLocale, intent.Scope)
 	}
 	results := make([]Result, 0, len(internal)+20)
 	localIDs := map[uuid.UUID]bool{}
-	for _, x := range internal {
-		r := fromStore(x)
+	for rank, x := range internal {
+		r := fromStore(x, rank)
 		results = append(results, r)
 		localIDs[x.ID] = true
-	}
-	var external []Place
-	googleUsed := false
-	if s.places != nil {
-		googleUsed = true
-		if localized, ok := s.places.(LocalizedPlacesProvider); ok {
-			external, e = localized.TextSearchLocalized(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters, requestLocale)
-		} else {
-			external, e = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, in.RadiusMeters)
-		}
-		if e != nil {
-			fallback = joinFallback(fallback, "places_unavailable")
-			external = nil
-		}
 	}
 	mapped, e := s.lookupExternal(ctx, external)
 	if e != nil {
 		return Response{}, e
 	}
-	for _, p := range external {
+	for rank, p := range external {
 		if m, ok := mapped[p.PlaceID]; ok {
 			if localIDs[m.StoreID] {
 				for i := range results {
@@ -214,10 +231,10 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: 80 + float64(m.ReviewCount), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: platformScore(m, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
-			results = append(results, Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: 50 + p.Rating, externalPlaceID: p.PlaceID})
+			results = append(results, Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: googleScore(p, rank), externalPlaceID: p.PlaceID})
 		}
 	}
 	for i := range results {
@@ -270,13 +287,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			return Response{}, e
 		}
 	}
-	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + searchID.String(), UserID: user, VisitorSessionID: visitor, SearchID: &searchID, Metadata: map[string]any{"ai_used": aiUsed, "google_places_used": googleUsed, "zero_results": len(results) == 0}}); e != nil {
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + searchID.String(), UserID: user, VisitorSessionID: visitor, SearchID: &searchID, Metadata: map[string]any{"ai_used": aiUsed, "google_places_used": googleUsed, "scope": intent.Scope, "zero_results": len(results) == 0}}); e != nil {
 		return Response{}, e
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return Response{}, e
 	}
-	return Response{searchID, visitor, intent, results, fallback}, nil
+	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
 }
 func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]Platform, error) {
 	ids := make([]string, 0, len(places))
@@ -400,6 +417,9 @@ func roundedDistance(v *float64) *int {
 	return &n
 }
 func merge(a, b Intent) Intent {
+	if b.Scope == ScopeHomeLiving || (a.Scope != ScopeHomeLiving && (b.Scope == ScopeOutOfScope || b.Scope == ScopeUnclear)) {
+		a.Scope = b.Scope
+	}
 	if i18n.IsSupported(b.QueryLanguage) {
 		a.QueryLanguage = b.QueryLanguage
 	}
@@ -417,6 +437,9 @@ func merge(a, b Intent) Intent {
 	}
 	for _, v := range b.Attributes {
 		a.Attributes = appendUnique(a.Attributes, v)
+	}
+	for _, v := range b.SemanticTerms {
+		a.SemanticTerms = appendUnique(a.SemanticTerms, v)
 	}
 	if b.PriceIntent != "" {
 		a.PriceIntent = b.PriceIntent
@@ -452,6 +475,25 @@ func internalQuery(i Intent) string {
 		return i.NormalizedQuery
 	}
 	return strings.Join(terms, " OR ")
+}
+
+func placesQuery(i Intent, raw string) string {
+	terms := make([]string, 0, 1+len(i.ProductTerms)+len(i.SemanticTerms)+len(i.Categories))
+	terms = append(terms, strings.TrimSpace(raw))
+	parsed := append(append(append([]string{}, i.ProductTerms...), i.SemanticTerms...), i.Categories...)
+	for _, term := range parsed {
+		term = strings.TrimSpace(term)
+		if term == "" {
+			continue
+		}
+		terms = appendUnique(terms, strings.ReplaceAll(term, "_", " "))
+	}
+	query := strings.TrimSpace(strings.Join(terms, " "))
+	runes := []rune(query)
+	if len(runes) > 500 {
+		query = strings.TrimSpace(string(runes[:500]))
+	}
+	return query
 }
 func haversine(a, b, c, d float64) float64 {
 	const r = 6371000

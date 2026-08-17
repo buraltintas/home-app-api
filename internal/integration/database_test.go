@@ -56,6 +56,17 @@ func (p placesStub) TextSearch(context.Context, string, *float64, *float64, int)
 }
 func (p placesStub) PlaceDetails(context.Context, string) (search.Place, error) { return p.place, nil }
 
+type countingPlacesStub struct{ calls int }
+
+func (p *countingPlacesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
+	p.calls++
+	return nil, nil
+}
+
+func (p *countingPlacesStub) PlaceDetails(context.Context, string) (search.Place, error) {
+	return search.Place{}, errors.New("unexpected place details call")
+}
+
 func database(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -472,7 +483,7 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 	place := search.Place{PlaceID: placeID, Name: "External Locale Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03, Rating: 4.8, RatingCount: 321}
 	_, _, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
 
-	first, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleEN), &searcher, nil, search.Request{Query: "External Locale Store"})
+	first, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleEN), &searcher, nil, search.Request{Query: "furniture store External Locale Store"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +505,7 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 	if _, err = db.Exec(t.Context(), `UPDATE store_stats SET average_rating=3.25,rating_count=4,review_count=4,favorite_count=2,post_count=4 WHERE store_id=$1`, storeID); err != nil {
 		t.Fatal(err)
 	}
-	second, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleRU), &searcher, nil, search.Request{Query: "External Locale Store"})
+	second, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleRU), &searcher, nil, search.Request{Query: "furniture store External Locale Store"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -507,6 +518,32 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 	}
 	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 4.8 || enriched.Google.RatingCount != 321 {
 		t.Fatalf("enriched result=%+v", enriched)
+	}
+}
+
+func TestOutOfScopeSearchReturnsGuidanceWithoutCallingProviders(t *testing.T) {
+	db := database(t)
+	searcher := user(t, db, "search-scope-"+uuid.NewString()+"@example.test")
+	places := &countingPlacesStub{}
+	_, _, _, searchSvc, _ := services(t, db, googleStub{}, places)
+
+	response, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "Yakınımda lastikçi lazım"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Intent.Scope != search.ScopeOutOfScope || len(response.Results) != 0 || response.Guidance == nil || response.Guidance.Reason != search.ScopeOutOfScope {
+		t.Fatalf("unexpected response: %+v", response)
+	}
+	if places.calls != 0 {
+		t.Fatalf("places calls=%d", places.calls)
+	}
+	var internalCount, externalCount int
+	var googleUsed bool
+	if err = db.QueryRow(t.Context(), `SELECT internal_result_count,external_result_count,google_places_used FROM searches WHERE id=$1`, response.SearchID).Scan(&internalCount, &externalCount, &googleUsed); err != nil {
+		t.Fatal(err)
+	}
+	if internalCount != 0 || externalCount != 0 || googleUsed {
+		t.Fatalf("internal=%d external=%d google=%t", internalCount, externalCount, googleUsed)
 	}
 }
 
@@ -551,7 +588,7 @@ func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(post.Media) != 1 || post.Media[0] != created.Upload.StorageKey {
+	if len(post.Media) != 1 || post.Media[0].ID != created.ID || post.Media[0].URL != "/media/"+created.ID.String() {
 		t.Fatalf("post media=%v", post.Media)
 	}
 }

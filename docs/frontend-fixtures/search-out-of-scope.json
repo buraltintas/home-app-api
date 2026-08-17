@@ -1,0 +1,27 @@
+{
+  "search_id": "d2463b53-849d-46b0-948a-4d801cf81329",
+  "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
+  "intent": {
+    "scope": "out_of_scope",
+    "query_language": "tr",
+    "normalized_query": "yakınımda lastikçi lazım",
+    "location_text": "",
+    "categories": [],
+    "product_terms": [],
+    "style_terms": [],
+    "price_intent": "",
+    "attributes": [],
+    "sort_preference": "relevance",
+    "semantic_terms": []
+  },
+  "results": [],
+  "guidance": {
+    "code": "HOME_LIVING_ONLY",
+    "reason": "out_of_scope",
+    "message": "İsteğinizi anlayamadım. Yalnızca ev ürünleri mağazaları bulabilirim.",
+    "examples": [
+      "Perdelerimi yenilemek istiyorum",
+      "Nevresim takımı almak istiyorum"
+    ]
+  }
+}

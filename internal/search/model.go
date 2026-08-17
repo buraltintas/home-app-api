@@ -3,7 +3,9 @@ package search
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
+	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -14,6 +16,7 @@ import (
 )
 
 type Intent struct {
+	Scope           string      `json:"scope"`
 	QueryLanguage   i18n.Locale `json:"query_language"`
 	NormalizedQuery string      `json:"normalized_query"`
 	LocationText    string      `json:"location_text"`
@@ -88,13 +91,27 @@ type Response struct {
 	VisitorSessionID *uuid.UUID `json:"visitor_session_id,omitempty"`
 	Intent           Intent     `json:"intent"`
 	Results          []Result   `json:"results"`
+	Guidance         *Guidance  `json:"guidance,omitempty"`
 	FallbackState    string     `json:"fallback_state,omitempty"`
 }
+
+type Guidance struct {
+	Code     string   `json:"code"`
+	Reason   string   `json:"reason"`
+	Message  string   `json:"message"`
+	Examples []string `json:"examples"`
+}
+
+const (
+	ScopeHomeLiving = "home_living"
+	ScopeOutOfScope = "out_of_scope"
+	ScopeUnclear    = "unclear"
+)
 
 func Deterministic(raw string) Intent {
 	n := normalizeText(raw)
 	folded := foldLatin(n)
-	i := Intent{QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, SortPreference: "relevance"}
+	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, SortPreference: "relevance"}
 	type concept struct {
 		category string
 		product  string
@@ -105,7 +122,7 @@ func Deterministic(raw string) Intent {
 		{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "lighting", "chandelier", "lamp", "beleuchtung", "leuchter", "lampe", "освещение", "люстра", "лампа"}, nil},
 		{"curtain", "curtain", []string{"perde", "curtain", "gardine", "vorhang", "штор", "занавес"}, []string{"home_textile"}},
 		{"furniture", "furniture", []string{"mobilya", "koltuk", "masa", "sandalye", "furniture", "sofa", "table", "chair", "möbel", "sofa", "tisch", "stuhl", "мебел", "диван", "стол", "стул"}, nil},
-		{"home_textile", "home_textile", []string{"tekstil", "nevresim", "home textile", "bedding textile", "heimtextil", "домашний текстиль"}, nil},
+		{"home_textile", "home_textile", []string{"tekstil", "nevresim", "çarşaf", "yorgan", "battaniye", "havlu", "pike", "home textile", "duvet cover", "bed linen", "blanket", "towel", "bedding textile", "heimtextil", "bettwäsche", "handtuch", "домашний текстиль", "постельное белье", "одеяло", "полотенце"}, nil},
 		{"carpet", "carpet", []string{"halı", "kilim", "carpet", "rug", "teppich", "ковер", "ковёр"}, nil},
 		{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор"}, nil},
 		{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
@@ -113,6 +130,19 @@ func Deterministic(raw string) Intent {
 		{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
 		{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 		{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	}
+	if containsAnyFolded(n, folded, "çeyiz", "ceyiz", "dowry", "aussteuer", "приданое") {
+		i.Categories = appendUnique(i.Categories, "home_textile")
+		i.Categories = appendUnique(i.Categories, "bedding")
+		i.Categories = appendUnique(i.Categories, "kitchenware")
+		i.Categories = appendUnique(i.Categories, "tableware")
+		i.ProductTerms = appendUnique(i.ProductTerms, "dowry_set")
+		i.SemanticTerms = appendUnique(i.SemanticTerms, "home dowry shopping")
+	}
+	if containsAnyFolded(n, folded, "nevresim takımı", "nevresim takimi", "duvet cover set", "bettwäsche set", "комплект постельного белья") {
+		i.Categories = appendUnique(i.Categories, "home_textile")
+		i.Categories = appendUnique(i.Categories, "bedding")
+		i.ProductTerms = appendUnique(i.ProductTerms, "bedding_set")
 	}
 	for _, concept := range concepts {
 		for _, term := range concept.terms {
@@ -125,6 +155,11 @@ func Deterministic(raw string) Intent {
 				break
 			}
 		}
+	}
+	if len(i.Categories) > 0 || len(i.ProductTerms) > 0 {
+		i.Scope = ScopeHomeLiving
+	} else if containsAnyFolded(n, folded, "lastikçi", "lastikci", "lastik", "tire shop", "tyre shop", "reifen", "шиномонтаж", "restoran", "restaurant", "kuaför", "kuafor", "berber", "hairdresser", "eczane", "pharmacy", "oto servis", "car repair") {
+		i.Scope = ScopeOutOfScope
 	}
 	if containsAnyFolded(n, folded, "uygun fiyat", "ucuz", "ekonomik", "çok pahalı olmayan", "affordable", "cheap", "budget", "günstig", "preiswert", "nicht teuer", "недорог", "дешев", "бюджет") {
 		i.PriceIntent = "budget"
@@ -200,6 +235,9 @@ func containsAnyFolded(normalized, folded string, terms ...string) bool {
 	return false
 }
 func Validate(i Intent) error {
+	if i.Scope != ScopeHomeLiving && i.Scope != ScopeOutOfScope && i.Scope != ScopeUnclear {
+		return fmt.Errorf("invalid search scope")
+	}
 	if i.QueryLanguage != "" && !i18n.IsSupported(i.QueryLanguage) {
 		return fmt.Errorf("unsupported query language")
 	}
@@ -249,7 +287,41 @@ func containsAny(s string, terms ...string) bool {
 	}
 	return false
 }
-func fromStore(x storepkg.Item) Result {
+func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, score: 100 + float64(x.Platform.ReviewCount)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, score: platformScore(*p, rank)}
+}
+
+func platformScore(p Platform, relevanceRank int) float64 {
+	if p.ReviewCount > 0 {
+		return 300 + p.AverageRating*10 + math.Log1p(float64(p.ReviewCount))*15 + math.Log1p(float64(p.FavoriteCount))*3 - float64(relevanceRank)
+	}
+	return 80 - float64(relevanceRank)
+}
+
+func googleScore(p Place, relevanceRank int) float64 {
+	return 100 + p.Rating*4 + math.Log1p(float64(p.RatingCount))*2 - float64(relevanceRank)
+}
+
+var guidanceRotation atomic.Uint64
+
+type guidanceCopy struct {
+	message  string
+	examples []string
+}
+
+var localizedGuidance = map[i18n.Locale]guidanceCopy{
+	i18n.LocaleTR: {"İsteğinizi anlayamadım. Yalnızca ev ürünleri mağazaları bulabilirim.", []string{"Perdelerimi yenilemek istiyorum", "Nevresim takımı almak istiyorum", "Çeyiz alışverişi yapmak istiyorum", "Modern bir avize arıyorum", "Yeni bir yemek takımı lazım", "Salonuma uygun bir halı arıyorum"}},
+	i18n.LocaleEN: {"I couldn't understand that request. I can only find stores for home and living products.", []string{"I want to replace my curtains", "I need a new bedding set", "I'm shopping for home essentials", "I'm looking for a modern chandelier", "I need a new dinnerware set", "I'm looking for a rug for my living room"}},
+	i18n.LocaleDE: {"Ich konnte diese Anfrage nicht verstehen. Ich kann nur Geschäfte für Wohn- und Haushaltsprodukte finden.", []string{"Ich möchte meine Vorhänge erneuern", "Ich brauche neue Bettwäsche", "Ich suche Haushaltswaren für meine Aussteuer", "Ich suche einen modernen Kronleuchter", "Ich brauche ein neues Geschirrset", "Ich suche einen Teppich für mein Wohnzimmer"}},
+	i18n.LocaleRU: {"Не удалось понять запрос. Я могу искать только магазины товаров для дома.", []string{"Я хочу обновить шторы", "Мне нужен новый комплект постельного белья", "Я покупаю товары для дома", "Я ищу современную люстру", "Мне нужен новый столовый сервиз", "Я ищу ковёр для гостиной"}},
+}
+
+func guidanceFor(locale i18n.Locale, reason string) *Guidance {
+	c, ok := localizedGuidance[locale]
+	if !ok {
+		c = localizedGuidance[i18n.DefaultLocale]
+	}
+	start := int(guidanceRotation.Add(1)-1) % len(c.examples)
+	return &Guidance{Code: "HOME_LIVING_ONLY", Reason: reason, Message: c.message, Examples: []string{c.examples[start], c.examples[(start+1)%len(c.examples)]}}
 }

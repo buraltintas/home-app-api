@@ -2,6 +2,7 @@
   "search_id": "ca9f4ce3-f264-4b52-85f5-5f9469aa1249",
   "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
   "intent": {
+    "scope": "home_living",
     "query_language": "tr",
     "normalized_query": "kadıköy'de modern avize mağazaları",
     "location_text": "Kadikoy",

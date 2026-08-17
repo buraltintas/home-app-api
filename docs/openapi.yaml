@@ -492,8 +492,9 @@ components:
         external_sources: {type: array, items: {$ref: '#/components/schemas/ExternalSource'}}
     SearchIntent:
       type: object
-      required: [query_language, normalized_query, location_text, categories, product_terms, style_terms, price_intent, attributes, sort_preference, semantic_terms]
+      required: [scope, query_language, normalized_query, location_text, categories, product_terms, style_terms, price_intent, attributes, sort_preference, semantic_terms]
       properties:
+        scope: {type: string, enum: [home_living, out_of_scope, unclear]}
         query_language: {$ref: '#/components/schemas/Locale'}
         normalized_query: {type: string}
         location_text: {type: string}
@@ -544,6 +545,15 @@ components:
         visitor_session_id: {type: string, format: uuid}
         intent: {$ref: '#/components/schemas/SearchIntent'}
         results: {type: array, maxItems: 30, items: {$ref: '#/components/schemas/SearchResult'}}
+        guidance:
+          type: object
+          description: Present only when the query is outside home/living or cannot be understood. Providers are not queried and results is empty.
+          required: [code, reason, message, examples]
+          properties:
+            code: {const: HOME_LIVING_ONLY}
+            reason: {type: string, enum: [out_of_scope, unclear]}
+            message: {type: string}
+            examples: {type: array, minItems: 2, maxItems: 2, items: {type: string}}
         fallback_state: {type: string, description: Comma-joined provider degradation markers., examples: [ai_unavailable_or_invalid, places_unavailable, 'ai_unavailable_or_invalid,places_unavailable']}
     StoreSearchResponse:
       type: object
