@@ -462,6 +462,46 @@ func TestFeedCursorTieBreakerHasNoDuplicatesOrGaps(t *testing.T) {
 	}
 }
 
+func TestFeedWithLocationRanksStoresByViewerDistance(t *testing.T) {
+	db := database(t)
+	author := user(t, db, "nearby-feed-"+uuid.NewString()+"@example.test")
+	nearStore := store(t, db, 41.001, 29)
+	farStore := store(t, db, 41.02, 29)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	nearPost, farPost := uuid.New(), uuid.New()
+	created := time.Now().Add(48 * time.Hour).Truncate(time.Microsecond)
+	for _, item := range []struct {
+		id, store uuid.UUID
+		body      string
+	}{{nearPost, nearStore, "nearby feed near"}, {farPost, farStore, "nearby feed far"}} {
+		if _, err := db.Exec(t.Context(), `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,created_at) VALUES($1,$2,$3,$4,5,0,$5,$5)`, item.id, author, item.store, item.body, created); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lat, lon := 41.0, 29.0
+	items, _, err := socialSvc.Feed(t.Context(), nil, "", 50, social.FeedContext{Latitude: &lat, Longitude: &lon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nearIndex, farIndex := -1, -1
+	lastDistance := -1.0
+	for index, item := range items {
+		if item.StoreDistanceMeters == nil || *item.StoreDistanceMeters < lastDistance {
+			t.Fatalf("feed is not distance ordered at %d: %+v", index, item)
+		}
+		lastDistance = *item.StoreDistanceMeters
+		if item.ID == nearPost {
+			nearIndex = index
+		}
+		if item.ID == farPost {
+			farIndex = index
+		}
+	}
+	if nearIndex < 0 || farIndex < 0 || nearIndex >= farIndex {
+		t.Fatalf("near_index=%d far_index=%d", nearIndex, farIndex)
+	}
+}
+
 func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
 	db := database(t)
 	placeID := "integration-place-" + uuid.NewString()

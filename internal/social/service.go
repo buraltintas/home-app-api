@@ -57,27 +57,33 @@ type VisitVerification struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 }
 type Post struct {
-	ID              uuid.UUID    `json:"id"`
-	UserID          uuid.UUID    `json:"user_id"`
-	StoreID         uuid.UUID    `json:"store_id"`
-	Text            string       `json:"text"`
-	ContentLanguage string       `json:"content_language,omitempty"`
-	Rating          int          `json:"rating"`
-	VisitVerified   bool         `json:"visit_verified"`
-	DistanceMeters  float64      `json:"distance_meters"`
-	CreatedAt       time.Time    `json:"created_at"`
-	Username        string       `json:"username"`
-	DisplayName     string       `json:"display_name"`
-	AvatarURL       string       `json:"avatar_url"`
-	StoreName       string       `json:"store_name"`
-	StoreCity       string       `json:"store_city"`
-	StoreDistrict   string       `json:"store_district"`
-	Media           []MediaAsset `json:"media"`
-	LikeCount       int          `json:"like_count"`
-	CommentCount    int          `json:"comment_count"`
-	ViewerLiked     bool         `json:"viewer_has_liked"`
-	ViewerFollows   bool         `json:"viewer_follows_author"`
-	ViewerFavorited bool         `json:"viewer_has_favorited_store"`
+	ID                  uuid.UUID    `json:"id"`
+	UserID              uuid.UUID    `json:"user_id"`
+	StoreID             uuid.UUID    `json:"store_id"`
+	Text                string       `json:"text"`
+	ContentLanguage     string       `json:"content_language,omitempty"`
+	Rating              int          `json:"rating"`
+	VisitVerified       bool         `json:"visit_verified"`
+	DistanceMeters      float64      `json:"distance_meters"`
+	StoreDistanceMeters *float64     `json:"store_distance_meters,omitempty"`
+	CreatedAt           time.Time    `json:"created_at"`
+	Username            string       `json:"username"`
+	DisplayName         string       `json:"display_name"`
+	AvatarURL           string       `json:"avatar_url"`
+	StoreName           string       `json:"store_name"`
+	StoreCity           string       `json:"store_city"`
+	StoreDistrict       string       `json:"store_district"`
+	Media               []MediaAsset `json:"media"`
+	LikeCount           int          `json:"like_count"`
+	CommentCount        int          `json:"comment_count"`
+	ViewerLiked         bool         `json:"viewer_has_liked"`
+	ViewerFollows       bool         `json:"viewer_follows_author"`
+	ViewerFavorited     bool         `json:"viewer_has_favorited_store"`
+}
+
+type FeedContext struct {
+	Latitude  *float64
+	Longitude *float64
 }
 type MediaAsset struct {
 	ID       uuid.UUID `json:"id"`
@@ -240,33 +246,59 @@ func (s *Service) VerifyVisit(ctx context.Context, user, store uuid.UUID, latitu
 	return out, tx.Commit(ctx)
 }
 
-func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, limit int) ([]Post, string, error) {
+func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, limit int, options ...FeedContext) ([]Post, string, error) {
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
+	var feedContext FeedContext
+	if len(options) > 0 {
+		feedContext = options[0]
+	}
+	if (feedContext.Latitude == nil) != (feedContext.Longitude == nil) || (feedContext.Latitude != nil && !storepkg.ValidCoordinates(*feedContext.Latitude, *feedContext.Longitude)) {
+		return nil, "", httpapi.ErrInvalidInput
+	}
+	mode := "recent"
+	if feedContext.Latitude != nil {
+		mode = "nearby"
+	}
 	var before time.Time
 	var beforeID uuid.UUID
+	var beforeDistance *float64
 	if cursor != "" {
 		b, e := base64.RawURLEncoding.DecodeString(cursor)
 		if e != nil {
 			return nil, "", httpapi.ErrInvalidInput
 		}
 		var c struct {
-			Time time.Time `json:"t"`
-			ID   uuid.UUID `json:"id"`
+			Mode     string    `json:"m"`
+			Distance *float64  `json:"d,omitempty"`
+			Time     time.Time `json:"t"`
+			ID       uuid.UUID `json:"id"`
 		}
-		if json.Unmarshal(b, &c) != nil {
+		if json.Unmarshal(b, &c) != nil || c.Time.IsZero() || c.ID == uuid.Nil {
+			return nil, "", httpapi.ErrInvalidInput
+		}
+		if c.Mode == "" {
+			c.Mode = "recent"
+		}
+		if c.Mode != mode || (mode == "nearby" && (c.Distance == nil || *c.Distance < 0)) {
 			return nil, "", httpapi.ErrInvalidInput
 		}
 		before, beforeID = c.Time, c.ID
+		beforeDistance = c.Distance
 	}
-	rows, e := s.db.Query(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,
+	rows, e := s.db.Query(ctx, `WITH feed AS (SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,'') content_language,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,
  coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),
  (SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),
  EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$1),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$1),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$1),
- coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb)
+ coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),
+ CASE WHEN $5::float8 IS NULL OR $6::float8 IS NULL THEN NULL ELSE ST_Distance(st.location,ST_SetSRID(ST_MakePoint($6,$5),4326)::geography) END store_distance_meters
  FROM posts p JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL JOIN user_profiles up ON up.user_id=u.id JOIN stores st ON st.id=p.store_id AND st.deleted_at IS NULL
- WHERE p.deleted_at IS NULL AND ($2::timestamptz IS NULL OR (p.created_at,p.id)<($2,$3)) ORDER BY p.created_at DESC,p.id DESC LIMIT $4`, viewer, nilTime(before), nilUUID(beforeID), limit+1)
+ WHERE p.deleted_at IS NULL)
+ SELECT * FROM feed WHERE
+ ($5::float8 IS NULL AND ($2::timestamptz IS NULL OR (created_at,id)<($2,$3))) OR
+ ($5::float8 IS NOT NULL AND ($7::float8 IS NULL OR store_distance_meters>$7 OR (store_distance_meters=$7 AND (created_at,id)<($2,$3))))
+ ORDER BY store_distance_meters ASC NULLS LAST,created_at DESC,id DESC LIMIT $4`, viewer, nilTime(before), nilUUID(beforeID), limit+1, feedContext.Latitude, feedContext.Longitude, beforeDistance)
 	if e != nil {
 		return nil, "", e
 	}
@@ -274,7 +306,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 	var out []Post
 	for rows.Next() {
 		var p Post
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media); e != nil {
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media, &p.StoreDistanceMeters); e != nil {
 			return nil, "", e
 		}
 		out = append(out, p)
@@ -286,7 +318,11 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 	if len(out) > limit {
 		out = out[:limit]
 		last := out[len(out)-1]
-		b, _ := json.Marshal(map[string]any{"t": last.CreatedAt, "id": last.ID})
+		cursorValue := map[string]any{"m": mode, "t": last.CreatedAt, "id": last.ID}
+		if mode == "nearby" {
+			cursorValue["d"] = last.StoreDistanceMeters
+		}
+		b, _ := json.Marshal(cursorValue)
 		next = base64.RawURLEncoding.EncodeToString(b)
 	}
 	return out, next, nil

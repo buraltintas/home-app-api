@@ -159,9 +159,9 @@ Exact request/response schemas and status responses are in OpenAPI.
 
 ## 9. Feed, posts, and media
 
-`GET /v1/feed?limit=20&cursor=...` returns newest-first posts. Treat `cursor` as opaque; `next_cursor` is `""` when done (there is no `has_more`). Compare anonymous and authenticated fixtures: viewer flags are false anonymously and account-specific when authenticated.
+`GET /v1/feed?limit=20&cursor=...` returns newest-first posts when no location is supplied. With a valid paired `latitude`/`longitude`, it returns reviews ordered by the viewer's distance to each store, nearest first. Feed coordinates are request-scoped and not persisted. Explain the nearby-feed benefit before requesting location; if permission is denied, use the chronological feed. Treat `cursor` as opaque, keep the same location mode and coordinates for subsequent pages, and note that `next_cursor` is `""` when done (there is no `has_more`). Compare anonymous and authenticated fixtures: viewer flags are false anonymously and account-specific when authenticated.
 
-A post contains IDs for post/author/store; original text and optional `content_language`; rating; backend-derived `visit_verified` and distance; timestamp; denormalized author/store display fields; ordered `media`; counts; and viewer liked/followed/favorited booleans. `media[].url` is backend-origin-relative (for example `/media/<uuid>`), so resolve it against the Go API origin, not the Next BFF page origin unless that route is proxied. See [`post-detail.json`](./frontend-fixtures/post-detail.json).
+A post contains IDs for post/author/store; original text and optional `content_language`; rating; backend-derived `visit_verified` and visit-verification `distance_meters`; timestamp; denormalized author/store display fields; ordered `media`; counts; and viewer liked/followed/favorited booleans. Location-aware feed responses additionally include `store_distance_meters`, which is the viewer-to-store distance and must not be confused with visit verification. `media[].url` is backend-origin-relative (for example `/media/<uuid>`), so resolve it against the Go API origin, not the Next BFF page origin unless that route is proxied. See [`post-detail.json`](./frontend-fixtures/post-detail.json).
 
 Create with:
 

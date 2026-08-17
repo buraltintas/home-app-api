@@ -2,8 +2,11 @@ package social
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/google/uuid"
@@ -14,6 +17,18 @@ func TestCreatePostRejectsDuplicateMediaBeforeDatabaseWrite(t *testing.T) {
 	_, err := (&Service{}).CreatePost(context.Background(), uuid.New(), CreatePost{StoreID: uuid.New(), Text: "Geçerli yorum", Rating: 5, Latitude: 41, Longitude: 29, MediaIDs: []uuid.UUID{id, id}})
 	if err == nil {
 		t.Fatal("duplicate media accepted")
+	}
+}
+
+func TestFeedRejectsCursorModeMismatchBeforeDatabaseRead(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{"m": "recent", "t": time.Now(), "id": uuid.New()})
+	cursor := base64.RawURLEncoding.EncodeToString(raw)
+	lat, lon := 41.0, 29.0
+	if _, _, err := (&Service{}).Feed(context.Background(), nil, cursor, 20, FeedContext{Latitude: &lat, Longitude: &lon}); err == nil {
+		t.Fatal("recent cursor accepted for nearby feed")
+	}
+	if _, _, err := (&Service{}).Feed(context.Background(), nil, "", 20, FeedContext{Latitude: &lat}); err == nil {
+		t.Fatal("unpaired feed coordinates accepted")
 	}
 }
 

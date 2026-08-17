@@ -304,7 +304,13 @@ func queryInt(r *http.Request, key string, d int) int {
 }
 
 func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
-	items, next, e := s.social.Feed(r.Context(), viewer(r), r.URL.Query().Get("cursor"), queryInt(r, "limit", 20))
+	lat, e := queryFloat(r, "latitude")
+	lon, lonErr := queryFloat(r, "longitude")
+	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	items, next, e := s.social.Feed(r.Context(), viewer(r), r.URL.Query().Get("cursor"), queryInt(r, "limit", 20), social.FeedContext{Latitude: lat, Longitude: lon})
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

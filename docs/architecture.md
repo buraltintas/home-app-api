@@ -4,7 +4,7 @@
 
 Boşa Gezme! is a modular Go monolith for discovering and reviewing real home/living store locations. Its canonical product domain is `bosagezme.com`. PostgreSQL is the system of record; PostGIS provides indexed geographic filtering and distance checks. External systems sit behind narrow interfaces. Stores exist independently of users, so a later claim/merchant model can reference `stores` without changing store identity.
 
-The first feed is keyset-paginated reverse chronology. Search intent is parsed deterministically first and optionally enriched by AI; only validated domain fields reach SQL. Aggregates are transactionally updated in `store_stats`, while normalized social tables remain authoritative and a recalculation command repairs drift.
+The feed is keyset-paginated: reverse chronology without location, and stable viewer-to-store distance followed by reverse chronology when a coordinate pair is supplied. Search intent is parsed deterministically first and optionally enriched by AI; only validated domain fields reach SQL. Aggregates are transactionally updated in `store_stats`, while normalized social tables remain authoritative and a recalculation command repairs drift.
 
 ## A. Repository tree
 
