@@ -112,7 +112,7 @@ paths:
     get:
       tags: [Discovery]
       summary: Resolve manually entered city, district, or neighborhood text
-      description: Returns geographic Google Places candidates only. Clients should debounce input and use a selected candidate's coordinates for feed/search/nearby discovery, never for visit verification.
+      description: Accepts human-readable location text and returns geographic Google Places candidates only. UI must show name/address, never coordinate input fields; returned coordinates are transport-only discovery context and never visit verification evidence.
       parameters:
         - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 120}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}
@@ -432,8 +432,8 @@ components:
         place_id: {type: string}
         name: {type: string}
         address: {type: string}
-        latitude: {type: number, minimum: -90, maximum: 90}
-        longitude: {type: number, minimum: -180, maximum: 180}
+        latitude: {type: number, minimum: -90, maximum: 90, description: Transport-only resolved value; never shown as a manual user input.}
+        longitude: {type: number, minimum: -180, maximum: 180, description: Transport-only resolved value; never shown as a manual user input.}
         types: {type: array, items: {type: string}}
         attributions: {type: array, items: {type: string}}
     VisitVerification:
