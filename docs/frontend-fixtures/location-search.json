@@ -1,0 +1,24 @@
+{
+  "items": [
+    {
+      "provider": "google",
+      "place_id": "ChIJP5iLHkQGykARF0F0T1k_4mE",
+      "name": "Kadıköy",
+      "address": "Kadıköy/İstanbul, Türkiye",
+      "latitude": 40.9917,
+      "longitude": 29.0277,
+      "types": ["administrative_area_level_2", "political"],
+      "attributions": ["Google"]
+    },
+    {
+      "provider": "google",
+      "place_id": "ChIJModaNeighborhoodExample",
+      "name": "Moda",
+      "address": "Caferağa, Kadıköy/İstanbul, Türkiye",
+      "latitude": 40.9819,
+      "longitude": 29.0251,
+      "types": ["neighborhood", "political"],
+      "attributions": ["Google"]
+    }
+  ]
+}

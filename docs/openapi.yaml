@@ -108,6 +108,15 @@ paths:
         - {name: latitude, in: query, schema: {type: number, minimum: -90, maximum: 90}}
         - {name: longitude, in: query, schema: {type: number, minimum: -180, maximum: 180}}
       responses: {'200': {$ref: '#/components/responses/Feed'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/locations/search:
+    get:
+      tags: [Discovery]
+      summary: Resolve manually entered city, district, or neighborhood text
+      description: Returns geographic Google Places candidates only. Clients should debounce input and use a selected candidate's coordinates for feed/search/nearby discovery, never for visit verification.
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 120}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}
+      responses: {'200': {description: Geographic candidates, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/LocationResult'}}}}}}}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}, '502': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
   /v1/search:
     post:
       tags: [Discovery]
@@ -415,6 +424,18 @@ components:
               accuracy_meters: {type: number, exclusiveMinimum: 0}
   schemas:
     Locale: {type: string, enum: [tr, en, de, ru]}
+    LocationResult:
+      type: object
+      required: [provider, place_id, name, address, latitude, longitude, types, attributions]
+      properties:
+        provider: {const: google}
+        place_id: {type: string}
+        name: {type: string}
+        address: {type: string}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        types: {type: array, items: {type: string}}
+        attributions: {type: array, items: {type: string}}
     VisitVerification:
       type: object
       required: [id, store_id, distance_meters, verified_at, expires_at]

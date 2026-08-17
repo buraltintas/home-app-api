@@ -48,6 +48,17 @@ type PlacesProvider interface {
 	TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error)
 	PlaceDetails(context.Context, string) (Place, error)
 }
+
+type LocationResult struct {
+	Provider     string   `json:"provider"`
+	PlaceID      string   `json:"place_id"`
+	Name         string   `json:"name"`
+	Address      string   `json:"address"`
+	Latitude     float64  `json:"latitude"`
+	Longitude    float64  `json:"longitude"`
+	Types        []string `json:"types"`
+	Attributions []string `json:"attributions"`
+}
 type LocalizedPlacesProvider interface {
 	TextSearchLocalized(context.Context, string, *float64, *float64, int, i18n.Locale) ([]Place, error)
 }

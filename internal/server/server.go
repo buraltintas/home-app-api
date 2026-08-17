@@ -81,6 +81,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		socialLimit := appmw.NewLimiter(60, 15)
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
+		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
@@ -316,6 +317,16 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"items": items, "next_cursor": next})
+}
+
+func (s *Server) searchLocations(w http.ResponseWriter, r *http.Request) {
+	limit := queryInt(r, "limit", 5)
+	items, e := s.search.ResolveLocations(r.Context(), r.URL.Query().Get("q"), limit)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()

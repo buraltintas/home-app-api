@@ -131,6 +131,47 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	return out, err
 }
 
+func (s *Service) ResolveLocations(ctx context.Context, query string, limit int) ([]LocationResult, error) {
+	query = strings.TrimSpace(query)
+	if utf8.RuneCountInString(query) < 2 || utf8.RuneCountInString(query) > 120 || limit < 1 || limit > 10 {
+		return nil, httpapi.ErrInvalidInput
+	}
+	if s.places == nil {
+		return nil, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Location provider is not configured")
+	}
+	var places []Place
+	var err error
+	if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+		places, err = localized.TextSearchLocalized(ctx, query, nil, nil, 50000, i18n.FromContext(ctx))
+	} else {
+		places, err = s.places.TextSearch(ctx, query, nil, nil, 50000)
+	}
+	if err != nil {
+		return nil, httpapi.E(502, "PLACES_UNAVAILABLE", "Location provider is temporarily unavailable")
+	}
+	results := make([]LocationResult, 0, limit)
+	for _, place := range places {
+		if !isGeographicPlace(place.Types) || strings.TrimSpace(place.PlaceID) == "" || strings.TrimSpace(place.Name) == "" || !storepkg.ValidCoordinates(place.Latitude, place.Longitude) {
+			continue
+		}
+		results = append(results, LocationResult{Provider: "google", PlaceID: place.PlaceID, Name: place.Name, Address: place.Address, Latitude: place.Latitude, Longitude: place.Longitude, Types: append([]string{}, place.Types...), Attributions: append([]string{}, place.Attributions...)})
+		if len(results) == limit {
+			break
+		}
+	}
+	return results, nil
+}
+
+func isGeographicPlace(types []string) bool {
+	for _, placeType := range types {
+		switch placeType {
+		case "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3", "administrative_area_level_4", "locality", "neighborhood", "postal_town", "sublocality", "sublocality_level_1", "sublocality_level_2":
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
 	in.Query = strings.TrimSpace(in.Query)

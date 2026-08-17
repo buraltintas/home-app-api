@@ -129,6 +129,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `POST /v1/auth/refresh` | none | `refresh_token` → rotated pair | `INVALID_REFRESH_TOKEN` |
 | `POST /v1/auth/logout`, `/logout-all` | required | empty → 204 | auth errors |
 | `GET /v1/feed` | optional | `cursor`, `limit` → `{items,next_cursor}`; default 20/max 50 | invalid cursor |
+| `GET /v1/locations/search` | optional | manual city/district/neighborhood text → geographic Google candidates; default 5/max 10 | input/rate/provider errors |
 | `POST /v1/search` | optional | search request → structured results; no pagination, max 30 | input/rate/provider errors |
 | `GET /v1/stores/search`, `/nearby` | optional | `q`, coordinate pair, radius, limit → `{search_id,visitor_session_id,items}`; default 20/max 50 | `INVALID_INPUT` |
 | `POST /v1/stores/resolve-external` | required | `{provider:"google",place_id}` → `{id}` | provider errors |
@@ -162,6 +163,19 @@ Exact request/response schemas and status responses are in OpenAPI.
 `GET /v1/feed?limit=20&cursor=...` returns newest-first posts when no location is supplied. With a valid paired `latitude`/`longitude`, it returns reviews ordered by the viewer's distance to each store, nearest first. Feed coordinates are request-scoped and not persisted. Explain the nearby-feed benefit before requesting location; if permission is denied, use the chronological feed. Treat `cursor` as opaque, keep the same location mode and coordinates for subsequent pages, and note that `next_cursor` is `""` when done (there is no `has_more`). Compare anonymous and authenticated fixtures: viewer flags are false anonymously and account-specific when authenticated.
 
 A post contains IDs for post/author/store; original text and optional `content_language`; rating; backend-derived `visit_verified` and visit-verification `distance_meters`; timestamp; denormalized author/store display fields; ordered `media`; counts; and viewer liked/followed/favorited booleans. Location-aware feed responses additionally include `store_distance_meters`, which is the viewer-to-store distance and must not be confused with visit verification. `media[].url` is backend-origin-relative (for example `/media/<uuid>`), so resolve it against the Go API origin, not the Next BFF page origin unless that route is proxied. See [`post-detail.json`](./frontend-fixtures/post-detail.json).
+
+### Location choice on web and mobile
+
+Do not request location at app/page launch. When the user first chooses nearby feed, nearby stores, maps, or location-aware search, show short localized benefit copy and two equal, explicit actions: **Use current location** and **Choose a location**. Also provide **Not now**; it keeps the chronological/non-location experience usable.
+
+- Web: request browser geolocation only from the user's action. Browser code sends selected coordinates only through the same-origin BFF. The BFF forwards them to feed/search/store endpoints and must not expose backend credentials.
+- Mobile: request platform “while using the app” permission only from the user's action. Do not request background location. Forward fresh native coordinates through the isolated API transport.
+- Denied, restricted, unavailable, or deliberately skipped permission: immediately keep the product usable and show manual location selection. Never repeatedly trigger the system permission dialog.
+- Manual entry: debounce after the user enters at least two characters, call `GET /v1/locations/search?q=<text>&limit=5`, and render the returned geographic candidates with provider attribution. See [`location-search.json`](./frontend-fixtures/location-search.json). Use the selected candidate's `latitude`/`longitude` for nearby feed, hybrid search, classic nearby search, and distance display.
+- Keep a visible, keyboard/screen-reader accessible location control showing the active choice, with Change and Clear actions. Persist a manual choice or granted current-location preference only after the user chooses it; treat coordinates as sensitive and do not place them in analytics or logs.
+- Manual location is discovery context only. It must never be submitted to `/visit-verifications` or used as evidence for a review. Review verification always requires fresh native/browser device geolocation and horizontal accuracy while the user is physically present.
+
+All visible copy and location/error states must exist in `tr`, `en`, `de`, and `ru`. Cover loading suggestions, no geographic matches, provider unavailable, permission prompt, denied/restricted permission, location unavailable, active manual location, and clear/change states.
 
 Create with:
 
@@ -287,7 +301,7 @@ Push tables/services support device platform/token, locale, preferences, templat
 
 Next.js should proxy `/v1` calls server-side, inject its server-only secret, forward bearer token, `X-Locale`/`Accept-Language`, visitor ID, origin attribution headers, status, error body, `Retry-After`, and request ID without rewriting stable error codes. Keep refresh tokens in an appropriate secure server-side/HTTP-only session design; never expose the backend BFF secret to browser code.
 
-React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, explain the review/nearby benefit immediately before asking location permission, send fresh coordinates plus horizontal accuracy for current review verification or on-site visit verification, and follow the direct-upload sequence. Treat the embedded BFF header as public/recoverable and never as user authentication.
+React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, implement the current/manual location choice above, explain the review/nearby benefit immediately before asking location permission, send fresh coordinates plus horizontal accuracy for current review verification or on-site visit verification, and follow the direct-upload sequence. Treat the embedded BFF header as public/recoverable and never as user authentication.
 
 ## 15. Backend-supported frontend states
 
@@ -330,7 +344,8 @@ Frontend must never expose the BFF secret in browser JavaScript; send OpenAI/Goo
 - [ ] OTP and Google auth work; token refresh is serialized and rotated token replaces old token.
 - [ ] Logout and refresh-reuse failure clear local session.
 - [ ] Favorite/like/follow/comment/review prompt sign-in when anonymous.
-- [ ] Review obtains fresh location and handles proximity rejection.
+- [ ] Nearby discovery offers current location, manual location, and a usable permission-denied fallback.
+- [ ] Review obtains fresh device location and never reuses manual discovery coordinates for verification.
 - [ ] Direct media upload sends exact headers, finalizes, then attaches IDs.
 - [ ] Search/result IDs and idempotency keys propagate to interaction/attribution calls.
 - [ ] `tr/en/de/ru` locale is forwarded; canonical values remain untranslated.
