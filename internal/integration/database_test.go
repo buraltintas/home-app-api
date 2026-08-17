@@ -94,7 +94,7 @@ func services(t *testing.T, db *pgxpool.Pool, google auth.GoogleVerifier, places
 	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
 	authSvc := auth.NewService(db, auth.Config{OTPTTL: 10 * time.Minute, OTPMaxAttempts: 5, OTPEmailLimit: 20, OTPIPLimit: 20, OTPVisitorLimit: 20, VisitorTTL: 24 * time.Hour, RefreshTTL: 24 * time.Hour, HashKey: []byte(testHashKey)}, tokens, google, report)
 	stores := storepkg.NewService(db, report)
-	socialSvc := social.NewService(db, 500, report)
+	socialSvc := social.NewService(db, social.Config{ReviewRadiusMeters: 500, VisitProofTTL: 30 * 24 * time.Hour, MaxLocationAccuracyMeters: 100}, report)
 	searchSvc := search.NewService(db, stores, nil, places, "", 3, report, 72*time.Hour, 24*time.Hour)
 	return authSvc, stores, socialSvc, searchSvc, report
 }
@@ -396,6 +396,35 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	}
 	if first.RegisteredUsersTotal != second.RegisteredUsersTotal || first.PostsCurrentTotal != second.PostsCurrentTotal || first.SearchesLifetime != second.SearchesLifetime {
 		t.Fatalf("rebuild is not idempotent: first=%+v second=%+v", first, second)
+	}
+}
+
+func TestStoredVisitVerificationCanCreateExactlyOneLaterReview(t *testing.T) {
+	db := database(t)
+	author := user(t, db, "visit-proof-"+uuid.NewString()+"@example.test")
+	storeID := store(t, db, 41, 29)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+
+	if _, err := socialSvc.VerifyVisit(t.Context(), author, storeID, 41, 29, 101); appCode(err) != "INVALID_INPUT" {
+		t.Fatalf("inaccurate visit: %v", err)
+	}
+	if _, err := socialSvc.VerifyVisit(t.Context(), author, storeID, 41.01, 29, 10); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
+		t.Fatalf("distant visit: %v", err)
+	}
+	proof, err := socialSvc.VerifyVisit(t.Context(), author, storeID, 41, 29, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Daha önce doğruladığım mağaza ziyareti", Rating: 5, VisitVerificationID: &proof.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := socialSvc.GetPost(t.Context(), postID, &author)
+	if err != nil || !post.VisitVerified || post.DistanceMeters != proof.DistanceMeters {
+		t.Fatalf("post=%+v err=%v proof=%+v", post, err, proof)
+	}
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Aynı kanıt yeniden kullanılamaz", Rating: 4, VisitVerificationID: &proof.ID}); appCode(err) != "VISIT_VERIFICATION_INVALID" {
+		t.Fatalf("reused proof: %v", err)
 	}
 }
 

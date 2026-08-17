@@ -108,6 +108,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/me/searches", s.deleteMySearches)
 			r.Delete("/me/searches/{id}", s.deleteMySearch)
 			r.With(writeLimit.Middleware).Post("/posts", s.createPost)
+			r.With(writeLimit.Middleware).Post("/stores/{id}/visit-verifications", s.verifyStoreVisit)
 			r.With(writeLimit.Middleware).Post("/media/uploads", s.createMediaUpload)
 			r.With(writeLimit.Middleware).Post("/media/{id}/complete", s.completeMediaUpload)
 			r.Delete("/posts/{id}", s.deletePost)
@@ -561,6 +562,28 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		_ = s.search.Attribute(r.Context(), *in.OriginSearchID, *in.OriginSearchResultID, p.UserID, in.StoreID, "review_created", "review:"+id.String())
 	}
 	JSON(w, 201, map[string]any{"id": id})
+}
+
+func (s *Server) verifyStoreVisit(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	storeID, e := parseID(r)
+	var in struct {
+		Latitude       float64 `json:"latitude"`
+		Longitude      float64 `json:"longitude"`
+		AccuracyMeters float64 `json:"accuracy_meters"`
+	}
+	if e == nil {
+		e = Decode(w, r, &in, 16<<10)
+	}
+	var verification social.VisitVerification
+	if e == nil {
+		verification, e = s.social.VerifyVisit(r.Context(), p.UserID, storeID, in.Latitude, in.Longitude, in.AccuracyMeters)
+	}
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusCreated, verification)
 }
 func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
 	s.idAction(w, r, func(p, id uuid.UUID) error { return s.social.DeletePost(r.Context(), p, id) })

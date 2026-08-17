@@ -5,6 +5,7 @@
     "scope": "home_living",
     "query_language": "en",
     "normalized_query": "lighting stores near me",
+    "store_name": "",
     "location_text": "",
     "categories": ["lighting"],
     "product_terms": ["chandelier"],

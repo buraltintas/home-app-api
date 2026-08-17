@@ -35,7 +35,8 @@ type Config struct {
 	ObjectStoragePathStyle                                                 bool
 	ObjectStorageUploadTTL                                                 time.Duration
 	MediaMaxBytes                                                          int64
-	StoreReviewRadiusMeters                                                float64
+	StoreReviewRadiusMeters, StoreLocationMaxAccuracyMeters                float64
+	StoreVisitProofTTL                                                     time.Duration
 	SearchLocationDecimals                                                 int
 	ReportingTimezone                                                      string
 	SearchAttributionWindow                                                time.Duration
@@ -104,6 +105,12 @@ func Load() (Config, error) {
 	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 500); err != nil {
 		return c, err
 	}
+	if c.StoreLocationMaxAccuracyMeters, err = number("STORE_LOCATION_MAX_ACCURACY_METERS", 100); err != nil {
+		return c, err
+	}
+	if c.StoreVisitProofTTL, err = duration("STORE_VISIT_PROOF_TTL", 30*24*time.Hour); err != nil {
+		return c, err
+	}
 	if c.ObjectStorageUploadTTL, err = duration("OBJECT_STORAGE_UPLOAD_TTL", 15*time.Minute); err != nil {
 		return c, err
 	}
@@ -165,6 +172,15 @@ func Load() (Config, error) {
 	}
 	if c.SearchLocationDecimals < 0 || c.SearchLocationDecimals > 5 {
 		return c, errors.New("SEARCH_LOCATION_DECIMALS must be 0..5")
+	}
+	if c.StoreReviewRadiusMeters <= 0 || c.StoreReviewRadiusMeters > 5000 {
+		return c, errors.New("STORE_REVIEW_RADIUS_METERS must be greater than 0 and at most 5000")
+	}
+	if c.StoreLocationMaxAccuracyMeters <= 0 || c.StoreLocationMaxAccuracyMeters > 1000 {
+		return c, errors.New("STORE_LOCATION_MAX_ACCURACY_METERS must be greater than 0 and at most 1000")
+	}
+	if c.StoreVisitProofTTL < time.Hour || c.StoreVisitProofTTL > 365*24*time.Hour {
+		return c, errors.New("STORE_VISIT_PROOF_TTL must be between 1h and 8760h")
 	}
 	if c.ObjectStorageProvider == "s3" || c.ObjectStorageProvider == "r2" {
 		if c.ObjectStorageAccessKey == "" || c.ObjectStorageSecretKey == "" || c.Bucket == "" {

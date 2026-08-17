@@ -5,6 +5,7 @@
     "scope": "home_living",
     "query_language": "tr",
     "normalized_query": "kadıköy'de modern avize mağazaları",
+    "store_name": "",
     "location_text": "Kadikoy",
     "categories": ["lighting"],
     "product_terms": ["chandelier"],

@@ -423,6 +423,9 @@ func merge(a, b Intent) Intent {
 	if i18n.IsSupported(b.QueryLanguage) {
 		a.QueryLanguage = b.QueryLanguage
 	}
+	if b.StoreName != "" {
+		a.StoreName = b.StoreName
+	}
 	if b.LocationText != "" {
 		a.LocationText = b.LocationText
 	}
@@ -469,7 +472,11 @@ func joinFallback(a, b string) string {
 	return a + "," + b
 }
 func internalQuery(i Intent) string {
-	terms := append([]string{}, i.ProductTerms...)
+	terms := make([]string, 0, 1+len(i.ProductTerms)+len(i.SemanticTerms))
+	if i.StoreName != "" {
+		terms = append(terms, i.StoreName)
+	}
+	terms = append(terms, i.ProductTerms...)
 	terms = append(terms, i.SemanticTerms...)
 	if len(terms) == 0 {
 		return i.NormalizedQuery
@@ -478,9 +485,9 @@ func internalQuery(i Intent) string {
 }
 
 func placesQuery(i Intent, raw string) string {
-	terms := make([]string, 0, 1+len(i.ProductTerms)+len(i.SemanticTerms)+len(i.Categories))
+	terms := make([]string, 0, 2+len(i.ProductTerms)+len(i.SemanticTerms)+len(i.Categories))
 	terms = append(terms, strings.TrimSpace(raw))
-	parsed := append(append(append([]string{}, i.ProductTerms...), i.SemanticTerms...), i.Categories...)
+	parsed := append(append(append([]string{i.StoreName}, i.ProductTerms...), i.SemanticTerms...), i.Categories...)
 	for _, term := range parsed {
 		term = strings.TrimSpace(term)
 		if term == "" {

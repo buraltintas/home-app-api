@@ -18,6 +18,8 @@ const (
 	PostCreated           = "post_created"
 	PostDeleted           = "post_deleted"
 	PostVisitVerified     = "post_visit_verified"
+	StoreVisitVerified    = "store_visit_verified"
+	StoreVisitRejected    = "store_visit_rejected"
 	PostLocationRejected  = "post_location_rejected"
 	FavoriteCreated       = "favorite_created"
 	FavoriteRemoved       = "favorite_removed"

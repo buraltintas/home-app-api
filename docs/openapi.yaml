@@ -154,6 +154,15 @@ paths:
       summary: Reviews for a store
       parameters: [{$ref: '#/components/parameters/ID'}, {$ref: '#/components/parameters/PageLimit50'}]
       responses: {'200': {$ref: '#/components/responses/PostList'}}
+  /v1/stores/{id}/visit-verifications:
+    post:
+      tags: [Social]
+      summary: Verify a physical store visit for one later review
+      description: Uses server receipt time, stores no raw device coordinates, and returns a single-use expiring verification.
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody: {$ref: '#/components/requestBodies/VisitVerification'}
+      responses: {'201': {description: Visit verified, content: {application/json: {schema: {$ref: '#/components/schemas/VisitVerification'}}}}, '400': {$ref: '#/components/responses/Error'}, '404': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
   /v1/stores/{id}/favorite:
     post:
       tags: [Social]
@@ -374,19 +383,45 @@ components:
         application/json:
           schema:
             type: object
-            required: [store_id, text, rating, latitude, longitude]
+            required: [store_id, text, rating]
+            oneOf:
+              - required: [latitude, longitude]
+              - required: [visit_verification_id]
             properties:
               store_id: {type: string, format: uuid}
               text: {type: string, minLength: 3, maxLength: 5000}
               rating: {type: integer, minimum: 1, maximum: 5}
               latitude: {type: number, minimum: -90, maximum: 90}
               longitude: {type: number, minimum: -180, maximum: 180}
+              accuracy_meters: {type: number, exclusiveMinimum: 0, description: Mobile horizontal accuracy. Required by clients for robust current-location verification.}
+              visit_verification_id: {type: string, format: uuid, description: Single-use unexpired verification previously issued for this user and store.}
               media_ids: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, format: uuid}}
               origin_search_id: {type: [string, 'null'], format: uuid}
               origin_search_result_id: {type: [string, 'null'], format: uuid}
               content_language: {$ref: '#/components/schemas/Locale', description: Optional language metadata; content is stored unchanged.}
+    VisitVerification:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [latitude, longitude, accuracy_meters]
+            properties:
+              latitude: {type: number, minimum: -90, maximum: 90}
+              longitude: {type: number, minimum: -180, maximum: 180}
+              accuracy_meters: {type: number, exclusiveMinimum: 0}
   schemas:
     Locale: {type: string, enum: [tr, en, de, ru]}
+    VisitVerification:
+      type: object
+      required: [id, store_id, distance_meters, verified_at, expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        store_id: {type: string, format: uuid}
+        distance_meters: {type: number, minimum: 0}
+        verified_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
     Error:
       type: object
       required: [error, request_id]
@@ -492,11 +527,12 @@ components:
         external_sources: {type: array, items: {$ref: '#/components/schemas/ExternalSource'}}
     SearchIntent:
       type: object
-      required: [scope, query_language, normalized_query, location_text, categories, product_terms, style_terms, price_intent, attributes, sort_preference, semantic_terms]
+      required: [scope, query_language, normalized_query, store_name, location_text, categories, product_terms, style_terms, price_intent, attributes, sort_preference, semantic_terms]
       properties:
         scope: {type: string, enum: [home_living, out_of_scope, unclear]}
         query_language: {$ref: '#/components/schemas/Locale'}
         normalized_query: {type: string}
+        store_name: {type: string, maxLength: 160, description: Extracted home/living store or brand name; empty when absent.}
         location_text: {type: string}
         categories: {type: array, items: {type: string}}
         product_terms: {type: array, items: {type: string}}

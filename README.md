@@ -126,7 +126,7 @@ See [.env.example](.env.example). Important groups are:
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, local `EMAIL_DEVELOPMENT_DIR`, `RESEND_API_KEY` (legacy `EMAIL_API_KEY` also works), optional `EMAIL_API_URL`
-- domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `SEARCH_LOCATION_DECIMALS`
+- domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `STORE_LOCATION_MAX_ACCURACY_METERS`, `STORE_VISIT_PROOF_TTL`, `SEARCH_LOCATION_DECIMALS`
 - media: `OBJECT_STORAGE_PROVIDER=development|gcs|s3|r2`; GCS uses Application Default Credentials plus `OBJECT_STORAGE_BUCKET` and optional `GCS_SIGNING_SERVICE_ACCOUNT`; S3/R2 use endpoint/region/static credentials; all providers use upload TTL and `MEDIA_MAX_BYTES`
 - reporting: `REPORTING_TIMEZONE`, `SEARCH_ATTRIBUTION_WINDOW_HOURS`
 - operations: `METRICS_TOKEN`, `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`

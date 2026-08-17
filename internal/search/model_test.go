@@ -54,6 +54,9 @@ func TestIntentRejectsOversizedOrMalformedValues(t *testing.T) {
 	if Validate(Intent{Scope: ScopeHomeLiving, SemanticTerms: []string{"safe\nunsafe"}}) == nil {
 		t.Fatal("control character accepted")
 	}
+	if Validate(Intent{Scope: ScopeOutOfScope, StoreName: "Unrelated Shop"}) == nil {
+		t.Fatal("out-of-scope store name accepted")
+	}
 }
 
 func TestIntentCountsUnicodeCharactersNotBytes(t *testing.T) {
@@ -112,6 +115,22 @@ func TestDeterministicRejectsUnrelatedAndMarksChitchatUnclear(t *testing.T) {
 	}
 	if got := Deterministic("naber merhaba").Scope; got != ScopeUnclear {
 		t.Fatalf("chitchat scope=%q", got)
+	}
+}
+
+func TestDeterministicRecognizesHomeStoreName(t *testing.T) {
+	for _, query := range []string{"IKEA", "Madame Coco Kadıköy", "Koçtaş"} {
+		intent := Deterministic(query)
+		if intent.Scope != ScopeHomeLiving || intent.StoreName == "" {
+			t.Fatalf("%q produced %+v", query, intent)
+		}
+		if got := internalQuery(intent); !strings.Contains(got, intent.StoreName) {
+			t.Fatalf("internal query %q missing store name %q", got, intent.StoreName)
+		}
+	}
+	enriched := merge(Deterministic("özel ev mağazası"), Intent{Scope: ScopeHomeLiving, StoreName: "Özel Ev"})
+	if enriched.Scope != ScopeHomeLiving || enriched.StoreName != "Özel Ev" {
+		t.Fatalf("AI store name was not merged: %+v", enriched)
 	}
 }
 

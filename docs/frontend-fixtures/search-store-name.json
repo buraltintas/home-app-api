@@ -1,0 +1,36 @@
+{
+  "search_id": "c2a466c3-8959-4721-8247-a8a65e7c25b4",
+  "visitor_session_id": "0ca7353b-f3eb-49b1-acbb-957744549fb4",
+  "intent": {
+    "scope": "home_living",
+    "query_language": "tr",
+    "normalized_query": "ikea bayrampaşa",
+    "store_name": "IKEA",
+    "location_text": "Bayrampaşa",
+    "categories": [],
+    "product_terms": [],
+    "style_terms": [],
+    "price_intent": "",
+    "attributes": [],
+    "sort_preference": "relevance",
+    "semantic_terms": []
+  },
+  "results": [
+    {
+      "search_result_impression_id": "b03d5888-bf56-47ec-ac62-fb10d79758ba",
+      "source": "google",
+      "name": "IKEA Bayrampaşa",
+      "address": "Kocatepe, Paşa Cd. No:1, Bayrampaşa/İstanbul",
+      "latitude": 41.0476,
+      "longitude": 28.8975,
+      "distance_meters": 1820.4,
+      "categories": [],
+      "google": {
+        "provider": "google",
+        "place_id": "ChIJIkeaBayrampasaExample",
+        "rating": 4.2,
+        "rating_count": 24180
+      }
+    }
+  ]
+}

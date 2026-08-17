@@ -56,7 +56,7 @@ func main() {
 	}
 	authSvc := auth.NewService(db, auth.Config{OTPTTL: cfg.OTPTTL, OTPMaxAttempts: cfg.OTPMaxAttempts, OTPEmailLimit: cfg.OTPEmailRequestLimit, OTPIPLimit: cfg.OTPIPRequestLimit, OTPVisitorLimit: cfg.OTPVisitorRequestLimit, VisitorTTL: time.Duration(cfg.VisitorRetentionDays) * 24 * time.Hour, RefreshTTL: cfg.RefreshTokenTTL, HashKey: []byte(cfg.OTPHashSecret)}, tokens, auth.NewGoogleVerifier(cfg.GoogleClientID), reportSvc)
 	stores := storepkg.NewService(db, reportSvc)
-	socialSvc := social.NewService(db, cfg.StoreReviewRadiusMeters, reportSvc)
+	socialSvc := social.NewService(db, social.Config{ReviewRadiusMeters: cfg.StoreReviewRadiusMeters, VisitProofTTL: cfg.StoreVisitProofTTL, MaxLocationAccuracyMeters: cfg.StoreLocationMaxAccuracyMeters}, reportSvc)
 	var ai searchpkg.IntentParser
 	if cfg.OpenAIAPIKey != "" {
 		ai = searchpkg.NewOpenAIParser(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout)

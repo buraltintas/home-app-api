@@ -19,6 +19,7 @@ type Intent struct {
 	Scope           string      `json:"scope"`
 	QueryLanguage   i18n.Locale `json:"query_language"`
 	NormalizedQuery string      `json:"normalized_query"`
+	StoreName       string      `json:"store_name"`
 	LocationText    string      `json:"location_text"`
 	Categories      []string    `json:"categories"`
 	ProductTerms    []string    `json:"product_terms"`
@@ -111,7 +112,7 @@ const (
 func Deterministic(raw string) Intent {
 	n := normalizeText(raw)
 	folded := foldLatin(n)
-	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, SortPreference: "relevance"}
+	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, Categories: []string{}, ProductTerms: []string{}, StyleTerms: []string{}, Attributes: []string{}, SortPreference: "relevance", SemanticTerms: []string{}}
 	type concept struct {
 		category string
 		product  string
@@ -130,6 +131,14 @@ func Deterministic(raw string) Intent {
 		{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
 		{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 		{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	}
+	knownHomeStores := []string{"ikea", "koçtaş", "koctas", "madame coco", "english home", "karaca", "paşabahçe", "pasabahce", "vivense", "bellona", "istikbal", "istikbal mobilya", "taç", "tac"}
+	for _, storeName := range knownHomeStores {
+		if containsNormalized(n, folded, storeName) {
+			i.StoreName = storeName
+			i.Scope = ScopeHomeLiving
+			break
+		}
 	}
 	if containsAnyFolded(n, folded, "çeyiz", "ceyiz", "dowry", "aussteuer", "приданое") {
 		i.Categories = appendUnique(i.Categories, "home_textile")
@@ -156,7 +165,7 @@ func Deterministic(raw string) Intent {
 			}
 		}
 	}
-	if len(i.Categories) > 0 || len(i.ProductTerms) > 0 {
+	if i.StoreName != "" || len(i.Categories) > 0 || len(i.ProductTerms) > 0 {
 		i.Scope = ScopeHomeLiving
 	} else if containsAnyFolded(n, folded, "lastikçi", "lastikci", "lastik", "tire shop", "tyre shop", "reifen", "шиномонтаж", "restoran", "restaurant", "kuaför", "kuafor", "berber", "hairdresser", "eczane", "pharmacy", "oto servis", "car repair") {
 		i.Scope = ScopeOutOfScope
@@ -187,6 +196,15 @@ func Deterministic(raw string) Intent {
 		if i.LocationText != "" {
 			break
 		}
+	}
+	if i.Scope != ScopeHomeLiving {
+		i.StoreName = ""
+		i.Categories = i.Categories[:0]
+		i.ProductTerms = i.ProductTerms[:0]
+		i.StyleTerms = i.StyleTerms[:0]
+		i.PriceIntent = ""
+		i.Attributes = i.Attributes[:0]
+		i.SemanticTerms = i.SemanticTerms[:0]
 	}
 	return i
 }
@@ -242,8 +260,14 @@ func Validate(i Intent) error {
 		return fmt.Errorf("unsupported query language")
 	}
 	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "storage": true, "home_accessories": true, "household": true}
-	if utf8.RuneCountInString(i.NormalizedQuery) > 500 || utf8.RuneCountInString(i.LocationText) > 120 {
+	if utf8.RuneCountInString(i.NormalizedQuery) > 500 || utf8.RuneCountInString(i.StoreName) > 160 || utf8.RuneCountInString(i.LocationText) > 120 {
 		return fmt.Errorf("intent text too long")
+	}
+	if i.StoreName != "" && (strings.TrimSpace(i.StoreName) == "" || strings.ContainsAny(i.StoreName, "\x00\r\n")) {
+		return fmt.Errorf("invalid store name")
+	}
+	if i.Scope != ScopeHomeLiving && (i.StoreName != "" || len(i.Categories) > 0 || len(i.ProductTerms) > 0 || len(i.StyleTerms) > 0 || i.PriceIntent != "" || len(i.Attributes) > 0 || len(i.SemanticTerms) > 0) {
+		return fmt.Errorf("non-home intent contains search terms")
 	}
 	if len(i.Categories) > 8 || len(i.ProductTerms) > 12 || len(i.StyleTerms) > 8 || len(i.Attributes) > 8 || len(i.SemanticTerms) > 12 {
 		return fmt.Errorf("too many intent values")

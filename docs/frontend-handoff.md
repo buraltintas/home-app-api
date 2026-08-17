@@ -8,7 +8,7 @@ Boşa Gezme! is a social discovery and physical-store review platform focused on
 
 `Discover → Search → Open Store → Visit Physically → Review → Social Interaction`
 
-Stores do not need to be platform members. Browsing is anonymous; login is required for mutations. Review creation is proximity checked by the backend (500 m by default).
+Stores do not need to be platform members. Browsing is anonymous; login is required for mutations. Review creation is proximity checked by the backend (500 m by default) using either current coordinates or a single-use proof captured while the user was on site.
 
 ## 2. Connection and client headers
 
@@ -18,7 +18,7 @@ Stores do not need to be platform members. Browsing is anonymous; login is requi
 | Staging | Not configured in this repository; inject a frontend server/runtime environment variable. |
 | Production | Product/web domain is `https://bosagezme.com`; the Go API deployment origin is not assigned in this repository and must be injected server-side. |
 
-Frontend-relevant backend configuration includes `BFF_SECRETS`, `DEFAULT_LOCALE`, token/OTP TTLs, `GOOGLE_CLIENT_ID`, `MEDIA_MAX_BYTES`, `OBJECT_STORAGE_UPLOAD_TTL`, `STORE_REVIEW_RADIUS_METERS`, and `VISITOR_RETENTION_DAYS`. Never copy backend provider keys or secrets into public frontend variables.
+Frontend-relevant backend configuration includes `BFF_SECRETS`, `DEFAULT_LOCALE`, token/OTP TTLs, `GOOGLE_CLIENT_ID`, `MEDIA_MAX_BYTES`, `OBJECT_STORAGE_UPLOAD_TTL`, `STORE_REVIEW_RADIUS_METERS`, `STORE_LOCATION_MAX_ACCURACY_METERS`, `STORE_VISIT_PROOF_TTL`, and `VISITOR_RETENTION_DAYS`. Never copy backend provider keys or secrets into public frontend variables.
 
 Common request headers:
 
@@ -102,6 +102,7 @@ Messages can be localized; branch UI logic only on `code`. Unknown JSON fields, 
 | `INVALID_INPUT` | Show field/general validation feedback. |
 | `STORE_NOT_FOUND`, `POST_NOT_FOUND`, `COMMENT_NOT_FOUND`, `USER_NOT_FOUND`, `SEARCH_NOT_FOUND`, `MEDIA_NOT_FOUND` | Show not-found state. |
 | `STORE_VISIT_NOT_VERIFIED` | Explain the user must be physically near the store. |
+| `VISIT_VERIFICATION_INVALID` | Discard the expired/used proof and request a new on-site verification or fresh current location. |
 | `USERNAME_TAKEN` | Request another username. |
 | `CANNOT_FOLLOW_SELF` | Suppress self-follow UI. |
 | `DUPLICATE_MEDIA`, `INVALID_MEDIA` | Correct media selection/readiness before retry. |
@@ -133,6 +134,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `POST /v1/stores/resolve-external` | required | `{provider:"google",place_id}` → `{id}` | provider errors |
 | `GET /v1/stores/{id}` | optional | optional coordinate pair → `{store,recent_posts}` (5 posts) | not found/input |
 | `GET /v1/stores/{id}/posts` | optional | limit → `{items}`; default 20/max 50, no next page token | — |
+| `POST /v1/stores/{id}/visit-verifications` | required | fresh mobile coordinates + horizontal accuracy → single-use expiring visit proof | proximity/input/rate errors |
 | `POST`, `DELETE /v1/stores/{id}/favorite` | required | empty → 204, idempotent | not found/auth |
 | `POST /v1/posts` | required | review payload → `{id}` | media/proximity/input |
 | `GET /v1/posts/{id}` | optional | post object | not found |
@@ -164,10 +166,19 @@ A post contains IDs for post/author/store; original text and optional `content_l
 Create with:
 
 ```json
-{"store_id":"...","text":"Işık çok sıcak ve güzel.","rating":5,"latitude":40.9901,"longitude":29.0292,"media_ids":["..."],"origin_search_id":"...","origin_search_result_id":"...","content_language":"tr"}
+{"store_id":"...","text":"Işık çok sıcak ve güzel.","rating":5,"latitude":40.9901,"longitude":29.0292,"accuracy_meters":18.4,"media_ids":["..."],"origin_search_id":"...","origin_search_result_id":"...","content_language":"tr"}
 ```
 
-`text` is 3–5000 Unicode characters; rating is 1–5; at most 10 unique ready media IDs owned by the caller. Do not send `visit_verified`: the server calculates distance and rejects beyond the configured radius with HTTP 422 `STORE_VISIT_NOT_VERIFIED`. Deleting is owner-only and soft-deletes.
+`text` is 3–5000 Unicode characters; rating is 1–5; at most 10 unique ready media IDs owned by the caller. Do not send `visit_verified`: the server calculates distance and rejects beyond the configured radius with HTTP 422 `STORE_VISIT_NOT_VERIFIED`. Send mobile horizontal accuracy when using current coordinates; accuracy contributes conservatively to the proximity boundary. Deleting is owner-only and soft-deletes.
+
+To let a user write later about a real visit, verify while they are physically present:
+
+```json
+POST /v1/stores/<store-id>/visit-verifications
+{"latitude":40.9901,"longitude":29.0292,"accuracy_meters":18.4}
+```
+
+The response contains `id`, `store_id`, backend-computed `distance_meters`, `verified_at`, and `expires_at`; see [`visit-verification.json`](./frontend-fixtures/visit-verification.json). The server uses receipt time and stores distance/accuracy, not raw device coordinates. Keep the proof ID in secure app storage. A later review replaces coordinates with `"visit_verification_id":"..."`. A proof is bound to its authenticated user and store, expires after `STORE_VISIT_PROOF_TTL` (default 30 days), and is consumed atomically by one review. Never send both current coordinates and a proof. Client-supplied historical timestamps or historical coordinates are not accepted as evidence.
 
 Media upload sequence:
 
@@ -213,7 +224,7 @@ Query is 2–500 Unicode characters. Coordinates are optional but must be suppli
 
 The backend, not frontend, optionally asks OpenAI to parse intent, runs deterministic fallback parsing, queries internal/PostGIS and optional Google Places, deduplicates/enriches, ranks, and returns structured data. The frontend never calls OpenAI or Places and never receives their keys/prompts.
 
-`intent` fields are exactly `scope`, `query_language`, `normalized_query`, `location_text`, `categories`, `product_terms`, `style_terms`, `price_intent`, `attributes`, `sort_preference`, `semantic_terms`. `scope` is `home_living`, `out_of_scope`, or `unclear`. Canonical values are language-independent. Examples: Turkish `modern avize`, English `modern chandelier`, German `moderner Kronleuchter`, and Russian `современная люстра` all map to locale-specific `query_language` plus compatible canonical `lighting`/`chandelier` intent. Returned intent may be rendered as filter chips but must not be treated as a user-authored translation.
+`intent` fields are exactly `scope`, `query_language`, `normalized_query`, `store_name`, `location_text`, `categories`, `product_terms`, `style_terms`, `price_intent`, `attributes`, `sort_preference`, `semantic_terms`. `scope` is `home_living`, `out_of_scope`, or `unclear`. `store_name` contains an extracted home/living store or brand name and is empty when absent. A bare store-name query such as `IKEA` or `Madame Coco`, including a name plus location, is a valid `home_living` search even without product/category terms; see [`search-store-name.json`](./frontend-fixtures/search-store-name.json). Canonical values are language-independent. Examples: Turkish `modern avize`, English `modern chandelier`, German `moderner Kronleuchter`, and Russian `современная люстра` all map to locale-specific `query_language` plus compatible canonical `lighting`/`chandelier` intent. Returned intent may be rendered as filter chips but must not be treated as a user-authored translation.
 
 Every result always has `search_result_impression_id`, source, name, address, coordinates, and category array. `id`, city/district/distance, `platform`, and `google` depend on source/context. Array order is ranking; no separate rank field exists. Full mixed and zero-result examples are fixtures.
 
@@ -276,7 +287,7 @@ Push tables/services support device platform/token, locale, preferences, templat
 
 Next.js should proxy `/v1` calls server-side, inject its server-only secret, forward bearer token, `X-Locale`/`Accept-Language`, visitor ID, origin attribution headers, status, error body, `Retry-After`, and request ID without rewriting stable error codes. Keep refresh tokens in an appropriate secure server-side/HTTP-only session design; never expose the backend BFF secret to browser code.
 
-React Native should use secure token storage, serialize refreshes, persist visitor UUID, forward device locale, ask location permission only when needed, send fresh coordinates for review creation, and follow the direct-upload sequence. Treat the embedded BFF header as public/recoverable and never as user authentication.
+React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, explain the review/nearby benefit immediately before asking location permission, send fresh coordinates plus horizontal accuracy for current review verification or on-site visit verification, and follow the direct-upload sequence. Treat the embedded BFF header as public/recoverable and never as user authentication.
 
 ## 15. Backend-supported frontend states
 
@@ -285,7 +296,7 @@ React Native should use secure token storage, serialize refreshes, persist visit
 | Store | platform-reviewed; no community reviews (`review_count=0`); Google-only search result needing resolution; enriched platform+Google; viewer favorited/not; viewer reviewed/not. |
 | Post | liked/not, author followed/not, store favorited/not, media/no media. Published posts are visit-verified; an unverified published state is not produced. |
 | User | anonymous viewer, authenticated own profile, authenticated other profile; following state is available in post context. |
-| Search | results, zero results, Google-only result, provider fallback marker, provider hard error, persisted visitor. |
+| Search | product/category intent, bare store-name intent, results, zero results, Google-only result, provider fallback marker, provider hard error, persisted visitor. |
 | Auth | signed out, active access token, refresh in flight, irrecoverably expired/revoked. |
 | Upload | authorization created, binary uploading, finalize pending, ready, expired/mismatch. |
 

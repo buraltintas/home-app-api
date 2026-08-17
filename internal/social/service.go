@@ -20,13 +20,19 @@ import (
 )
 
 type Service struct {
-	db           *pgxpool.Pool
-	reviewRadius float64
-	report       *reporting.Service
+	db     *pgxpool.Pool
+	cfg    Config
+	report *reporting.Service
 }
 
-func NewService(db *pgxpool.Pool, r float64, report *reporting.Service) *Service {
-	return &Service{db, r, report}
+type Config struct {
+	ReviewRadiusMeters        float64
+	VisitProofTTL             time.Duration
+	MaxLocationAccuracyMeters float64
+}
+
+func NewService(db *pgxpool.Pool, cfg Config, report *reporting.Service) *Service {
+	return &Service{db: db, cfg: cfg, report: report}
 }
 
 type CreatePost struct {
@@ -35,10 +41,20 @@ type CreatePost struct {
 	Rating               int         `json:"rating"`
 	Latitude             float64     `json:"latitude"`
 	Longitude            float64     `json:"longitude"`
+	AccuracyMeters       *float64    `json:"accuracy_meters"`
+	VisitVerificationID  *uuid.UUID  `json:"visit_verification_id"`
 	MediaIDs             []uuid.UUID `json:"media_ids"`
 	OriginSearchID       *uuid.UUID  `json:"origin_search_id"`
 	OriginSearchResultID *uuid.UUID  `json:"origin_search_result_id"`
 	ContentLanguage      *string     `json:"content_language"`
+}
+
+type VisitVerification struct {
+	ID             uuid.UUID `json:"id"`
+	StoreID        uuid.UUID `json:"store_id"`
+	DistanceMeters float64   `json:"distance_meters"`
+	VerifiedAt     time.Time `json:"verified_at"`
+	ExpiresAt      time.Time `json:"expires_at"`
 }
 type Post struct {
 	ID              uuid.UUID    `json:"id"`
@@ -84,7 +100,17 @@ type Comment struct {
 func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost) (uuid.UUID, error) {
 	in.Text = strings.TrimSpace(in.Text)
 	textLength := utf8.RuneCountInString(in.Text)
-	if in.StoreID == uuid.Nil || textLength < 3 || textLength > 5000 || in.Rating < 1 || in.Rating > 5 || !storepkg.ValidCoordinates(in.Latitude, in.Longitude) || len(in.MediaIDs) > 10 {
+	hasProof := in.VisitVerificationID != nil
+	if in.StoreID == uuid.Nil || textLength < 3 || textLength > 5000 || in.Rating < 1 || in.Rating > 5 || (!hasProof && !storepkg.ValidCoordinates(in.Latitude, in.Longitude)) || len(in.MediaIDs) > 10 {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if hasProof && (in.Latitude != 0 || in.Longitude != 0 || in.AccuracyMeters != nil) {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if hasProof && *in.VisitVerificationID == uuid.Nil {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if !hasProof && in.AccuracyMeters != nil && (*in.AccuracyMeters <= 0 || *in.AccuracyMeters > s.cfg.MaxLocationAccuracyMeters) {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))
@@ -111,27 +137,50 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	}
 	defer tx.Rollback(ctx)
 	var distance float64
-	e = tx.QueryRow(ctx, `SELECT ST_Distance(location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) FROM stores WHERE id=$3 AND deleted_at IS NULL FOR UPDATE`, in.Latitude, in.Longitude, in.StoreID).Scan(&distance)
-	if errors.Is(e, pgx.ErrNoRows) {
-		return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	verifiedAt := time.Now()
+	verificationSource := "current_location"
+	if hasProof {
+		verificationSource = "stored_visit"
+		e = tx.QueryRow(ctx, `SELECT v.verification_distance_meters,v.verified_at FROM store_visit_verifications v JOIN stores s ON s.id=v.store_id AND s.deleted_at IS NULL WHERE v.id=$1 AND v.user_id=$2 AND v.store_id=$3 AND v.consumed_at IS NULL AND v.expires_at>now() FOR UPDATE OF v`, *in.VisitVerificationID, user, in.StoreID).Scan(&distance, &verifiedAt)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return uuid.Nil, httpapi.E(422, "VISIT_VERIFICATION_INVALID", "Visit verification is invalid, expired, or already used")
+		}
+	} else {
+		e = tx.QueryRow(ctx, `SELECT ST_Distance(location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),now() FROM stores WHERE id=$3 AND deleted_at IS NULL FOR UPDATE`, in.Latitude, in.Longitude, in.StoreID).Scan(&distance, &verifiedAt)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+		}
 	}
 	if e != nil {
 		return uuid.Nil, e
 	}
-	if distance > s.reviewRadius {
+	effectiveDistance := distance
+	if !hasProof && in.AccuracyMeters != nil {
+		effectiveDistance += *in.AccuracyMeters
+	}
+	if effectiveDistance > s.cfg.ReviewRadiusMeters {
 		// Release the store row lock before recording the rejected attempt. The
 		// reporting event uses a separate transaction whose foreign-key check
 		// otherwise waits on this transaction's FOR UPDATE lock indefinitely.
 		if e = tx.Rollback(ctx); e != nil {
 			return uuid.Nil, e
 		}
-		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.PostLocationRejected, IdempotencyKey: "post-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &in.StoreID, Metadata: map[string]any{"distance_meters": distance, "allowed_radius_meters": s.reviewRadius}})
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.PostLocationRejected, IdempotencyKey: "post-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &in.StoreID, Metadata: map[string]any{"distance_meters": distance, "effective_distance_meters": effectiveDistance, "allowed_radius_meters": s.cfg.ReviewRadiusMeters}})
 		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
 	}
 	id := uuid.New()
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language) VALUES($1,$2,$3,$4,$5,$6,now(),$7)`, id, user, in.StoreID, in.Text, in.Rating, distance, in.ContentLanguage)
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, user, in.StoreID, in.Text, in.Rating, distance, verifiedAt, in.ContentLanguage)
 	if e != nil {
 		return uuid.Nil, e
+	}
+	if hasProof {
+		tag, updateErr := tx.Exec(ctx, `UPDATE store_visit_verifications SET consumed_at=now(),consumed_post_id=$2 WHERE id=$1 AND consumed_at IS NULL`, *in.VisitVerificationID, id)
+		if updateErr != nil {
+			return uuid.Nil, updateErr
+		}
+		if tag.RowsAffected() != 1 {
+			return uuid.Nil, httpapi.E(422, "VISIT_VERIFICATION_INVALID", "Visit verification is invalid, expired, or already used")
+		}
 	}
 	for i, m := range in.MediaIDs {
 		tag, e := tx.Exec(ctx, `INSERT INTO post_media(post_id,media_id,position) SELECT $1,id,$3 FROM media WHERE id=$2 AND owner_user_id=$4 AND status='ready'`, id, m, i, user)
@@ -149,10 +198,46 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostCreated, IdempotencyKey: "post-created:" + id.String(), UserID: &user, StoreID: &in.StoreID, PostID: &id}); e != nil {
 		return uuid.Nil, e
 	}
-	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostVisitVerified, IdempotencyKey: "post-verified:" + id.String(), UserID: &user, StoreID: &in.StoreID, PostID: &id, Metadata: map[string]any{"distance_meters": distance}}); e != nil {
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostVisitVerified, IdempotencyKey: "post-verified:" + id.String(), UserID: &user, StoreID: &in.StoreID, PostID: &id, Metadata: map[string]any{"distance_meters": distance, "verification_source": verificationSource, "verified_at": verifiedAt}}); e != nil {
 		return uuid.Nil, e
 	}
 	return id, tx.Commit(ctx)
+}
+
+func (s *Service) VerifyVisit(ctx context.Context, user, store uuid.UUID, latitude, longitude, accuracy float64) (VisitVerification, error) {
+	var out VisitVerification
+	if user == uuid.Nil || store == uuid.Nil || !storepkg.ValidCoordinates(latitude, longitude) || accuracy <= 0 || accuracy > s.cfg.MaxLocationAccuracyMeters {
+		return out, httpapi.ErrInvalidInput
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return out, err
+	}
+	defer tx.Rollback(ctx)
+	var distance float64
+	err = tx.QueryRow(ctx, `SELECT ST_Distance(location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) FROM stores WHERE id=$3 AND deleted_at IS NULL`, latitude, longitude, store).Scan(&distance)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	}
+	if err != nil {
+		return out, err
+	}
+	if distance+accuracy > s.cfg.ReviewRadiusMeters {
+		if err = tx.Rollback(ctx); err != nil {
+			return out, err
+		}
+		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.StoreVisitRejected, IdempotencyKey: "visit-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &store, Metadata: map[string]any{"distance_meters": distance, "accuracy_meters": accuracy, "effective_distance_meters": distance + accuracy, "allowed_radius_meters": s.cfg.ReviewRadiusMeters}})
+		return out, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to verify a visit.")
+	}
+	id := uuid.New()
+	err = tx.QueryRow(ctx, `INSERT INTO store_visit_verifications(id,user_id,store_id,verification_distance_meters,reported_accuracy_meters,verified_at,expires_at) VALUES($1,$2,$3,$4,$5,now(),now()+$6::interval) ON CONFLICT(user_id,store_id) WHERE consumed_at IS NULL DO UPDATE SET verification_distance_meters=excluded.verification_distance_meters,reported_accuracy_meters=excluded.reported_accuracy_meters,verified_at=excluded.verified_at,expires_at=excluded.expires_at RETURNING id,store_id,verification_distance_meters,verified_at,expires_at`, id, user, store, distance, accuracy, s.cfg.VisitProofTTL.String()).Scan(&out.ID, &out.StoreID, &out.DistanceMeters, &out.VerifiedAt, &out.ExpiresAt)
+	if err != nil {
+		return out, err
+	}
+	if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreVisitVerified, IdempotencyKey: "store-visit-verified:" + out.ID.String() + ":" + out.VerifiedAt.UTC().Format(time.RFC3339Nano), UserID: &user, StoreID: &store, Metadata: map[string]any{"distance_meters": distance, "accuracy_meters": accuracy, "expires_at": out.ExpiresAt}}); err != nil {
+		return out, err
+	}
+	return out, tx.Commit(ctx)
 }
 
 func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, limit int) ([]Post, string, error) {

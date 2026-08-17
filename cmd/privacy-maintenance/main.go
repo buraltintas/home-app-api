@@ -35,6 +35,7 @@ func main() {
 		{`DELETE FROM visitor_sessions WHERE expires_at < now() OR last_seen_at < now()-($1::int*interval '1 day')`, []any{c.VisitorRetentionDays}},
 		{`DELETE FROM email_verification_codes WHERE created_at < now()-interval '30 days'`, nil},
 		{`DELETE FROM auth_sessions WHERE expires_at < now()-interval '30 days' OR revoked_at < now()-interval '30 days'`, nil},
+		{`DELETE FROM store_visit_verifications WHERE expires_at < now()-interval '30 days' OR consumed_at < now()-interval '30 days'`, nil},
 		{`DELETE FROM email_outbox WHERE created_at < now()-interval '90 days' AND status IN ('sent','failed')`, nil},
 		{`UPDATE searches SET request_latitude=NULL,request_longitude=NULL WHERE created_at < now()-($1::int*interval '1 day')`, []any{c.SearchLocationRetentionDays}},
 	}
