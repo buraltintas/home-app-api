@@ -49,6 +49,22 @@ existing local volumes, or deterministic seed identity.
 
 ## Local setup
 
+The checked-in `.env.example` is the minimal production template. For local
+development, copy it and change/add the following local-only values in `.env`:
+
+```dotenv
+APP_ENV=development
+DATABASE_URL=postgres://home_app:home_app@localhost:5432/home_app?sslmode=disable
+BFF_SECRETS=development-only-change-me
+ACCESS_TOKEN_SECRET=development-access-secret-at-least-32-bytes
+OTP_HASH_SECRET=development-otp-secret-at-least-32-bytes
+EMAIL_PROVIDER=development
+EMAIL_DEVELOPMENT_DIR=.data/mailbox
+OBJECT_STORAGE_PROVIDER=development
+OBJECT_STORAGE_LOCAL_DIR=.data/uploads
+OBJECT_STORAGE_PUBLIC_URL=http://localhost:8080/uploads
+```
+
 ```bash
 cp .env.example .env
 set -a; source .env; set +a
@@ -82,7 +98,8 @@ make rebuild-admin-metrics
 make privacy-maintenance
 ```
 
-All example secrets are intentionally development-only. Replace them before using any shared environment.
+Blank production placeholders must be supplied through the deployment secret
+manager. Never commit populated `.env` files or Google service-account JSON.
 
 ## Minimal API examples
 
@@ -118,7 +135,9 @@ Authenticated actions additionally send `Authorization: Bearer <access_token>`.
 
 ## Configuration
 
-See [.env.example](.env.example). Important groups are:
+See the minimal production template in [.env.example](.env.example). Parameters
+with safe code defaults and variables for unused alternative providers are
+intentionally omitted. Important supported groups are:
 
 - core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`, `DEFAULT_LOCALE`
 - client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback)
