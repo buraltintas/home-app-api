@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/mail"
 	"os"
 	"strconv"
 	"strings"
@@ -27,6 +28,8 @@ type Config struct {
 	EmailProvider, EmailFrom                                               string
 	EmailDevelopmentDir                                                    string
 	EmailAPIURL, EmailAPIKey                                               string
+	GmailServiceAccountFile, GmailServiceAccountJSON                       string
+	GmailImpersonatedUser, GmailAPIURL                                     string
 	ObjectStorageProvider, Bucket                                          string
 	ObjectStorageRegion, ObjectStorageEndpoint                             string
 	GCSSigningServiceAccount                                               string
@@ -61,6 +64,8 @@ func Load() (Config, error) {
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
+		GmailServiceAccountFile: os.Getenv("GMAIL_SERVICE_ACCOUNT_FILE"), GmailServiceAccountJSON: os.Getenv("GMAIL_SERVICE_ACCOUNT_JSON"),
+		GmailImpersonatedUser: os.Getenv("GMAIL_IMPERSONATED_USER"), GmailAPIURL: os.Getenv("GMAIL_API_URL"),
 		ObjectStorageProvider: env("OBJECT_STORAGE_PROVIDER", "development"), Bucket: os.Getenv("OBJECT_STORAGE_BUCKET"),
 		ObjectStorageRegion: env("OBJECT_STORAGE_REGION", "auto"), ObjectStorageEndpoint: os.Getenv("OBJECT_STORAGE_ENDPOINT"), ObjectStorageAccessKey: os.Getenv("OBJECT_STORAGE_ACCESS_KEY"), ObjectStorageSecretKey: os.Getenv("OBJECT_STORAGE_SECRET_KEY"),
 		GCSSigningServiceAccount: os.Getenv("GCS_SIGNING_SERVICE_ACCOUNT"),
@@ -196,8 +201,23 @@ func Load() (Config, error) {
 	if c.EmailProvider == "resend" && (c.EmailAPIKey == "" || strings.TrimSpace(c.EmailFrom) == "") {
 		return c, errors.New("RESEND_API_KEY (or EMAIL_API_KEY) and EMAIL_FROM are required for resend")
 	}
-	if c.EmailProvider != "development" && c.EmailProvider != "resend" {
-		return c, errors.New("EMAIL_PROVIDER must be development or resend")
+	if c.EmailProvider == "gmail" {
+		hasFile := strings.TrimSpace(c.GmailServiceAccountFile) != ""
+		hasJSON := strings.TrimSpace(c.GmailServiceAccountJSON) != ""
+		if hasFile && hasJSON {
+			return c, errors.New("GMAIL_SERVICE_ACCOUNT_FILE and GMAIL_SERVICE_ACCOUNT_JSON cannot both be set")
+		}
+		impersonated, err := mail.ParseAddress(strings.TrimSpace(c.GmailImpersonatedUser))
+		if err != nil || impersonated.Name != "" {
+			return c, errors.New("GMAIL_IMPERSONATED_USER must be a Google Workspace email address")
+		}
+		from, err := mail.ParseAddress(strings.TrimSpace(c.EmailFrom))
+		if err != nil || !strings.EqualFold(from.Address, impersonated.Address) {
+			return c, errors.New("EMAIL_FROM address must match GMAIL_IMPERSONATED_USER")
+		}
+	}
+	if c.EmailProvider != "development" && c.EmailProvider != "resend" && c.EmailProvider != "gmail" {
+		return c, errors.New("EMAIL_PROVIDER must be development, gmail or resend")
 	}
 	return c, nil
 }

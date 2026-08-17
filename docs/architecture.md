@@ -14,7 +14,7 @@ internal/
   auth/                 OTP, Google identity, access/refresh sessions
   config/               environment configuration
   database/             pgx connection and transaction helpers
-  email/                provider boundary, dev/HTTP adapters, outbox worker
+  email/                provider boundary, dev/Resend/Gmail adapters, outbox worker
   httpapi/              router, handlers, JSON/error conventions
   i18n/                 locales, resolution helpers, application messages
   middleware/           request ID, logging, recovery, BFF, auth, limits
@@ -52,6 +52,8 @@ Physical-presence verification always uses a fresh mobile OS fix (or a still-val
 ## C. Authentication design
 
 Email request creates a six-digit code with `crypto/rand`, stores only an HMAC-SHA256 digest keyed by `OTP_HASH_SECRET`, and atomically enqueues an email. Codes expire, have an attempt cap, are single-use, and request/verify paths are limited by client, IP, email and visitor ID. The API does not wait for email delivery.
+
+Production delivery uses the Gmail API through a dedicated Google Workspace service account with domain-wide delegation limited to `gmail.send`. The worker impersonates only the configured Workspace sender, builds RFC-compliant multipart text/HTML, and sends through `users.messages.send`; it has no mailbox read permission. Service-account credentials are secret-manager material and never stored in PostgreSQL or the repository. Development keeps using private local `.eml` files, and the transactional outbox/retry semantics remain provider-independent.
 
 Verification locks the code row. Identity creation runs in one serializable transaction:
 

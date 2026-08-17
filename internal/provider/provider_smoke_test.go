@@ -74,6 +74,32 @@ func TestResendSmoke(t *testing.T) {
 	}
 }
 
+func TestGmailWorkspaceSmoke(t *testing.T) {
+	recipient := os.Getenv("GMAIL_TEST_RECIPIENT")
+	impersonated := os.Getenv("GMAIL_IMPERSONATED_USER")
+	credentials := []byte(os.Getenv("GMAIL_SERVICE_ACCOUNT_JSON"))
+	if len(credentials) == 0 && os.Getenv("GMAIL_SERVICE_ACCOUNT_FILE") != "" {
+		var err error
+		credentials, err = os.ReadFile(os.Getenv("GMAIL_SERVICE_ACCOUNT_FILE"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if recipient == "" || impersonated == "" || len(credentials) == 0 {
+		t.Skip("Gmail credentials, GMAIL_IMPERSONATED_USER and explicit GMAIL_TEST_RECIPIENT are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	sender, err := email.NewGmailSender(ctx, credentials, impersonated, os.Getenv("GMAIL_API_URL"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := sender.Send(ctx, email.Message{From: os.Getenv("EMAIL_FROM"), To: recipient, Subject: brand.ProductName + " Gmail provider smoke test", Text: "This is an explicitly requested " + brand.ProductName + " Gmail provider smoke test.", HTML: "<p>This is an explicitly requested " + brand.ProductName + " Gmail provider smoke test.</p>"})
+	if err != nil || id == "" {
+		t.Fatalf("provider id=%q err=%v", id, err)
+	}
+}
+
 func TestGoogleCloudStorageSmoke(t *testing.T) {
 	bucket := os.Getenv("GCS_TEST_BUCKET")
 	if bucket == "" {

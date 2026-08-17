@@ -125,13 +125,27 @@ See [.env.example](.env.example). Important groups are:
 - auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, and per-email/IP/visitor request limits
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
-- email: `EMAIL_PROVIDER=development|resend`, `EMAIL_FROM`, local `EMAIL_DEVELOPMENT_DIR`, `RESEND_API_KEY` (legacy `EMAIL_API_KEY` also works), optional `EMAIL_API_URL`
+- email: `EMAIL_PROVIDER=development|gmail|resend`, `EMAIL_FROM`; Gmail Workspace uses `GMAIL_IMPERSONATED_USER` plus exactly one secret source (`GMAIL_SERVICE_ACCOUNT_FILE` recommended, or `GMAIL_SERVICE_ACCOUNT_JSON`) and optional `GMAIL_API_URL`; local development uses `EMAIL_DEVELOPMENT_DIR`; Resend remains available through `RESEND_API_KEY`
 - domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `STORE_LOCATION_MAX_ACCURACY_METERS`, `STORE_VISIT_PROOF_TTL`, `SEARCH_LOCATION_DECIMALS`
 - media: `OBJECT_STORAGE_PROVIDER=development|gcs|s3|r2`; GCS uses Application Default Credentials plus `OBJECT_STORAGE_BUCKET` and optional `GCS_SIGNING_SERVICE_ACCOUNT`; S3/R2 use endpoint/region/static credentials; all providers use upload TTL and `MEDIA_MAX_BYTES`
 - reporting: `REPORTING_TIMEZONE`, `SEARCH_ATTRIBUTION_WINDOW_HOURS`
 - operations: `METRICS_TOKEN`, `OTEL_ENABLED`, `OTEL_EXPORTER_OTLP_ENDPOINT`
 
 The API never needs OpenAI or Places credentials to boot. Search falls back to deterministic parsing and internal PostgreSQL results when either provider is unavailable.
+
+### Google Workspace Gmail delivery
+
+Production OTP email can be sent from the Workspace mailbox `no-reply@bosagezme.com` through the Gmail API:
+
+1. Create the Workspace user/mailbox and enable the Gmail API in the Google Cloud project.
+2. Create a dedicated service account, enable domain-wide delegation, and note its numeric OAuth client ID.
+3. As a Workspace super administrator, open **Security → Access and data control → API controls → Manage Domain Wide Delegation**. Add that numeric client ID with only `https://www.googleapis.com/auth/gmail.send`.
+4. Store the service-account JSON in a secret manager available only to the email worker and mount it read-only; set `GMAIL_SERVICE_ACCOUNT_FILE` to that path. `GMAIL_SERVICE_ACCOUNT_JSON` is supported for platforms that inject secrets directly, but never set both and never commit either value. The API process does not require this credential.
+5. Set `EMAIL_PROVIDER=gmail`, `EMAIL_FROM="Boşa Gezme! <no-reply@bosagezme.com>"`, and `GMAIL_IMPERSONATED_USER=no-reply@bosagezme.com`. The two addresses must match.
+6. Before production, set an explicit safe `GMAIL_TEST_RECIPIENT` and run `make provider-smoke`; this sends one clearly labelled test email. Remove the test-recipient variable afterward.
+7. Start/redeploy the worker. Domain-wide delegation can take time to propagate; a configuration/permission error is treated as permanent, while Gmail quota and server failures use the existing bounded outbox retry policy.
+
+The worker sends an RFC-compliant multipart text/HTML message through `users.messages.send`. It requests no Gmail read, modify, compose, or full-mailbox scope.
 
 ## Operational and privacy notes
 
@@ -220,7 +234,7 @@ Live providers are deliberately opt-in and skipped without credentials:
 ```bash
 make provider-smoke # OPENAI_API_KEY + optional OPENAI_MODEL
 make provider-smoke # GOOGLE_PLACES_API_KEY when present
-make provider-smoke # RESEND_API_KEY, EMAIL_FROM and explicit RESEND_TEST_RECIPIENT
+make provider-smoke # provider credentials plus an explicit RESEND_TEST_RECIPIENT or GMAIL_TEST_RECIPIENT
 make provider-smoke # GCS_TEST_BUCKET + ADC/IAM, creates and removes one smoke object
 ```
 

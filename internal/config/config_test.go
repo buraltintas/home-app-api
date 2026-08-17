@@ -59,3 +59,41 @@ func TestLoadRequiresExplicitGCSBucket(t *testing.T) {
 		t.Fatal("gcs accepted without an explicit bucket")
 	}
 }
+
+func TestLoadSupportsGoogleWorkspaceGmailProvider(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("EMAIL_PROVIDER", "gmail")
+	t.Setenv("EMAIL_FROM", "Boşa Gezme! <no-reply@bosagezme.com>")
+	t.Setenv("GMAIL_IMPERSONATED_USER", "no-reply@bosagezme.com")
+	t.Setenv("GMAIL_SERVICE_ACCOUNT_FILE", "/run/secrets/gmail-service-account.json")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.EmailProvider != "gmail" || cfg.GmailImpersonatedUser != "no-reply@bosagezme.com" {
+		t.Fatalf("config=%+v", cfg)
+	}
+}
+
+func TestLoadDoesNotRequireWorkerGmailSecretForAPIProcess(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("EMAIL_PROVIDER", "gmail")
+	t.Setenv("EMAIL_FROM", "no-reply@bosagezme.com")
+	t.Setenv("GMAIL_IMPERSONATED_USER", "no-reply@bosagezme.com")
+	t.Setenv("GMAIL_SERVICE_ACCOUNT_FILE", "")
+	t.Setenv("GMAIL_SERVICE_ACCOUNT_JSON", "")
+	if _, err := Load(); err != nil {
+		t.Fatalf("shared API config required worker-only Gmail secret: %v", err)
+	}
+}
+
+func TestLoadRejectsMismatchedGmailSender(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("EMAIL_PROVIDER", "gmail")
+	t.Setenv("EMAIL_FROM", "other@bosagezme.com")
+	t.Setenv("GMAIL_IMPERSONATED_USER", "no-reply@bosagezme.com")
+	t.Setenv("GMAIL_SERVICE_ACCOUNT_JSON", `{}`)
+	if _, err := Load(); err == nil {
+		t.Fatal("mismatched Gmail sender accepted")
+	}
+}

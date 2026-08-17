@@ -42,12 +42,32 @@ func main() {
 	}
 	defer db.Close()
 	var sender email.Sender = email.FileSender{Dir: cfg.EmailDevelopmentDir}
-	if cfg.EmailProvider == "resend" {
+	switch cfg.EmailProvider {
+	case "resend":
 		url := cfg.EmailAPIURL
 		if url == "" {
 			url = "https://api.resend.com/emails"
 		}
 		sender = &email.ResendSender{URL: url, APIKey: cfg.EmailAPIKey, Client: &http.Client{Timeout: 10 * time.Second}}
+	case "gmail":
+		credentials := []byte(cfg.GmailServiceAccountJSON)
+		if len(credentials) == 0 {
+			if cfg.GmailServiceAccountFile == "" {
+				log.Error("gmail credentials unavailable", "error", "GMAIL_SERVICE_ACCOUNT_FILE or GMAIL_SERVICE_ACCOUNT_JSON is required by the worker")
+				os.Exit(1)
+			}
+			credentials, e = os.ReadFile(cfg.GmailServiceAccountFile)
+			if e != nil {
+				log.Error("gmail credentials unavailable", "error", e)
+				os.Exit(1)
+			}
+		}
+		gmailSender, gmailErr := email.NewGmailSender(ctx, credentials, cfg.GmailImpersonatedUser, cfg.GmailAPIURL)
+		if gmailErr != nil {
+			log.Error("gmail sender unavailable", "error", gmailErr)
+			os.Exit(1)
+		}
+		sender = gmailSender
 	}
 	w := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
 	reportSvc, e := reporting.NewService(db, cfg.ReportingTimezone, cfg.SearchAttributionWindow)

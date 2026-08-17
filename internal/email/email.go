@@ -3,15 +3,22 @@ package email
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"log/slog"
+	"mime"
+	"mime/multipart"
+	"mime/quotedprintable"
 	"net/http"
+	"net/mail"
+	"net/textproto"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/brand"
@@ -21,6 +28,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 )
 
 type Message struct{ From, To, Subject, HTML, Text string }
@@ -102,6 +111,165 @@ func (s *ResendSender) send(ctx context.Context, m Message) (string, error) {
 		return "", fmt.Errorf("email provider returned no message id")
 	}
 	return out.ID, nil
+}
+
+const GmailSendScope = "https://www.googleapis.com/auth/gmail.send"
+
+type GmailSender struct {
+	URL    string
+	Client *http.Client
+}
+
+func NewGmailSender(ctx context.Context, credentialsJSON []byte, impersonatedUser, apiURL string) (*GmailSender, error) {
+	impersonatedUser = strings.TrimSpace(impersonatedUser)
+	if len(credentialsJSON) == 0 || impersonatedUser == "" {
+		return nil, errors.New("gmail credentials and impersonated user are required")
+	}
+	impersonatedAddress, err := mail.ParseAddress(impersonatedUser)
+	if err != nil || impersonatedAddress.Name != "" || !strings.EqualFold(impersonatedAddress.Address, impersonatedUser) {
+		return nil, errors.New("invalid gmail impersonated user")
+	}
+	config, err := google.JWTConfigFromJSON(credentialsJSON, GmailSendScope)
+	if err != nil {
+		return nil, fmt.Errorf("parse gmail service account credentials: %w", err)
+	}
+	config.Subject = impersonatedUser
+	if apiURL == "" {
+		apiURL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+	}
+	client := config.Client(ctx)
+	client.Timeout = 10 * time.Second
+	return &GmailSender{URL: apiURL, Client: client}, nil
+}
+
+func (s *GmailSender) Send(ctx context.Context, message Message) (string, error) {
+	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.gmail.send")
+	id, err := s.send(ctx, message)
+	finish(err)
+	observability.Provider("gmail", observability.Outcome(err), time.Since(started))
+	return id, err
+}
+
+func (s *GmailSender) send(ctx context.Context, message Message) (string, error) {
+	if s.Client == nil || strings.TrimSpace(s.URL) == "" {
+		return "", errors.New("gmail sender is not configured")
+	}
+	raw, err := gmailRawMessage(message)
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(struct {
+		Raw string `json:"raw"`
+	}{Raw: base64.RawURLEncoding.EncodeToString(raw)})
+	if err != nil {
+		return "", err
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := s.Client.Do(request)
+	if err != nil {
+		var retrieveError *oauth2.RetrieveError
+		if errors.As(err, &retrieveError) && retrieveError.Response != nil {
+			return "", &DeliveryError{Status: retrieveError.Response.StatusCode, Retryable: gmailRetryable(retrieveError.Response.StatusCode, retrieveError.Body)}
+		}
+		return "", err
+	}
+	defer response.Body.Close()
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, 64<<10))
+	if readErr != nil {
+		return "", readErr
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", &DeliveryError{Status: response.StatusCode, Retryable: gmailRetryable(response.StatusCode, body)}
+	}
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err = json.Unmarshal(body, &result); err != nil {
+		return "", err
+	}
+	if result.ID == "" {
+		return "", errors.New("gmail returned no message id")
+	}
+	return result.ID, nil
+}
+
+func gmailRawMessage(message Message) ([]byte, error) {
+	from, err := mail.ParseAddress(strings.TrimSpace(message.From))
+	if err != nil {
+		return nil, errors.New("invalid email from address")
+	}
+	to, err := mail.ParseAddress(strings.TrimSpace(message.To))
+	if err != nil {
+		return nil, errors.New("invalid email recipient address")
+	}
+	if strings.ContainsAny(message.Subject, "\r\n") {
+		return nil, errors.New("invalid email subject")
+	}
+	var body bytes.Buffer
+	multipartWriter := multipart.NewWriter(&body)
+	boundary := multipartWriter.Boundary()
+	for _, alternative := range []struct {
+		contentType string
+		body        string
+	}{{"text/plain", message.Text}, {"text/html", message.HTML}} {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Type", alternative.contentType+`; charset="UTF-8"`)
+		header.Set("Content-Transfer-Encoding", "quoted-printable")
+		part, createErr := multipartWriter.CreatePart(header)
+		if createErr != nil {
+			return nil, createErr
+		}
+		quoted := quotedprintable.NewWriter(part)
+		if _, err = quoted.Write([]byte(alternative.body)); err != nil {
+			return nil, err
+		}
+		if err = quoted.Close(); err != nil {
+			return nil, err
+		}
+	}
+	if err = multipartWriter.Close(); err != nil {
+		return nil, err
+	}
+	var raw bytes.Buffer
+	fmt.Fprintf(&raw, "From: %s\r\n", from.String())
+	fmt.Fprintf(&raw, "To: %s\r\n", to.String())
+	fmt.Fprintf(&raw, "Subject: %s\r\n", mime.QEncoding.Encode("UTF-8", message.Subject))
+	fmt.Fprintf(&raw, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&raw, "MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&raw, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+	raw.Write(body.Bytes())
+	return raw.Bytes(), nil
+}
+
+func gmailRetryable(status int, body []byte) bool {
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	var response struct {
+		Error struct {
+			Errors []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &response) != nil {
+		return false
+	}
+	for _, providerError := range response.Error.Errors {
+		switch providerError.Reason {
+		case "rateLimitExceeded", "userRateLimitExceeded", "backendError":
+			return true
+		}
+	}
+	return false
 }
 
 type Worker struct {
