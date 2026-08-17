@@ -303,7 +303,9 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 		return nil, "", e
 	}
 	defer rows.Close()
-	var out []Post
+	// Keep the API collection contract stable on an empty database: encoding a
+	// nil slice would produce `null`, while clients expect `items` to be an array.
+	out := make([]Post, 0)
 	for rows.Next() {
 		var p Post
 		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &p.Media, &p.StoreDistanceMeters); e != nil {

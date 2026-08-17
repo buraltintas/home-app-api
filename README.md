@@ -74,6 +74,10 @@ make seed
 make run
 ```
 
+When using `source`, quote values containing shell metacharacters such as `&`.
+Managed production platforms should inject environment variables natively
+instead of shell-sourcing a file.
+
 Run the email outbox worker separately:
 
 ```bash
