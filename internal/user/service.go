@@ -73,7 +73,6 @@ type DiscoveryLocationInput struct {
 	Latitude       float64
 	Longitude      float64
 	AccuracyMeters *float64
-	OverrideManual bool
 }
 type Update struct {
 	Username           *string   `json:"username"`
@@ -125,10 +124,7 @@ func (s *Service) SetDiscoveryLocation(ctx context.Context, id uuid.UUID, in Dis
 	}
 	_, err := s.db.Exec(ctx, `INSERT INTO user_private_profiles(user_id,discovery_location,discovery_location_source,discovery_location_label,discovery_location_address,discovery_location_place_id,discovery_location_accuracy_meters,discovery_location_updated_at)
 		VALUES($1,ST_SetSRID(ST_MakePoint($6,$5),4326)::geography,$2,nullif($3,''),nullif($4,''),nullif($7,''),$8,now())
-		ON CONFLICT(user_id) DO UPDATE SET discovery_location=excluded.discovery_location,discovery_location_source=excluded.discovery_location_source,discovery_location_label=excluded.discovery_location_label,discovery_location_address=excluded.discovery_location_address,discovery_location_place_id=excluded.discovery_location_place_id,discovery_location_accuracy_meters=excluded.discovery_location_accuracy_meters,discovery_location_updated_at=now(),updated_at=now()
-		WHERE excluded.discovery_location_source='manual'
-		   OR user_private_profiles.discovery_location_source IS DISTINCT FROM 'manual'
-		   OR $9`, id, in.Source, in.Label, in.Address, in.Latitude, in.Longitude, in.PlaceID, in.AccuracyMeters, in.OverrideManual)
+		ON CONFLICT(user_id) DO UPDATE SET discovery_location=excluded.discovery_location,discovery_location_source=excluded.discovery_location_source,discovery_location_label=excluded.discovery_location_label,discovery_location_address=excluded.discovery_location_address,discovery_location_place_id=excluded.discovery_location_place_id,discovery_location_accuracy_meters=excluded.discovery_location_accuracy_meters,discovery_location_updated_at=now(),updated_at=now()`, id, in.Source, in.Label, in.Address, in.Latitude, in.Longitude, in.PlaceID, in.AccuracyMeters)
 	return err
 }
 
@@ -149,7 +145,7 @@ func validateDiscoveryLocation(in *DiscoveryLocationInput) error {
 		return httpapi.ErrInvalidInput
 	}
 	if in.Source == "manual" {
-		if in.PlaceID == "" || in.Label == "" || in.AccuracyMeters != nil || in.OverrideManual {
+		if in.PlaceID == "" || in.Label == "" || in.AccuracyMeters != nil {
 			return httpapi.ErrInvalidInput
 		}
 		return nil

@@ -132,6 +132,11 @@ func appCode(err error) string {
 	return ""
 }
 
+func locationAccuracy() *float64 {
+	value := 0.1
+	return &value
+}
+
 func TestAuthenticationIdentityAndSessionLifecycle(t *testing.T) {
 	db := database(t)
 	email := "integration-" + uuid.NewString() + "@example.test"
@@ -311,17 +316,17 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	storeID := store(t, db, 41.0000, 29.0000)
 	_, stores, socialSvc, searchSvc, report := services(t, db, googleStub{}, nil)
 
-	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Gerçek PostGIS entegrasyon yorumu", Rating: 5, Latitude: 41.003, Longitude: 29.0000})
+	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Gerçek PostGIS entegrasyon yorumu", Rating: 5, Latitude: 41.003, Longitude: 29.0000, AccuracyMeters: locationAccuracy()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Bu konum çok uzakta", Rating: 3, Latitude: 41.010, Longitude: 29.0000}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Bu konum çok uzakta", Rating: 3, Latitude: 41.010, Longitude: 29.0000, AccuracyMeters: locationAccuracy()}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
 		t.Fatalf("outside-radius review: %v", err)
 	}
-	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen içindeki ziyaret", Rating: 4, Latitude: 41.00448, Longitude: 29.0000}); err != nil {
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen içindeki ziyaret", Rating: 4, Latitude: 41.00448, Longitude: 29.0000, AccuracyMeters: locationAccuracy()}); err != nil {
 		t.Fatalf("inside boundary review: %v", err)
 	}
-	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen dışındaki ziyaret", Rating: 4, Latitude: 41.00452, Longitude: 29.0000}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
+	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Sınırın hemen dışındaki ziyaret", Rating: 4, Latitude: 41.00452, Longitude: 29.0000, AccuracyMeters: locationAccuracy()}); appCode(err) != "STORE_VISIT_NOT_VERIFIED" {
 		t.Fatalf("outside boundary review: %v", err)
 	}
 	for i := 0; i < 2; i++ {
@@ -649,7 +654,7 @@ func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	if err = mediaSvc.Complete(t.Context(), owner, created.ID, 1, 1); appCode(err) != "MEDIA_NOT_FOUND" {
 		t.Fatalf("duplicate finalize: %v", err)
 	}
-	postID, err := socialSvc.CreatePost(t.Context(), owner, social.CreatePost{StoreID: storeID, Text: "Yerel dosya ile gerçek medya akışı", Rating: 5, Latitude: 41, Longitude: 29, MediaIDs: []uuid.UUID{created.ID}})
+	postID, err := socialSvc.CreatePost(t.Context(), owner, social.CreatePost{StoreID: storeID, Text: "Yerel dosya ile gerçek medya akışı", Rating: 5, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy(), MediaIDs: []uuid.UUID{created.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -669,7 +674,7 @@ func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
 	storeID := store(t, db, 41, 29)
 	_, stores, socialSvc, _, _ := services(t, db, googleStub{}, nil)
 	longGermanPost := strings.Repeat("ä", 5000)
-	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Rating: 5, Latitude: 41, Longitude: 29})
+	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Rating: 5, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1015,7 +1020,7 @@ func TestMultilingualArchitectureMatrix(t *testing.T) {
 	// User content is byte-for-byte preserved and only annotated with language.
 	russianPost := "Очень хороший магазин штор"
 	russian := "ru"
-	postID, err := socialSvc.CreatePost(t.Context(), pair.UserID, social.CreatePost{StoreID: storeID, Text: russianPost, Rating: 5, Latitude: 41, Longitude: 29, ContentLanguage: &russian})
+	postID, err := socialSvc.CreatePost(t.Context(), pair.UserID, social.CreatePost{StoreID: storeID, Text: russianPost, Rating: 5, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy(), ContentLanguage: &russian})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1100,17 +1105,8 @@ func TestPrivateDiscoveryLocationLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	me, err = users.Me(t.Context(), userID)
-	if err != nil || me.DiscoveryLocation == nil || me.DiscoveryLocation.Source != "manual" {
-		t.Fatalf("ordinary device update overwrote manual location: %+v err=%v", me.DiscoveryLocation, err)
-	}
-
-	device.OverrideManual = true
-	if err = users.SetDiscoveryLocation(t.Context(), userID, device); err != nil {
-		t.Fatal(err)
-	}
-	me, err = users.Me(t.Context(), userID)
 	if err != nil || me.DiscoveryLocation == nil || me.DiscoveryLocation.Source != "device" || me.DiscoveryLocation.AccuracyMeters == nil {
-		t.Fatalf("device location=%+v err=%v", me.DiscoveryLocation, err)
+		t.Fatalf("device location did not take priority: %+v err=%v", me.DiscoveryLocation, err)
 	}
 
 	if err = users.ClearDiscoveryLocation(t.Context(), userID); err != nil {

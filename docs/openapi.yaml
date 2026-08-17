@@ -169,7 +169,7 @@ paths:
     post:
       tags: [Social]
       summary: Verify a physical store visit for one later review
-      description: Uses server receipt time, stores no raw device coordinates, and returns a single-use expiring verification.
+      description: Uses fresh mobile OS coordinates and horizontal accuracy. The backend accepts device-to-store distance plus accuracy at or below 500 m, stores no raw device coordinates, and returns a single-use expiring verification. Manual/profile discovery location is never accepted as evidence.
       security: [{bffSecret: [], bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/ID'}]
       requestBody: {$ref: '#/components/requestBodies/VisitVerification'}
@@ -191,6 +191,7 @@ paths:
     post:
       tags: [Social]
       summary: Create a proximity-verified store review
+      description: Physical presence uses fresh mobile OS location or a previously issued single-use visit proof. Manual/profile discovery coordinates are never valid evidence; the configured production boundary is 500 m including reported accuracy.
       security: [{bffSecret: [], bearerAuth: []}]
       requestBody: {$ref: '#/components/requestBodies/Post'}
       responses: {'201': {$ref: '#/components/responses/ID'}, '400': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
@@ -325,7 +326,7 @@ paths:
     put:
       tags: [Profile]
       summary: Persist the authenticated user's private discovery location
-      description: Manual selection accepts only a Google geographic place ID; the backend resolves its coordinates. Device coordinates come from OS geolocation. A manual selection remains active until a device request explicitly sets override_manual after the user chooses current location.
+      description: Manual selection accepts only a Google geographic place ID; the backend resolves its coordinates. Device coordinates come from OS geolocation and always replace a previously persisted manual fallback.
       security: [{bffSecret: [], bearerAuth: []}]
       requestBody:
         required: true
@@ -346,7 +347,6 @@ paths:
                     latitude: {type: number, minimum: -90, maximum: 90, description: OS-produced; never user-entered.}
                     longitude: {type: number, minimum: -180, maximum: 180, description: OS-produced; never user-entered.}
                     accuracy_meters: {type: number, exclusiveMinimum: 0, maximum: 1000}
-                    override_manual: {type: boolean, default: false, description: Set true only when the user explicitly switches from a manual place to current location.}
                   additionalProperties: false
       responses: {'200': {$ref: '#/components/responses/Me'}, '400': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}, '502': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
     delete:
@@ -429,7 +429,7 @@ components:
             type: object
             required: [store_id, text, rating]
             oneOf:
-              - required: [latitude, longitude]
+              - required: [latitude, longitude, accuracy_meters]
               - required: [visit_verification_id]
             properties:
               store_id: {type: string, format: uuid}
@@ -437,7 +437,7 @@ components:
               rating: {type: integer, minimum: 1, maximum: 5}
               latitude: {type: number, minimum: -90, maximum: 90}
               longitude: {type: number, minimum: -180, maximum: 180}
-              accuracy_meters: {type: number, exclusiveMinimum: 0, description: Mobile horizontal accuracy. Required by clients for robust current-location verification.}
+              accuracy_meters: {type: number, exclusiveMinimum: 0, maximum: 100, description: Required mobile OS horizontal accuracy; added conservatively to store distance for the 500 m boundary.}
               visit_verification_id: {type: string, format: uuid, description: Single-use unexpired verification previously issued for this user and store.}
               media_ids: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, format: uuid}}
               origin_search_id: {type: [string, 'null'], format: uuid}

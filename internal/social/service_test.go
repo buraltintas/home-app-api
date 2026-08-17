@@ -20,6 +20,13 @@ func TestCreatePostRejectsDuplicateMediaBeforeDatabaseWrite(t *testing.T) {
 	}
 }
 
+func TestCreatePostRequiresMobileHorizontalAccuracy(t *testing.T) {
+	_, err := (&Service{cfg: Config{MaxLocationAccuracyMeters: 100}}).CreatePost(context.Background(), uuid.New(), CreatePost{StoreID: uuid.New(), Text: "Geçerli yorum", Rating: 5, Latitude: 41, Longitude: 29})
+	if err == nil {
+		t.Fatal("current location without horizontal accuracy accepted")
+	}
+}
+
 func TestFeedRejectsCursorModeMismatchBeforeDatabaseRead(t *testing.T) {
 	raw, _ := json.Marshal(map[string]any{"m": "recent", "t": time.Now(), "id": uuid.New()})
 	cursor := base64.RawURLEncoding.EncodeToString(raw)

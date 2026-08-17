@@ -116,7 +116,7 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	if hasProof && *in.VisitVerificationID == uuid.Nil {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
-	if !hasProof && in.AccuracyMeters != nil && (*in.AccuracyMeters <= 0 || *in.AccuracyMeters > s.cfg.MaxLocationAccuracyMeters) {
+	if !hasProof && (in.AccuracyMeters == nil || *in.AccuracyMeters <= 0 || *in.AccuracyMeters > s.cfg.MaxLocationAccuracyMeters) {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))

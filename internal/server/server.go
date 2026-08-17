@@ -534,7 +534,6 @@ type discoveryLocationRequest struct {
 	Latitude       *float64 `json:"latitude"`
 	Longitude      *float64 `json:"longitude"`
 	AccuracyMeters *float64 `json:"accuracy_meters"`
-	OverrideManual bool     `json:"override_manual"`
 }
 
 func (s *Server) updateDiscoveryLocation(w http.ResponseWriter, r *http.Request) {
@@ -544,10 +543,10 @@ func (s *Server) updateDiscoveryLocation(w http.ResponseWriter, r *http.Request)
 		WriteError(w, err, r.Context())
 		return
 	}
-	input := userpkg.DiscoveryLocationInput{Source: strings.TrimSpace(request.Source), AccuracyMeters: request.AccuracyMeters, OverrideManual: request.OverrideManual}
+	input := userpkg.DiscoveryLocationInput{Source: strings.TrimSpace(request.Source), AccuracyMeters: request.AccuracyMeters}
 	switch input.Source {
 	case "manual":
-		if request.Latitude != nil || request.Longitude != nil || request.AccuracyMeters != nil || request.OverrideManual {
+		if request.Latitude != nil || request.Longitude != nil || request.AccuracyMeters != nil {
 			WriteError(w, ErrInvalidInput, r.Context())
 			return
 		}
