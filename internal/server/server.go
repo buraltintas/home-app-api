@@ -105,6 +105,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Get("/me", s.me)
 			r.Delete("/me", s.deleteAccount)
 			r.Patch("/me", s.updateMe)
+			r.With(writeLimit.Middleware).Put("/me/discovery-location", s.updateDiscoveryLocation)
+			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/searches", s.mySearches)
 			r.Delete("/me/searches", s.deleteMySearches)
 			r.Delete("/me/searches/{id}", s.deleteMySearch)
@@ -524,6 +526,62 @@ func (s *Server) updateMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.me(w, r)
+}
+
+type discoveryLocationRequest struct {
+	Source         string   `json:"source"`
+	PlaceID        string   `json:"place_id"`
+	Latitude       *float64 `json:"latitude"`
+	Longitude      *float64 `json:"longitude"`
+	AccuracyMeters *float64 `json:"accuracy_meters"`
+	OverrideManual bool     `json:"override_manual"`
+}
+
+func (s *Server) updateDiscoveryLocation(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	var request discoveryLocationRequest
+	if err := Decode(w, r, &request, 16<<10); err != nil {
+		WriteError(w, err, r.Context())
+		return
+	}
+	input := userpkg.DiscoveryLocationInput{Source: strings.TrimSpace(request.Source), AccuracyMeters: request.AccuracyMeters, OverrideManual: request.OverrideManual}
+	switch input.Source {
+	case "manual":
+		if request.Latitude != nil || request.Longitude != nil || request.AccuracyMeters != nil || request.OverrideManual {
+			WriteError(w, ErrInvalidInput, r.Context())
+			return
+		}
+		location, err := s.search.ResolveLocationPlace(r.Context(), request.PlaceID)
+		if err != nil {
+			WriteError(w, err, r.Context())
+			return
+		}
+		input.Label, input.Address, input.PlaceID = location.Name, location.Address, location.PlaceID
+		input.Latitude, input.Longitude = location.Latitude, location.Longitude
+	case "device":
+		if request.PlaceID != "" || request.Latitude == nil || request.Longitude == nil || request.AccuracyMeters == nil {
+			WriteError(w, ErrInvalidInput, r.Context())
+			return
+		}
+		input.Latitude, input.Longitude = *request.Latitude, *request.Longitude
+	default:
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if err := s.users.SetDiscoveryLocation(r.Context(), p.UserID, input); err != nil {
+		WriteError(w, err, r.Context())
+		return
+	}
+	s.me(w, r)
+}
+
+func (s *Server) clearDiscoveryLocation(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	if err := s.users.ClearDiscoveryLocation(r.Context(), p.UserID); err != nil {
+		WriteError(w, err, r.Context())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())

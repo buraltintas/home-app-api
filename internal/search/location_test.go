@@ -9,6 +9,7 @@ import (
 
 type locationPlacesStub struct {
 	places []Place
+	detail Place
 	locale i18n.Locale
 }
 
@@ -22,7 +23,20 @@ func (s *locationPlacesStub) TextSearchLocalized(_ context.Context, _ string, _,
 }
 
 func (s *locationPlacesStub) PlaceDetails(context.Context, string) (Place, error) {
-	return Place{}, nil
+	return s.detail, nil
+}
+
+func TestResolveLocationPlaceAcceptsOnlyVerifiedGeographicPlaces(t *testing.T) {
+	provider := &locationPlacesStub{detail: Place{PlaceID: "kadikoy", Name: "Kadıköy", Address: "İstanbul, Türkiye", Latitude: 40.99, Longitude: 29.03, Types: []string{"administrative_area_level_2", "political"}}}
+	service := &Service{places: provider}
+	item, err := service.ResolveLocationPlace(context.Background(), "kadikoy")
+	if err != nil || item.PlaceID != "kadikoy" || item.Name != "Kadıköy" {
+		t.Fatalf("item=%+v err=%v", item, err)
+	}
+	provider.detail.Types = []string{"furniture_store"}
+	if _, err = service.ResolveLocationPlace(context.Background(), "kadikoy"); err == nil {
+		t.Fatal("business accepted as a profile location")
+	}
 }
 
 func TestResolveLocationsFiltersBusinessesAndPreservesProviderOrder(t *testing.T) {

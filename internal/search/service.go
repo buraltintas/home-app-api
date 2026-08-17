@@ -162,6 +162,26 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int)
 	return results, nil
 }
 
+// ResolveLocationPlace re-fetches a manually selected location so clients never
+// need to submit or trust user-entered coordinates.
+func (s *Service) ResolveLocationPlace(ctx context.Context, placeID string) (LocationResult, error) {
+	placeID = strings.TrimSpace(placeID)
+	if placeID == "" || utf8.RuneCountInString(placeID) > 300 {
+		return LocationResult{}, httpapi.ErrInvalidInput
+	}
+	if s.places == nil {
+		return LocationResult{}, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Location provider is not configured")
+	}
+	place, err := s.places.PlaceDetails(ctx, placeID)
+	if err != nil {
+		return LocationResult{}, httpapi.E(502, "PLACES_UNAVAILABLE", "Location provider is temporarily unavailable")
+	}
+	if place.PlaceID != placeID || strings.TrimSpace(place.Name) == "" || !isGeographicPlace(place.Types) || !storepkg.ValidCoordinates(place.Latitude, place.Longitude) {
+		return LocationResult{}, httpapi.E(422, "INVALID_LOCATION", "The selected location could not be verified")
+	}
+	return LocationResult{Provider: "google", PlaceID: place.PlaceID, Name: strings.TrimSpace(place.Name), Address: strings.TrimSpace(place.Address), Latitude: place.Latitude, Longitude: place.Longitude, Types: append([]string{}, place.Types...), Attributions: append([]string{}, place.Attributions...)}, nil
+}
+
 func isGeographicPlace(types []string) bool {
 	for _, placeType := range types {
 		switch placeType {

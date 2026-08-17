@@ -3,6 +3,7 @@ package user
 import (
 	"context"
 	"errors"
+	"math"
 	"net/url"
 	"regexp"
 	"strings"
@@ -41,15 +42,38 @@ type PublicProfile struct {
 }
 type Me struct {
 	PublicProfile
-	Email              string   `json:"email"`
-	RelationshipStatus *string  `json:"relationship_status"`
-	HasChildren        *bool    `json:"has_children"`
-	ChildrenAgeRanges  []string `json:"children_age_ranges"`
-	HousingStatus      *string  `json:"housing_status"`
-	Occupation         *string  `json:"occupation"`
-	AgeRange           *string  `json:"age_range"`
-	HomeStyleInterests []string `json:"home_style_interests"`
-	PreferredLocale    string   `json:"preferred_locale"`
+	Email              string             `json:"email"`
+	RelationshipStatus *string            `json:"relationship_status"`
+	HasChildren        *bool              `json:"has_children"`
+	ChildrenAgeRanges  []string           `json:"children_age_ranges"`
+	HousingStatus      *string            `json:"housing_status"`
+	Occupation         *string            `json:"occupation"`
+	AgeRange           *string            `json:"age_range"`
+	HomeStyleInterests []string           `json:"home_style_interests"`
+	PreferredLocale    string             `json:"preferred_locale"`
+	DiscoveryLocation  *DiscoveryLocation `json:"discovery_location"`
+}
+
+type DiscoveryLocation struct {
+	Source         string    `json:"source"`
+	Label          string    `json:"label"`
+	Address        string    `json:"address"`
+	PlaceID        string    `json:"place_id,omitempty"`
+	Latitude       float64   `json:"latitude"`
+	Longitude      float64   `json:"longitude"`
+	AccuracyMeters *float64  `json:"accuracy_meters,omitempty"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type DiscoveryLocationInput struct {
+	Source         string
+	Label          string
+	Address        string
+	PlaceID        string
+	Latitude       float64
+	Longitude      float64
+	AccuracyMeters *float64
+	OverrideManual bool
 }
 type Update struct {
 	Username           *string   `json:"username"`
@@ -78,8 +102,62 @@ func (s *Service) Public(ctx context.Context, id uuid.UUID) (PublicProfile, erro
 }
 func (s *Service) Me(ctx context.Context, id uuid.UUID) (Me, error) {
 	var m Me
-	e := s.db.QueryRow(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.bio_language::text,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL),x.relationship_status,x.has_children,coalesce(x.children_age_ranges,'{}'),x.housing_status,x.occupation,x.age_range,coalesce(x.home_style_interests,'{}'),u.preferred_locale::text FROM users u JOIN user_profiles p ON p.user_id=u.id LEFT JOIN user_private_profiles x ON x.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&m.ID, &m.Email, &m.Username, &m.DisplayName, &m.AvatarURL, &m.Bio, &m.BioLanguage, &m.City, &m.FollowerCount, &m.FollowingCount, &m.PostCount, &m.RelationshipStatus, &m.HasChildren, &m.ChildrenAgeRanges, &m.HousingStatus, &m.Occupation, &m.AgeRange, &m.HomeStyleInterests, &m.PreferredLocale)
+	var locationSource, locationLabel, locationAddress, locationPlaceID *string
+	var latitude, longitude, accuracy *float64
+	var locationUpdatedAt *time.Time
+	e := s.db.QueryRow(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.bio_language::text,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL),x.relationship_status,x.has_children,coalesce(x.children_age_ranges,'{}'),x.housing_status,x.occupation,x.age_range,coalesce(x.home_style_interests,'{}'),u.preferred_locale::text,x.discovery_location_source,x.discovery_location_label,x.discovery_location_address,x.discovery_location_place_id,ST_Y(x.discovery_location::geometry),ST_X(x.discovery_location::geometry),x.discovery_location_accuracy_meters::double precision,x.discovery_location_updated_at FROM users u JOIN user_profiles p ON p.user_id=u.id LEFT JOIN user_private_profiles x ON x.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&m.ID, &m.Email, &m.Username, &m.DisplayName, &m.AvatarURL, &m.Bio, &m.BioLanguage, &m.City, &m.FollowerCount, &m.FollowingCount, &m.PostCount, &m.RelationshipStatus, &m.HasChildren, &m.ChildrenAgeRanges, &m.HousingStatus, &m.Occupation, &m.AgeRange, &m.HomeStyleInterests, &m.PreferredLocale, &locationSource, &locationLabel, &locationAddress, &locationPlaceID, &latitude, &longitude, &accuracy, &locationUpdatedAt)
+	if e == nil && locationSource != nil && latitude != nil && longitude != nil && locationUpdatedAt != nil {
+		m.DiscoveryLocation = &DiscoveryLocation{Source: *locationSource, Label: derefString(locationLabel), Address: derefString(locationAddress), PlaceID: derefString(locationPlaceID), Latitude: *latitude, Longitude: *longitude, AccuracyMeters: accuracy, UpdatedAt: *locationUpdatedAt}
+	}
 	return m, e
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func (s *Service) SetDiscoveryLocation(ctx context.Context, id uuid.UUID, in DiscoveryLocationInput) error {
+	if err := validateDiscoveryLocation(&in); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(ctx, `INSERT INTO user_private_profiles(user_id,discovery_location,discovery_location_source,discovery_location_label,discovery_location_address,discovery_location_place_id,discovery_location_accuracy_meters,discovery_location_updated_at)
+		VALUES($1,ST_SetSRID(ST_MakePoint($6,$5),4326)::geography,$2,nullif($3,''),nullif($4,''),nullif($7,''),$8,now())
+		ON CONFLICT(user_id) DO UPDATE SET discovery_location=excluded.discovery_location,discovery_location_source=excluded.discovery_location_source,discovery_location_label=excluded.discovery_location_label,discovery_location_address=excluded.discovery_location_address,discovery_location_place_id=excluded.discovery_location_place_id,discovery_location_accuracy_meters=excluded.discovery_location_accuracy_meters,discovery_location_updated_at=now(),updated_at=now()
+		WHERE excluded.discovery_location_source='manual'
+		   OR user_private_profiles.discovery_location_source IS DISTINCT FROM 'manual'
+		   OR $9`, id, in.Source, in.Label, in.Address, in.Latitude, in.Longitude, in.PlaceID, in.AccuracyMeters, in.OverrideManual)
+	return err
+}
+
+func (s *Service) ClearDiscoveryLocation(ctx context.Context, id uuid.UUID) error {
+	_, err := s.db.Exec(ctx, `UPDATE user_private_profiles SET discovery_location=NULL,discovery_location_source=NULL,discovery_location_label=NULL,discovery_location_address=NULL,discovery_location_place_id=NULL,discovery_location_accuracy_meters=NULL,discovery_location_updated_at=NULL,updated_at=now() WHERE user_id=$1`, id)
+	return err
+}
+
+func validateDiscoveryLocation(in *DiscoveryLocationInput) error {
+	in.Source = strings.TrimSpace(in.Source)
+	in.Label = strings.TrimSpace(in.Label)
+	in.Address = strings.TrimSpace(in.Address)
+	in.PlaceID = strings.TrimSpace(in.PlaceID)
+	if (in.Source != "device" && in.Source != "manual") || math.IsNaN(in.Latitude) || math.IsNaN(in.Longitude) || math.IsInf(in.Latitude, 0) || math.IsInf(in.Longitude, 0) || in.Latitude < -90 || in.Latitude > 90 || in.Longitude < -180 || in.Longitude > 180 {
+		return httpapi.ErrInvalidInput
+	}
+	if utf8.RuneCountInString(in.Label) > 200 || utf8.RuneCountInString(in.Address) > 500 || utf8.RuneCountInString(in.PlaceID) > 300 {
+		return httpapi.ErrInvalidInput
+	}
+	if in.Source == "manual" {
+		if in.PlaceID == "" || in.Label == "" || in.AccuracyMeters != nil || in.OverrideManual {
+			return httpapi.ErrInvalidInput
+		}
+		return nil
+	}
+	if in.PlaceID != "" || in.Label != "" || in.Address != "" || in.AccuracyMeters == nil || *in.AccuracyMeters <= 0 || *in.AccuracyMeters > 1000 || math.IsNaN(*in.AccuracyMeters) || math.IsInf(*in.AccuracyMeters, 0) {
+		return httpapi.ErrInvalidInput
+	}
+	return nil
 }
 func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 	if e := validateUpdate(&in); e != nil {

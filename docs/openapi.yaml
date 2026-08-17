@@ -321,6 +321,39 @@ paths:
       summary: Delete and anonymize the account
       security: [{bffSecret: [], bearerAuth: []}]
       responses: {'204': {description: Deleted}}
+  /v1/me/discovery-location:
+    put:
+      tags: [Profile]
+      summary: Persist the authenticated user's private discovery location
+      description: Manual selection accepts only a Google geographic place ID; the backend resolves its coordinates. Device coordinates come from OS geolocation. A manual selection remains active until a device request explicitly sets override_manual after the user chooses current location.
+      security: [{bffSecret: [], bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  required: [source, place_id]
+                  properties:
+                    source: {type: string, const: manual}
+                    place_id: {type: string, minLength: 1, maxLength: 300}
+                  additionalProperties: false
+                - type: object
+                  required: [source, latitude, longitude, accuracy_meters]
+                  properties:
+                    source: {type: string, const: device}
+                    latitude: {type: number, minimum: -90, maximum: 90, description: OS-produced; never user-entered.}
+                    longitude: {type: number, minimum: -180, maximum: 180, description: OS-produced; never user-entered.}
+                    accuracy_meters: {type: number, exclusiveMinimum: 0, maximum: 1000}
+                    override_manual: {type: boolean, default: false, description: Set true only when the user explicitly switches from a manual place to current location.}
+                  additionalProperties: false
+      responses: {'200': {$ref: '#/components/responses/Me'}, '400': {$ref: '#/components/responses/Error'}, '422': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}, '502': {$ref: '#/components/responses/Error'}, '503': {$ref: '#/components/responses/Error'}}
+    delete:
+      tags: [Profile]
+      summary: Clear the authenticated user's private discovery location
+      security: [{bffSecret: [], bearerAuth: []}]
+      responses: {'204': {description: Cleared}}
   /v1/me/searches:
     get:
       tags: [Profile]
@@ -645,11 +678,24 @@ components:
         follower_count: {type: integer, minimum: 0}
         following_count: {type: integer, minimum: 0}
         post_count: {type: integer, minimum: 0}
+    DiscoveryLocation:
+      type: object
+      description: Private discovery preference. Coordinates are transport-only and must never be rendered, logged, or used as visit-verification evidence.
+      required: [source, label, address, latitude, longitude, updated_at]
+      properties:
+        source: {type: string, enum: [device, manual]}
+        label: {type: string, description: Empty for device mode; clients render localized current-location copy.}
+        address: {type: string}
+        place_id: {type: string}
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+        accuracy_meters: {type: number, exclusiveMinimum: 0, maximum: 1000}
+        updated_at: {type: string, format: date-time}
     Me:
       allOf:
         - {$ref: '#/components/schemas/PublicProfile'}
         - type: object
-          required: [email, relationship_status, has_children, children_age_ranges, housing_status, occupation, age_range, home_style_interests, preferred_locale]
+          required: [email, relationship_status, has_children, children_age_ranges, housing_status, occupation, age_range, home_style_interests, preferred_locale, discovery_location]
           properties:
             email: {type: string, format: email}
             relationship_status: {type: [string, 'null']}
@@ -660,6 +706,10 @@ components:
             age_range: {type: [string, 'null']}
             home_style_interests: {type: array, items: {type: string}}
             preferred_locale: {$ref: '#/components/schemas/Locale'}
+            discovery_location:
+              oneOf:
+                - {$ref: '#/components/schemas/DiscoveryLocation'}
+                - {type: 'null'}
     MediaUpload:
       type: object
       required: [id, upload]

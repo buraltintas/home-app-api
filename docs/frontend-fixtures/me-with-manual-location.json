@@ -1,0 +1,29 @@
+{
+  "id": "5c34f760-cb64-44aa-a790-21b95a03b233",
+  "username": "ayse_evde",
+  "display_name": "Ayşe",
+  "avatar_url": "",
+  "bio": "",
+  "city": "İstanbul",
+  "follower_count": 12,
+  "following_count": 8,
+  "post_count": 4,
+  "email": "ayse@example.com",
+  "relationship_status": null,
+  "has_children": null,
+  "children_age_ranges": [],
+  "housing_status": null,
+  "occupation": null,
+  "age_range": null,
+  "home_style_interests": [],
+  "preferred_locale": "tr",
+  "discovery_location": {
+    "source": "manual",
+    "label": "Kadıköy",
+    "address": "Kadıköy, İstanbul, Türkiye",
+    "place_id": "ChIJ6x1p9I5YwokRLQx-sGZ9V3Q",
+    "latitude": 40.9917,
+    "longitude": 29.0277,
+    "updated_at": "2026-08-17T14:30:00Z"
+  }
+}

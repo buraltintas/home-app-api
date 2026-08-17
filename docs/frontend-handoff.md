@@ -109,6 +109,7 @@ Messages can be localized; branch UI logic only on `code`. Unknown JSON fields, 
 | `MEDIA_STATE_CONFLICT` | Do not finalize twice; refresh upload state/start over. |
 | `MEDIA_UPLOAD_INCOMPLETE`, `MEDIA_UPLOAD_MISMATCH` | Re-upload binary with exact declared bytes/type. |
 | `INVALID_EXTERNAL_STORE` | Google result can no longer be materialized. |
+| `INVALID_LOCATION` | Discard the stale/non-geographic manual candidate and let the user choose again. |
 | `PLACES_NOT_CONFIGURED`, `PLACES_UNAVAILABLE` | Show provider-degraded state; do not call Google directly. |
 | `SEARCH_ATTRIBUTION_INVALID` | Drop stale/foreign attribution IDs and continue core action where appropriate. |
 | `INTERNAL_ERROR` | Generic retry/support state; raw provider/DB errors are never exposed. |
@@ -149,6 +150,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `POST`, `DELETE /v1/users/{id}/follow` | required | empty → 204, idempotent | `CANNOT_FOLLOW_SELF` |
 | `POST /v1/searches/{id}/interactions` | owning user/visitor | event payload → 204, idempotent when key supplied | attribution/not found |
 | `GET`, `PATCH /v1/me` | required | private profile / partial update → private profile | input/username conflict |
+| `PUT`, `DELETE /v1/me/discovery-location` | required | persist current/manual private discovery location → private profile; clear → 204 | input/rate/provider errors |
 | `DELETE /v1/me` | required | anonymize/delete → 204 | auth |
 | `GET /v1/me/searches` | required | limit → `{items}` default 30/max 100 | auth |
 | `DELETE /v1/me/searches` | required | all → 204 | auth |
@@ -171,8 +173,10 @@ Do not request location at app/page launch. When the user first chooses nearby f
 - Web: request browser geolocation only from the user's action. Browser code sends browser-produced coordinates only through the same-origin BFF. The BFF forwards them to feed/search/store endpoints and must not expose backend credentials.
 - Mobile: request platform “while using the app” permission only from the user's action. Do not request background location. Forward native-location coordinates through the isolated API transport.
 - Denied, restricted, unavailable, or deliberately skipped permission: immediately keep the product usable and show manual location selection. Never repeatedly trigger the system permission dialog.
-- Manual entry has exactly one user-editable text field. The user types a human place name such as `Kadıköy`, `Çankaya` or `Berlin Mitte`; never show latitude/longitude inputs. Debounce after at least two characters, call `GET /v1/locations/search?q=<text>&limit=5`, and render only candidate place name/address plus provider attribution. See [`location-search.json`](./frontend-fixtures/location-search.json). After selection, the transport layer uses that candidate's returned `latitude`/`longitude` internally for nearby feed, hybrid search, classic nearby search, and distance calculation; never render those numeric fields or ask the user to type them.
-- Keep a visible, keyboard/screen-reader accessible location control showing the active human-readable place name, with Change and Clear actions. Persist a manual choice or granted current-location preference only after the user chooses it; treat transport-level coordinates as sensitive and do not place them in UI copy, analytics, or logs.
+- Manual entry has exactly one user-editable text field. The user types a human place name such as `Kadıköy`, `Çankaya` or `Berlin Mitte`; never show latitude/longitude inputs. Debounce after at least two characters, call `GET /v1/locations/search?q=<text>&limit=5`, and render only candidate place name/address plus provider attribution. See [`location-search.json`](./frontend-fixtures/location-search.json). After selection, call `PUT /v1/me/discovery-location` with only `{"source":"manual","place_id":"..."}`. The backend re-fetches and verifies the geographic place and stores its coordinates privately; never copy candidate coordinates into the manual-selection request, render numeric fields, or ask the user to type them.
+- Keep a visible, keyboard/screen-reader accessible location control showing the active human-readable place name, with Change and Clear actions. `GET /v1/me.discovery_location` is the authenticated source of truth and is private; `source=manual` supplies `label`/`address`, while `source=device` should display localized “Current location” copy. Coordinates remain transport-only and must not appear in UI copy, analytics, crash reports, or logs. `DELETE /v1/me/discovery-location` clears the preference.
+- Mobile current-location mode: persist OS coordinates and horizontal accuracy with `source=device` while the app is foregrounded. Update after meaningful movement (recommended: at least 250 m) or when the last persisted fix is at least 15 minutes old; do not request background location. A manual selection is sticky: ordinary device updates use `override_manual=false` and cannot overwrite it. Send `override_manual=true` only for the first device update after the user explicitly taps **Use current location**. Manual changes persist immediately.
+- Web may persist a current fix after an explicit browser-geolocation action, but it must not continuously poll. Re-request only from a user action or while an already active nearby experience reasonably needs a refreshed fix.
 - Manual location is discovery context only. It must never be submitted to `/visit-verifications` or used as evidence for a review. Review verification always requires fresh native/browser device geolocation and horizontal accuracy while the user is physically present.
 
 All visible copy and location/error states must exist in `tr`, `en`, `de`, and `ru`. Cover loading suggestions, no geographic matches, provider unavailable, permission prompt, denied/restricted permission, location unavailable, active manual location, and clear/change states.
@@ -224,7 +228,7 @@ Comments are one-level only, oldest-first, and have no cursor. They contain `bod
 
 Follows are unique/idempotent. Self-follow returns HTTP 422 `CANNOT_FOLLOW_SELF`. Public profiles expose only `id`, username/display name/avatar, bio and optional `bio_language`, city, follower/following counts, and post count. `viewer_follows_author` is present on post objects, not public profile.
 
-`GET /v1/me` adds email, preferred locale, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. These fields and search history must never appear on another user's profile. PATCH is partial. Username is 3–30 ASCII letters/digits/underscore and unique. Account deletion revokes sessions, removes private/relationship/search data, soft-deletes content, and anonymizes the profile.
+`GET /v1/me` adds email, preferred locale, private discovery location, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. The discovery location belongs in the profile settings area with readable current/manual state and Change/Clear actions; never show its numeric coordinates. These fields and search history must never appear on another user's profile. PATCH is partial. Username is 3–30 ASCII letters/digits/underscore and unique. Account deletion revokes sessions, removes private location/relationship/search data, soft-deletes content, and anonymizes the profile.
 
 ## 12. Search contract
 
@@ -301,7 +305,7 @@ Push tables/services support device platform/token, locale, preferences, templat
 
 Next.js should proxy `/v1` calls server-side, inject its server-only secret, forward bearer token, `X-Locale`/`Accept-Language`, visitor ID, origin attribution headers, status, error body, `Retry-After`, and request ID without rewriting stable error codes. Keep refresh tokens in an appropriate secure server-side/HTTP-only session design; never expose the backend BFF secret to browser code.
 
-React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, implement the current/manual location choice above, explain the review/nearby benefit immediately before asking location permission, send fresh coordinates plus horizontal accuracy for current review verification or on-site visit verification, and follow the direct-upload sequence. Treat the embedded BFF header as public/recoverable and never as user authentication.
+React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, implement and synchronize the private current/manual profile location choice above, explain the review/nearby benefit immediately before asking location permission, send fresh coordinates plus horizontal accuracy for current review verification or on-site visit verification, and follow the direct-upload sequence. A persisted discovery location is never proof of presence. Treat the embedded BFF header as public/recoverable and never as user authentication.
 
 ## 15. Backend-supported frontend states
 

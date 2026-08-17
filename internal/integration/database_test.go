@@ -1079,6 +1079,49 @@ func TestMultilingualArchitectureMatrix(t *testing.T) {
 	}
 }
 
+func TestPrivateDiscoveryLocationLifecycle(t *testing.T) {
+	db := database(t)
+	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	userID := user(t, db, "location-"+uuid.NewString()+"@example.test")
+	users := userpkg.NewService(db, report)
+
+	manual := userpkg.DiscoveryLocationInput{Source: "manual", Label: "Kadıköy", Address: "Kadıköy, İstanbul", PlaceID: "kadikoy-place", Latitude: 40.9917, Longitude: 29.0277}
+	if err := users.SetDiscoveryLocation(t.Context(), userID, manual); err != nil {
+		t.Fatal(err)
+	}
+	me, err := users.Me(t.Context(), userID)
+	if err != nil || me.DiscoveryLocation == nil || me.DiscoveryLocation.Source != "manual" || me.DiscoveryLocation.Label != "Kadıköy" {
+		t.Fatalf("manual location=%+v err=%v", me.DiscoveryLocation, err)
+	}
+
+	accuracy := 20.0
+	device := userpkg.DiscoveryLocationInput{Source: "device", Latitude: 41.05, Longitude: 29.10, AccuracyMeters: &accuracy}
+	if err = users.SetDiscoveryLocation(t.Context(), userID, device); err != nil {
+		t.Fatal(err)
+	}
+	me, err = users.Me(t.Context(), userID)
+	if err != nil || me.DiscoveryLocation == nil || me.DiscoveryLocation.Source != "manual" {
+		t.Fatalf("ordinary device update overwrote manual location: %+v err=%v", me.DiscoveryLocation, err)
+	}
+
+	device.OverrideManual = true
+	if err = users.SetDiscoveryLocation(t.Context(), userID, device); err != nil {
+		t.Fatal(err)
+	}
+	me, err = users.Me(t.Context(), userID)
+	if err != nil || me.DiscoveryLocation == nil || me.DiscoveryLocation.Source != "device" || me.DiscoveryLocation.AccuracyMeters == nil {
+		t.Fatalf("device location=%+v err=%v", me.DiscoveryLocation, err)
+	}
+
+	if err = users.ClearDiscoveryLocation(t.Context(), userID); err != nil {
+		t.Fatal(err)
+	}
+	me, err = users.Me(t.Context(), userID)
+	if err != nil || me.DiscoveryLocation != nil {
+		t.Fatalf("cleared location=%+v err=%v", me.DiscoveryLocation, err)
+	}
+}
+
 func containsAll(values []string, wanted ...string) bool {
 	set := make(map[string]bool, len(values))
 	for _, value := range values {
