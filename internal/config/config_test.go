@@ -12,6 +12,8 @@ func requiredTestEnvironment(t *testing.T) {
 	t.Setenv("BFF_SECRETS", "current,previous")
 	t.Setenv("ACCESS_TOKEN_SECRET", "test-access-secret-at-least-32-bytes")
 	t.Setenv("OTP_HASH_SECRET", "test-otp-secret-at-least-32-bytes")
+	t.Setenv("APP_REVIEW_EMAIL", "")
+	t.Setenv("APP_REVIEW_CODE", "")
 }
 
 func TestLoadRejectsUnknownObjectStorageProvider(t *testing.T) {
@@ -95,5 +97,42 @@ func TestLoadRejectsMismatchedGmailSender(t *testing.T) {
 	t.Setenv("GMAIL_SERVICE_ACCOUNT_JSON", `{}`)
 	if _, err := Load(); err == nil {
 		t.Fatal("mismatched Gmail sender accepted")
+	}
+}
+
+func TestLoadSupportsAppReviewLogin(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("APP_REVIEW_EMAIL", "APP-REVIEW@bosagezme.com")
+	t.Setenv("APP_REVIEW_CODE", "123456")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AppReviewEmail != "app-review@bosagezme.com" || cfg.AppReviewCode != "123456" {
+		t.Fatalf("config=%+v", cfg)
+	}
+}
+
+func TestLoadRejectsIncompleteOrInvalidAppReviewLogin(t *testing.T) {
+	tests := []struct {
+		name  string
+		email string
+		code  string
+	}{
+		{name: "missing code", email: "app-review@bosagezme.com"},
+		{name: "missing email", code: "123456"},
+		{name: "invalid email", email: "not-an-email", code: "123456"},
+		{name: "non-digit code", email: "app-review@bosagezme.com", code: "12A456"},
+		{name: "short code", email: "app-review@bosagezme.com", code: "12345"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requiredTestEnvironment(t)
+			t.Setenv("APP_REVIEW_EMAIL", test.email)
+			t.Setenv("APP_REVIEW_CODE", test.code)
+			if _, err := Load(); err == nil {
+				t.Fatal("invalid app review login accepted")
+			}
+		})
 	}
 }

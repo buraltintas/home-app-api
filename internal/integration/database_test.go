@@ -807,10 +807,50 @@ func TestReportingReadModelsExecuteAgainstAggregates(t *testing.T) {
 	}
 }
 
-func TestAccountDeletionAnonymizesAndRevokes(t *testing.T) {
+func TestAppReviewLoginSkipsEmailAndDeletedAccountReactivatesBlank(t *testing.T) {
 	db := database(t)
-	id := user(t, db, "delete-"+uuid.NewString()+"@example.test")
+	emailAddress := "app-review+" + uuid.NewString() + "@bosagezme.com"
 	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
+	authSvc := auth.NewService(db, auth.Config{
+		OTPTTL: 10 * time.Minute, OTPMaxAttempts: 5, OTPEmailLimit: 20, OTPIPLimit: 20,
+		OTPVisitorLimit: 20, VisitorTTL: 24 * time.Hour, RefreshTTL: 24 * time.Hour,
+		HashKey: []byte(testHashKey), AppReviewEmail: emailAddress, AppReviewCode: "123456",
+	}, tokens, googleStub{}, report)
+	if err := authSvc.RequestCode(t.Context(), emailAddress, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	var outboxCount int
+	if err := db.QueryRow(t.Context(), `SELECT count(*) FROM email_outbox WHERE recipient=$1`, emailAddress).Scan(&outboxCount); err != nil {
+		t.Fatal(err)
+	}
+	if outboxCount != 0 {
+		t.Fatalf("app review login queued %d email(s)", outboxCount)
+	}
+	pair, err := authSvc.VerifyCode(t.Context(), emailAddress, "123456", auth.Client{Type: "app-review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := pair.UserID
+	storeID := store(t, db, 41.01, 29.02)
+	postID := uuid.New()
+	commentID := uuid.New()
+	mediaID := uuid.New()
+	if _, err = db.Exec(t.Context(), `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at) VALUES($1,$2,$3,'Personal review',5,10,now())`, postID, id, storeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `INSERT INTO comments(id,post_id,user_id,body) VALUES($1,$2,$3,'Personal comment')`, commentID, postID, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `INSERT INTO media(id,owner_user_id,storage_key,mime_type,size_bytes,status) VALUES($1,$2,$3,'image/jpeg',100,'ready')`, mediaID, id, "users/"+id.String()+"/review.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `INSERT INTO user_private_profiles(user_id,occupation) VALUES($1,'Architect')`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `INSERT INTO searches(user_id,raw_query,normalized_query,parsed_intent,search_mode) VALUES($1,'perde','perde','{}','internal')`, id); err != nil {
+		t.Fatal(err)
+	}
 	users := userpkg.NewService(db, report)
 	if err := users.DeleteAccount(t.Context(), id); err != nil {
 		t.Fatal(err)
@@ -820,8 +860,50 @@ func TestAccountDeletionAnonymizesAndRevokes(t *testing.T) {
 	if err := db.QueryRow(t.Context(), `SELECT u.status,u.primary_email::text,p.display_name,u.deleted_at IS NOT NULL FROM users u JOIN user_profiles p ON p.user_id=u.id WHERE u.id=$1`, id).Scan(&status, &email, &display, &deleted); err != nil {
 		t.Fatal(err)
 	}
-	if status != "deleted" || !deleted || display != "Deleted user" || email == "" || email[:8] != "deleted+" {
+	if status != "inactive" || !deleted || display != "Deleted user" || email != emailAddress {
 		t.Fatalf("status=%q email=%q display=%q deleted=%v", status, email, display, deleted)
+	}
+	var identities, searches, privateProfiles, activeSessions int
+	if err := db.QueryRow(t.Context(), `SELECT
+		(SELECT count(*) FROM auth_identities WHERE user_id=$1),
+		(SELECT count(*) FROM searches WHERE user_id=$1),
+		(SELECT count(*) FROM user_private_profiles WHERE user_id=$1),
+		(SELECT count(*) FROM auth_sessions WHERE user_id=$1 AND revoked_at IS NULL)`, id).Scan(&identities, &searches, &privateProfiles, &activeSessions); err != nil {
+		t.Fatal(err)
+	}
+	if identities != 1 || searches != 0 || privateProfiles != 0 || activeSessions != 0 {
+		t.Fatalf("identities=%d searches=%d private_profiles=%d active_sessions=%d", identities, searches, privateProfiles, activeSessions)
+	}
+	var postBody, commentBody, mediaStatus string
+	var postDeleted, commentDeleted bool
+	if err := db.QueryRow(t.Context(), `SELECT
+		(SELECT body FROM posts WHERE id=$1),(SELECT deleted_at IS NOT NULL FROM posts WHERE id=$1),
+		(SELECT body FROM comments WHERE id=$2),(SELECT deleted_at IS NOT NULL FROM comments WHERE id=$2),
+		(SELECT status FROM media WHERE id=$3)`, postID, commentID, mediaID).Scan(&postBody, &postDeleted, &commentBody, &commentDeleted, &mediaStatus); err != nil {
+		t.Fatal(err)
+	}
+	if postBody != "" || !postDeleted || commentBody != "" || !commentDeleted || mediaStatus != "deleted" {
+		t.Fatalf("post_body=%q post_deleted=%v comment_body=%q comment_deleted=%v media_status=%q", postBody, postDeleted, commentBody, commentDeleted, mediaStatus)
+	}
+	if err := authSvc.RequestCode(t.Context(), emailAddress, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	reactivated, err := authSvc.VerifyCode(t.Context(), emailAddress, "123456", auth.Client{Type: "app-review"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reactivated.UserID != id {
+		t.Fatalf("reactivation created a new user: %s != %s", reactivated.UserID, id)
+	}
+	me, err := users.Me(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if me.Email != emailAddress || me.DisplayName != strings.Split(emailAddress, "@")[0] || me.Occupation != nil || me.DiscoveryLocation != nil {
+		t.Fatalf("reactivated profile=%+v", me)
+	}
+	if history, err := users.Searches(t.Context(), id, 20); err != nil || len(history) != 0 {
+		t.Fatalf("reactivated history=%+v err=%v", history, err)
 	}
 }
 

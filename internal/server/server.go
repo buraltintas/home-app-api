@@ -75,6 +75,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Use(appmw.BFF(bff))
 		r.Use(appmw.NewLimiter(180, 40).Middleware)
 		r.Use(appmw.OptionalAuth(tokens))
+		r.Use(appmw.ActiveAccount(s.db))
 		r.Use(appmw.UserLocale(s.db))
 		searchLimit := appmw.NewLimiter(30, 8)
 		writeLimit := appmw.NewLimiter(20, 6)

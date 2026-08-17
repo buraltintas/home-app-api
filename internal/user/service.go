@@ -300,6 +300,12 @@ func (s *Service) DeleteAccount(ctx context.Context, user uuid.UUID) error {
 		return e
 	}
 	defer tx.Rollback(ctx)
+	var email string
+	if e = tx.QueryRow(ctx, `SELECT primary_email::text FROM users WHERE id=$1 AND status='active' AND deleted_at IS NULL FOR UPDATE`, user).Scan(&email); errors.Is(e, pgx.ErrNoRows) {
+		return httpapi.E(404, "USER_NOT_FOUND", "User not found")
+	} else if e != nil {
+		return e
+	}
 	rows, e := tx.Query(ctx, `SELECT DISTINCT store_id FROM posts WHERE user_id=$1 AND deleted_at IS NULL`, user)
 	if e != nil {
 		return e
@@ -314,22 +320,34 @@ func (s *Service) DeleteAccount(ctx context.Context, user uuid.UUID) error {
 	}
 	rows.Close()
 	for _, query := range []string{
-		`UPDATE posts SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
-		`UPDATE comments SET deleted_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
+		`UPDATE posts SET body='',content_language=NULL,deleted_at=now(),updated_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
+		`UPDATE comments SET body='',content_language=NULL,deleted_at=now(),updated_at=now() WHERE user_id=$1 AND deleted_at IS NULL`,
 		`DELETE FROM likes WHERE user_id=$1`,
 		`DELETE FROM follows WHERE follower_id=$1 OR following_id=$1`,
 		`DELETE FROM favorites WHERE user_id=$1`,
 		`DELETE FROM searches WHERE user_id=$1`,
-		`DELETE FROM auth_identities WHERE user_id=$1`,
-		`UPDATE auth_sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='account_deleted' WHERE user_id=$1`,
+		`DELETE FROM store_visit_verifications WHERE user_id=$1`,
+		`UPDATE media SET status='deleted' WHERE owner_user_id=$1 AND status<>'deleted'`,
+		`DELETE FROM push_devices WHERE user_id=$1`,
+		`DELETE FROM notification_preferences WHERE user_id=$1`,
+		`DELETE FROM notification_outbox WHERE user_id=$1`,
+		`UPDATE visitor_sessions SET linked_user_id=NULL WHERE linked_user_id=$1`,
+		`UPDATE platform_events SET user_id=NULL WHERE user_id=$1`,
+		`UPDATE auth_sessions SET revoked_at=coalesce(revoked_at,now()),revoke_reason='account_deactivated' WHERE user_id=$1`,
 		`DELETE FROM user_private_profiles WHERE user_id=$1`,
-		`UPDATE user_profiles SET username=NULL,display_name='Deleted user',avatar_url=NULL,bio=NULL,city=NULL,updated_at=now() WHERE user_id=$1`,
+		`UPDATE user_profiles SET username=NULL,display_name='Deleted user',avatar_url=NULL,bio=NULL,bio_language=NULL,city=NULL,updated_at=now() WHERE user_id=$1`,
 	} {
 		if _, e = tx.Exec(ctx, query, user); e != nil {
 			return e
 		}
 	}
-	tag, e := tx.Exec(ctx, `UPDATE users SET primary_email=('deleted+'||id::text||'@invalid.local')::citext,status='deleted',deleted_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, user)
+	if _, e = tx.Exec(ctx, `DELETE FROM email_verification_codes WHERE normalized_email=$1`, email); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `DELETE FROM email_outbox WHERE recipient=$1`, email); e != nil {
+		return e
+	}
+	tag, e := tx.Exec(ctx, `UPDATE users SET status='inactive',preferred_locale='tr',deleted_at=now(),updated_at=now() WHERE id=$1 AND status='active' AND deleted_at IS NULL`, user)
 	if e != nil {
 		return e
 	}

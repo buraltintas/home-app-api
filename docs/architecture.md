@@ -51,7 +51,7 @@ Physical-presence verification always uses a fresh mobile OS fix (or a still-val
 
 ## C. Authentication design
 
-Email request creates a six-digit code with `crypto/rand`, stores only an HMAC-SHA256 digest keyed by `OTP_HASH_SECRET`, and atomically enqueues an email. Codes expire, have an attempt cap, are single-use, and request/verify paths are limited by client, IP, email and visitor ID. The API does not wait for email delivery.
+Email request creates a six-digit code with `crypto/rand`, stores only an HMAC-SHA256 digest keyed by `OTP_HASH_SECRET`, and atomically enqueues an email. Codes expire, have an attempt cap, are single-use, and request/verify paths are limited by client, IP, email and visitor ID. The API does not wait for email delivery. An optional, exact `APP_REVIEW_EMAIL` identity uses the paired fixed six-digit `APP_REVIEW_CODE`: it still requires the request step and all expiry, attempt and rate-limit controls, but deliberately skips email enqueueing. Removing both variables disables the exception.
 
 Production delivery uses the Gmail API through a dedicated Google Workspace service account with domain-wide delegation limited to `gmail.send`. The worker impersonates only the configured Workspace sender, builds RFC-compliant multipart text/HTML, and sends through `users.messages.send`; it has no mailbox read permission. Service-account credentials are secret-manager material and never stored in PostgreSQL or the repository. Development keeps using private local `.eml` files, and the transactional outbox/retry semantics remain provider-independent.
 
@@ -72,7 +72,9 @@ Access JWTs are short-lived and include user/session IDs, issuer `https://bosage
 
 `/health` and `/ready` disclose only status. Every `/v1/*` route first passes constant-time `X-BFF-Secret` validation against all configured `BFF_SECRETS`; values and sensitive headers are never logged. This client credential is independent from user auth.
 
-Optional auth accepts no token or a valid access token; an invalid supplied token is rejected. Required auth additionally demands an authenticated principal. Owner checks are performed in transactional mutations. Rate-limit classes use bounded in-process token buckets now and can later be backed by Redis without changing handlers. JSON bodies are bounded, unknown fields rejected, server timeouts enforced, panics recovered, and request IDs propagated.
+Optional auth accepts no token or a valid access token; an invalid supplied token is rejected. Authenticated requests additionally verify that the referenced database session is current and the account is active, so logout or account deletion invalidates an otherwise unexpired JWT immediately. Required auth additionally demands an authenticated principal. Owner checks are performed in transactional mutations. Rate-limit classes use bounded in-process token buckets now and can later be backed by Redis without changing handlers. JSON bodies are bounded, unknown fields rejected, server timeouts enforced, panics recovered, and request IDs propagated.
+
+User-facing account deletion is implemented as privacy purge plus reversible identity deactivation. The transaction revokes sessions; removes searches, private profile/location, relationships, preferences and delivery data; soft-deletes authored content; and makes owned media inaccessible. It retains only the verified provider identity and normalized primary email needed to recognize a later verified login. That login reactivates the same UUID with a blank public/private profile; purged data is not recoverable. Suspended or otherwise unavailable identities are never reactivated by login.
 
 A mobile-embedded BFF secret can be extracted and is only a coarse client gate. The middleware is deliberately replaceable by a client-verifier interface so App Attest, Play Integrity, or short-lived gateway credentials can replace it.
 
@@ -179,6 +181,7 @@ Infrastructure-only `GET /health` and `GET /ready` do not require BFF or user au
 | BFF leakage | rotation list, constant-time compare, no logging, per-client limits; mobile extraction remains possible |
 | Token theft | short access TTL, hashed rotating refresh tokens, family reuse detection, logout-all, TLS required |
 | OTP brute force | keyed hash, short TTL, attempt cap, single use, layered limits, generic responses |
+| App Review credential disclosure | exception is bound to one configured identity, still request/expiry/attempt/rate limited, absent from UI; disable or rotate with environment configuration |
 | Google token abuse | official signature/audience/issuer/expiry verification; only verified email links |
 | Fake GPS | server distance calculation and radius; GPS can be spoofed, so future attestation/receipt signals fit a visit-verifier boundary |
 | Duplicate accounts/stores | transactions, row locks, verified-email policy, unique provider IDs, retry on unique races |

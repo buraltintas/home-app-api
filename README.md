@@ -122,7 +122,7 @@ See [.env.example](.env.example). Important groups are:
 
 - core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`, `DEFAULT_LOCALE`
 - client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback)
-- auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, and per-email/IP/visitor request limits
+- auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, per-email/IP/visitor request limits, and the optional paired `APP_REVIEW_EMAIL`/`APP_REVIEW_CODE`
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - email: `EMAIL_PROVIDER=development|gmail|resend`, `EMAIL_FROM`; Gmail Workspace uses `GMAIL_IMPERSONATED_USER` plus exactly one secret source (`GMAIL_SERVICE_ACCOUNT_FILE` recommended, or `GMAIL_SERVICE_ACCOUNT_JSON`) and optional `GMAIL_API_URL`; local development uses `EMAIL_DEVELOPMENT_DIR`; Resend remains available through `RESEND_API_KEY`
@@ -148,6 +148,12 @@ Production OTP email can be sent from the Workspace mailbox `no-reply@bosagezme.
 The worker sends an RFC-compliant multipart text/HTML message through `users.messages.send`. It requests no Gmail read, modify, compose, or full-mailbox scope.
 The OTP template follows the Boşa Gezme! warm editorial palette and includes explicit light/dark mailbox styles, responsive email-safe table layout, high-contrast code presentation, localized `tr`/`en`/`de`/`ru` content, hidden preview text, and a complete plain-text alternative.
 
+### App Store review login
+
+Set `APP_REVIEW_EMAIL=app-review@bosagezme.com` and `APP_REVIEW_CODE=123456` together. The reviewer follows the ordinary email login flow: request a code, then enter `123456`. The request still creates a short-lived, single-use, attempt-limited verification record and uses the normal rate limits, but it does not queue or send an email for that exact address. All other addresses keep the ordinary random-code delivery flow.
+
+Keep these credentials out of the application UI and provide them only in App Store Connect review notes. The account should contain synthetic/minimal review data. Remove both environment variables to disable the exception, or rotate the code between review windows.
+
 ## Operational and privacy notes
 
 - Terminate TLS at the deployment edge. BFF and bearer credentials must never travel over plaintext networks.
@@ -156,6 +162,7 @@ The OTP template follows the Boşa Gezme! warm editorial palette and includes ex
 - Search coordinates are deliberately rounded before persistence. Add a scheduled retention/anonymization job according to the product's final privacy policy.
 - Google provider payloads are not stored wholesale. Search snapshots retain provider reference/rank and platform-owned metrics; attribution is returned from live provider data.
 - The current limiter is process-local. Replace its storage with Redis only when horizontally scaled instances require coordinated quotas.
+- `DELETE /v1/me` is the user-facing account deletion action. It permanently purges profile/private fields, search history, social relationships and user content, revokes every session, and deactivates the row. The verified login identity and original email are retained solely so a later verified login reactivates the same UUID with a blank profile; deleted data is never restored.
 
 ## Migrations
 

@@ -64,6 +64,8 @@ The current Go API also expects this header from React Native. A secret embedded
 
 Codes are six digits, expire after `OTP_TTL` (default 10 minutes), and allow `OTP_MAX_ATTEMPTS` (default 5). The request endpoint intentionally returns accepted without revealing account existence. Invalid, expired, or attempt-exhausted verification uses `INVALID_CODE`. Rate limits are applied by normalized email, IP, and visitor; HTTP 429 uses `RATE_LIMITED` and `Retry-After: 60`.
 
+The App Store reviewer uses the same request and verify screens. The configured review address is a backend-only delivery exception; do not add a special button, prefill, label, or branch to the mobile/web UI.
+
 ### Google and identity merging
 
 Obtain a Google ID token for the configured backend audience, then call `POST /v1/auth/google` with `{"id_token":"<google-id-token>"}`. Failures use `INVALID_GOOGLE_TOKEN`; an unverified email uses `EMAIL_NOT_VERIFIED`. Google and OTP identities with the same trusted, verified, normalized email automatically map to one user. The frontend must not implement account merging.
@@ -96,6 +98,7 @@ Messages can be localized; branch UI logic only on `code`. Unknown JSON fields, 
 | `AUTH_REQUIRED` | Show sign-in. |
 | `INVALID_TOKEN` | Try refresh once, otherwise sign out. |
 | `INVALID_REFRESH_TOKEN` | Clear session and sign in again. |
+| `ACCOUNT_UNAVAILABLE` | Clear session and explain that the account cannot currently be used; do not retry automatically. |
 | `INVALID_CODE` | Keep OTP screen; explain invalid/expired code and permit a rate-aware resend. |
 | `INVALID_GOOGLE_TOKEN`, `EMAIL_NOT_VERIFIED` | Restart Google auth or explain account email requirement. |
 | `RATE_LIMITED` | Disable/retry using `Retry-After` (currently 60 seconds). |
@@ -228,7 +231,18 @@ Comments are one-level only, oldest-first, and have no cursor. They contain `bod
 
 Follows are unique/idempotent. Self-follow returns HTTP 422 `CANNOT_FOLLOW_SELF`. Public profiles expose only `id`, username/display name/avatar, bio and optional `bio_language`, city, follower/following counts, and post count. `viewer_follows_author` is present on post objects, not public profile.
 
-`GET /v1/me` adds email, preferred locale, private discovery location, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. The discovery location belongs in the profile settings area with readable current/manual state and Change/Clear actions; never show its numeric coordinates. These fields and search history must never appear on another user's profile. PATCH is partial. Username is 3–30 ASCII letters/digits/underscore and unique. Account deletion revokes sessions, removes private location/relationship/search data, soft-deletes content, and anonymizes the profile.
+`GET /v1/me` adds email, preferred locale, private discovery location, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. The discovery location belongs in the profile settings area with readable current/manual state and Change/Clear actions; never show its numeric coordinates. These fields and search history must never appear on another user's profile. PATCH is partial. Username is 3–30 ASCII letters/digits/underscore and unique.
+
+Profile settings must include a danger-zone action named “Hesabımı sil” (localized). Confirm before `DELETE /v1/me`. A successful 204 means the backend permanently removed profile/private data, search history, relationships and authored content, revoked every session, and deactivated the account. Immediately clear tokens, cached private data and personalized state, then return to the anonymous entry screen. A later verified login with the same email reactivates the same account ID as a blank profile; deleted data does not return. Do not describe this as temporary deactivation.
+
+Localized confirmation copy:
+
+| Locale | Title | Body | Confirm | Cancel |
+|---|---|---|---|---|
+| `tr` | Hesabınızı silmek istiyor musunuz? | Yorumlarınız, arama geçmişiniz, profil bilgileriniz ve sosyal bağlantılarınız kaldırılır. Daha sonra aynı e-postayla giriş yapabilirsiniz ancak silinen veriler geri gelmez. | Hesabımı sil | Vazgeç |
+| `en` | Delete your account? | Your reviews, search history, profile information, and social connections will be removed. You can sign in later with the same email, but deleted data cannot be restored. | Delete my account | Cancel |
+| `de` | Konto löschen? | Deine Bewertungen, dein Suchverlauf, deine Profilangaben und deine sozialen Verbindungen werden entfernt. Du kannst dich später mit derselben E-Mail-Adresse anmelden, gelöschte Daten werden jedoch nicht wiederhergestellt. | Mein Konto löschen | Abbrechen |
+| `ru` | Удалить аккаунт? | Ваши отзывы, история поиска, данные профиля и социальные связи будут удалены. Позже вы сможете войти с тем же адресом электронной почты, но удалённые данные нельзя восстановить. | Удалить аккаунт | Отмена |
 
 ## 12. Search contract
 
@@ -347,6 +361,7 @@ Frontend must never expose the BFF secret in browser JavaScript; send OpenAI/Goo
 - [ ] Google-only store resolves before platform detail/social action.
 - [ ] OTP and Google auth work; token refresh is serialized and rotated token replaces old token.
 - [ ] Logout and refresh-reuse failure clear local session.
+- [ ] Account deletion is confirmed, returns to anonymous state, and clears all local private caches.
 - [ ] Favorite/like/follow/comment/review prompt sign-in when anonymous.
 - [ ] Nearby discovery offers current location, manual location, and a usable permission-denied fallback.
 - [ ] Review obtains fresh device location and never reuses manual discovery coordinates for verification.

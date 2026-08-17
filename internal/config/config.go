@@ -22,6 +22,7 @@ type Config struct {
 	OTPMaxAttempts                                                         int
 	OTPEmailRequestLimit, OTPIPRequestLimit                                int
 	OTPVisitorRequestLimit                                                 int
+	AppReviewEmail, AppReviewCode                                          string
 	GoogleClientID, GooglePlacesAPIKey                                     string
 	OpenAIAPIKey, OpenAIModel                                              string
 	OpenAITimeout                                                          time.Duration
@@ -59,6 +60,7 @@ func Load() (Config, error) {
 		Environment: env("APP_ENV", "development"), HTTPAddr: env("HTTP_ADDR", ":8080"),
 		DatabaseURL: os.Getenv("DATABASE_URL"), BFFSecrets: split(os.Getenv("BFF_SECRETS")),
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
+		AppReviewEmail: os.Getenv("APP_REVIEW_EMAIL"), AppReviewCode: os.Getenv("APP_REVIEW_CODE"),
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
 		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-5-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
@@ -174,6 +176,24 @@ func Load() (Config, error) {
 	}
 	if c.OTPEmailRequestLimit < 1 || c.OTPIPRequestLimit < 1 || c.OTPVisitorRequestLimit < 1 {
 		return c, errors.New("OTP request limits must be positive")
+	}
+	if (c.AppReviewEmail == "") != (c.AppReviewCode == "") {
+		return c, errors.New("APP_REVIEW_EMAIL and APP_REVIEW_CODE must be configured together")
+	}
+	if c.AppReviewEmail != "" {
+		address, err := mail.ParseAddress(strings.TrimSpace(c.AppReviewEmail))
+		if err != nil || address.Name != "" || !strings.EqualFold(address.Address, strings.TrimSpace(c.AppReviewEmail)) {
+			return c, errors.New("APP_REVIEW_EMAIL must be an email address")
+		}
+		c.AppReviewEmail = strings.ToLower(address.Address)
+		if len(c.AppReviewCode) != 6 {
+			return c, errors.New("APP_REVIEW_CODE must contain exactly six digits")
+		}
+		for _, digit := range c.AppReviewCode {
+			if digit < '0' || digit > '9' {
+				return c, errors.New("APP_REVIEW_CODE must contain exactly six digits")
+			}
+		}
 	}
 	if c.SearchLocationDecimals < 0 || c.SearchLocationDecimals > 5 {
 		return c, errors.New("SEARCH_LOCATION_DECIMALS must be 0..5")

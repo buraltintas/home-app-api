@@ -8,6 +8,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type contextKey string
@@ -53,6 +54,28 @@ func OptionalAuth(tokens *security.TokenManager) func(http.Handler) http.Handler
 			// handler returns and must see the resolved principal without parsing or
 			// retaining the bearer token itself.
 			*r = *r.WithContext(context.WithValue(r.Context(), principalKey, Principal{u, s}))
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// ActiveAccount rejects access tokens whose session has been revoked or whose
+// account is no longer active. JWT validity alone is intentionally insufficient
+// for immediate logout and account-deactivation enforcement.
+func ActiveAccount(db *pgxpool.Pool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			principal, ok := PrincipalFrom(r.Context())
+			if !ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+			var active bool
+			err := db.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.id=$1 AND s.user_id=$2 AND s.revoked_at IS NULL AND s.expires_at>now() AND u.status='active' AND u.deleted_at IS NULL)`, principal.SessionID, principal.UserID).Scan(&active)
+			if err != nil || !active {
+				httpapi.WriteError(w, httpapi.ErrInvalidToken, r.Context())
+				return
+			}
 			next.ServeHTTP(w, r)
 		})
 	}

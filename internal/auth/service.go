@@ -28,6 +28,8 @@ type Config struct {
 	VisitorTTL      time.Duration
 	RefreshTTL      time.Duration
 	HashKey         []byte
+	AppReviewEmail  string
+	AppReviewCode   string
 }
 type Service struct {
 	db     *pgxpool.Pool
@@ -73,13 +75,18 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	if e != nil {
 		return e
 	}
-	code, e := security.NumericCode(6)
-	if e != nil {
-		return e
-	}
-	cipher, e := security.Seal(s.cfg.HashKey, code)
-	if e != nil {
-		return e
+	isAppReview := s.cfg.AppReviewCode != "" && strings.EqualFold(norm, strings.TrimSpace(s.cfg.AppReviewEmail))
+	code := s.cfg.AppReviewCode
+	cipher := ""
+	if !isAppReview {
+		code, e = security.NumericCode(6)
+		if e != nil {
+			return e
+		}
+		cipher, e = security.Seal(s.cfg.HashKey, code)
+		if e != nil {
+			return e
+		}
 	}
 	now := s.now()
 	locale := i18n.FromContext(ctx)
@@ -114,10 +121,12 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	if e != nil {
 		return e
 	}
-	payload, _ := json.Marshal(map[string]any{"encrypted_code": cipher, "expires_minutes": int(s.cfg.OTPTTL.Minutes())})
-	_, e = tx.Exec(ctx, `INSERT INTO email_outbox(idempotency_key,template,recipient,payload,locale) VALUES($1,'login_code',$2,$3,$4)`, "otp:"+id.String(), norm, payload, locale)
-	if e != nil {
-		return e
+	if !isAppReview {
+		payload, _ := json.Marshal(map[string]any{"encrypted_code": cipher, "expires_minutes": int(s.cfg.OTPTTL.Minutes())})
+		_, e = tx.Exec(ctx, `INSERT INTO email_outbox(idempotency_key,template,recipient,payload,locale) VALUES($1,'login_code',$2,$3,$4)`, "otp:"+id.String(), norm, payload, locale)
+		if e != nil {
+			return e
+		}
 	}
 	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.OTPRequested, IdempotencyKey: "otp-request:" + id.String(), VisitorSessionID: visitor}); e != nil {
 		return e
@@ -256,8 +265,16 @@ func identityRace(err error) bool {
 
 func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subject, email string, verified bool) (uuid.UUID, bool, error) {
 	var user uuid.UUID
-	e := tx.QueryRow(ctx, `SELECT user_id FROM auth_identities WHERE provider=$1 AND provider_subject=$2`, provider, subject).Scan(&user)
+	var status string
+	e := tx.QueryRow(ctx, `SELECT i.user_id,u.status FROM auth_identities i JOIN users u ON u.id=i.user_id WHERE i.provider=$1 AND i.provider_subject=$2 FOR UPDATE OF u`, provider, subject).Scan(&user, &status)
 	if e == nil {
+		if status == "inactive" {
+			if e = reactivateUser(ctx, tx, user, email); e != nil {
+				return uuid.Nil, false, e
+			}
+		} else if status != "active" {
+			return uuid.Nil, false, httpapi.E(403, "ACCOUNT_UNAVAILABLE", "This account is unavailable")
+		}
 		return user, false, nil
 	}
 	if !errors.Is(e, pgx.ErrNoRows) {
@@ -270,7 +287,8 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 	if _, e = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, email); e != nil {
 		return uuid.Nil, false, e
 	}
-	e = tx.QueryRow(ctx, `SELECT id FROM users WHERE primary_email=$1 AND deleted_at IS NULL FOR UPDATE`, email).Scan(&user)
+	var existingStatus string
+	e = tx.QueryRow(ctx, `SELECT id,status FROM users WHERE primary_email=$1 AND status IN ('active','inactive') FOR UPDATE`, email).Scan(&user, &existingStatus)
 	created := false
 	if errors.Is(e, pgx.ErrNoRows) {
 		user = uuid.New()
@@ -284,9 +302,23 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 		created = true
 	} else if e != nil {
 		return uuid.Nil, false, e
+	} else if existingStatus == "inactive" {
+		if e = reactivateUser(ctx, tx, user, email); e != nil {
+			return uuid.Nil, false, e
+		}
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified) VALUES($1,$2,$3,$4,true)`, user, provider, subject, email)
 	return user, created, e
+}
+
+func reactivateUser(ctx context.Context, tx pgx.Tx, user uuid.UUID, email string) error {
+	username := "user_" + strings.ReplaceAll(user.String()[:8], "-", "")
+	displayName := strings.Split(email, "@")[0]
+	if _, err := tx.Exec(ctx, `UPDATE users SET primary_email=$2,status='active',preferred_locale=$3,deleted_at=NULL,updated_at=now() WHERE id=$1 AND status='inactive'`, user, email, i18n.FromContext(ctx)); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO user_profiles(user_id,username,display_name) VALUES($1,$2,$3) ON CONFLICT(user_id) DO UPDATE SET username=excluded.username,display_name=excluded.display_name,avatar_url=NULL,bio=NULL,bio_language=NULL,city=NULL,updated_at=now()`, user, username, displayName)
+	return err
 }
 
 // LinkVisitor associates anonymous product activity after a successful login.

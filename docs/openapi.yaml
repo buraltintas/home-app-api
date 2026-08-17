@@ -60,7 +60,7 @@ paths:
     post:
       tags: [Auth]
       summary: Queue an email OTP
-      description: Rate limited by normalized email, remote IP and visitor session.
+      description: Rate limited by normalized email, remote IP and visitor session. The explicitly configured App Review identity receives the same generic response and short-lived attempt-limited code record, but no email is queued.
       requestBody: {$ref: '#/components/requestBodies/EmailRequest'}
       responses: {'202': {$ref: '#/components/responses/Accepted'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
   /v1/auth/email/verify-code:
@@ -68,7 +68,7 @@ paths:
       tags: [Auth]
       summary: Verify OTP and create a session
       requestBody: {$ref: '#/components/requestBodies/EmailVerify'}
-      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}}
   /v1/auth/google:
     post:
       tags: [Auth]
@@ -84,7 +84,7 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {type: object, required: [refresh_token], properties: {refresh_token: {type: string}}}}}
-      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}}
+      responses: {'200': {$ref: '#/components/responses/TokenPair'}, '401': {$ref: '#/components/responses/Error'}, '403': {$ref: '#/components/responses/Error'}}
   /v1/auth/logout:
     post:
       tags: [Auth]
@@ -319,9 +319,10 @@ paths:
       responses: {'200': {$ref: '#/components/responses/Me'}, '400': {$ref: '#/components/responses/Error'}, '409': {$ref: '#/components/responses/Error'}}
     delete:
       tags: [Profile]
-      summary: Delete and anonymize the account
+      summary: Privacy-purge and deactivate the account
+      description: Permanently removes profile, history, content and social data, revokes sessions, and leaves only the verified login identity required to reactivate the same user ID. A later verified login creates a blank active profile; purged data is never restored.
       security: [{bffSecret: [], bearerAuth: []}]
-      responses: {'204': {description: Deleted}}
+      responses: {'204': {description: Purged and deactivated}}
   /v1/me/discovery-location:
     put:
       tags: [Profile]
