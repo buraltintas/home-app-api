@@ -75,6 +75,61 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 	return x, e
 }
 
+// IndexEntry is the minimum a search engine needs to crawl a store: where it lives,
+// when it last changed, and whether our own community has said anything about it yet.
+type IndexEntry struct {
+	ID          uuid.UUID `json:"id"`
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	City        string    `json:"city"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	ReviewCount int       `json:"review_count"`
+}
+
+// Index enumerates published stores for sitemap generation. Search is query driven and
+// cannot answer "every store you have", which is exactly what a sitemap is. Ordering is
+// stable by id so paging through the whole catalogue cannot skip or repeat a row while
+// stores are being written.
+func (s *Service) Index(ctx context.Context, offset, limit int) ([]IndexEntry, error) {
+	if limit < 1 || limit > 5000 {
+		limit = 1000
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.slug,s.name,s.city,s.updated_at,ss.review_count
+ FROM stores s JOIN store_stats ss ON ss.store_id=s.id
+ WHERE s.deleted_at IS NULL ORDER BY s.id LIMIT $1 OFFSET $2`, limit, offset)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := make([]IndexEntry, 0, limit)
+	for rows.Next() {
+		var x IndexEntry
+		if e = rows.Scan(&x.ID, &x.Slug, &x.Name, &x.City, &x.UpdatedAt, &x.ReviewCount); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// ResolveSlug turns a human readable store URL back into an id. Slugs are unique and
+// already stored, so readable URLs cost one indexed lookup rather than a schema change.
+func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, error) {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	if slug == "" || len(slug) > 200 {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	var id uuid.UUID
+	e := s.db.QueryRow(ctx, `SELECT id FROM stores WHERE slug=$1 AND deleted_at IS NULL`, slug).Scan(&id)
+	if errors.Is(e, pgx.ErrNoRows) {
+		return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	}
+	return id, e
+}
+
 // Search returns matching stores. A radius of zero or less disables the distance
 // filter entirely, which is how a store searched for by name is found in another city.
 func (s *Service) Search(ctx context.Context, q string, categories []string, location string, lat, lon *float64, radius int, limit int, viewer *uuid.UUID) ([]Item, error) {

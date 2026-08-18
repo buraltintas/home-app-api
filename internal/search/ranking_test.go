@@ -1,6 +1,10 @@
 package search
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/uuid"
+)
 
 func meters(v float64) *float64 { return &v }
 
@@ -93,4 +97,20 @@ func indexOf(results []Result, name string) int {
 		}
 	}
 	return -1
+}
+
+// A store's own name has to survive into its URL. Dropping every non-ASCII letter turned
+// "GÜMÜŞHAN PERDE" into "g-m-han-perde", which is neither readable nor searchable.
+func TestStoreSlugFoldsTurkishLettersInsteadOfDroppingThem(t *testing.T) {
+	id := uuid.MustParse("a6b49c3a-a9a3-4e36-81ea-978ea1239d40")
+	for name, want := range map[string]string{
+		"GÜMÜŞHAN PERDE":    "gumushan-perde-a6b49c3a",
+		"Yataş Bedding":     "yatas-bedding-a6b49c3a",
+		"Çiğdem Ev Tekstil": "cigdem-ev-tekstil-a6b49c3a",
+		"İpek Halı":         "ipek-hali-a6b49c3a",
+	} {
+		if got := storeSlug(name, id); got != want {
+			t.Fatalf("storeSlug(%q)=%q want %q", name, got, want)
+		}
+	}
 }

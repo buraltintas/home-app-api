@@ -85,6 +85,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
 		r.With(searchLimit.Middleware).Get("/places/photo", s.placePhoto)
+		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
@@ -312,6 +313,17 @@ func viewer(r *http.Request) *uuid.UUID {
 	}
 	return nil
 }
+
+// A store may be addressed by id or by its slug, so that shared links can carry the
+// store's name instead of a uuid. Slugs are unique, so the two never collide.
+func parseStoreRef(r *http.Request, s *Server) (uuid.UUID, error) {
+	raw := chi.URLParam(r, "id")
+	if id, e := uuid.Parse(raw); e == nil {
+		return id, nil
+	}
+	return s.stores.ResolveSlug(r.Context(), raw)
+}
+
 func parseID(r *http.Request) (uuid.UUID, error) {
 	id, e := uuid.Parse(chi.URLParam(r, "id"))
 	if e != nil {
@@ -387,8 +399,20 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, 200, map[string]any{"search_id": searchID, "visitor_session_id": visitor, "items": items})
 }
+
+// storeIndex enumerates stores for sitemap generation. Search is query driven and can
+// never answer "every store you have", which left the sitemap listing no stores at all.
+func (s *Server) storeIndex(w http.ResponseWriter, r *http.Request) {
+	items, e := s.stores.Index(r.Context(), queryInt(r, "offset", 0), queryInt(r, "limit", 1000))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
 func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
-	id, e := parseID(r)
+	id, e := parseStoreRef(r, s)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

@@ -162,8 +162,11 @@ func (s *Service) PlacePhoto(ctx context.Context, name string, maxWidth int) (io
 	return body, contentType, nil
 }
 
+// Turkish letters are folded to their Latin base rather than dropped. Without this,
+// "GÜMÜŞHAN PERDE" became "g-m-han-perde": the store's own name was unreadable in its
+// URL, which matters now that the slug is the address a store is shared and indexed by.
 func storeSlug(name string, id uuid.UUID) string {
-	n := strings.ToLower(strings.TrimSpace(name))
+	n := foldLatin(normalizeText(name))
 	var b strings.Builder
 	dash := false
 	for _, r := range n {
