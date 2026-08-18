@@ -378,9 +378,24 @@ func retryable(err error) bool {
 	return true
 }
 func (w *Worker) render(j job) (Message, error) {
-	if j.Template != "login_code" {
+	var message Message
+	var e error
+	switch j.Template {
+	case "login_code":
+		message, e = w.renderLoginCode(j)
+	case "welcome":
+		message, e = RenderWelcome(j.Locale)
+	default:
 		return Message{}, fmt.Errorf("unknown template")
 	}
+	if e != nil {
+		return Message{}, e
+	}
+	message.From, message.To = w.from, j.Recipient
+	return message, nil
+}
+
+func (w *Worker) renderLoginCode(j job) (Message, error) {
 	var p struct {
 		EncryptedCode  string `json:"encrypted_code"`
 		ExpiresMinutes int    `json:"expires_minutes"`
@@ -392,12 +407,7 @@ func (w *Worker) render(j job) (Message, error) {
 	if e != nil {
 		return Message{}, e
 	}
-	message, e := RenderLoginCode(j.Locale, code, p.ExpiresMinutes)
-	if e != nil {
-		return Message{}, e
-	}
-	message.From, message.To = w.from, j.Recipient
-	return message, nil
+	return RenderLoginCode(j.Locale, code, p.ExpiresMinutes)
 }
 
 func RenderLoginCode(locale i18n.Locale, code string, minutes int) (Message, error) {

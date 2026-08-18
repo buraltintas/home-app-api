@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/email"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
@@ -90,6 +92,15 @@ func main() {
 		}
 	}
 	mediaSvc := media.NewService(db, storage, cfg.MediaMaxBytes, reportSvc)
+	// Sign-in is unusable if mail cannot leave the process, and the outbox is drained
+	// here now, so a broken provider is a startup failure rather than a queue that grows
+	// silently behind a healthy-looking service.
+	sender, e := email.NewSender(ctx, cfg.EmailSenderOptions())
+	if e != nil {
+		log.Error("email sender unavailable", "error", e, "email_provider", cfg.EmailProvider)
+		os.Exit(1)
+	}
+	emailWorker := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
@@ -97,6 +108,16 @@ func main() {
 		if e := server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
 			log.Error("server failed", "error", e)
 			stop()
+		}
+	}()
+	// The outbox is drained inside this process so the deployment stays one service.
+	// Requesting a code still only enqueues a row; nothing here makes the HTTP handler
+	// wait on the mail provider. Run returns when ctx is cancelled, which is the normal
+	// shutdown path and not worth reporting as a failure.
+	go func() {
+		log.Info("email worker started", "email_provider", cfg.EmailProvider)
+		if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {
+			log.Error("email worker stopped", "error", e)
 		}
 	}()
 	<-ctx.Done()

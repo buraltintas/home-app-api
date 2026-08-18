@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/brand"
+	"github.com/burakaltintas/home-app-api/internal/email"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 )
 
@@ -243,6 +244,22 @@ func Load() (Config, error) {
 		return c, errors.New("EMAIL_PROVIDER must be development, gmail or resend")
 	}
 	return c, nil
+}
+
+// EmailSenderOptions maps the process configuration onto the shared sender constructor.
+// The API process and the standalone worker drain the same outbox, so they read the same
+// fields through the same path and cannot end up on different providers.
+func (c Config) EmailSenderOptions() email.SenderOptions {
+	return email.SenderOptions{
+		Provider:                c.EmailProvider,
+		DevelopmentDir:          c.EmailDevelopmentDir,
+		APIURL:                  c.EmailAPIURL,
+		APIKey:                  c.EmailAPIKey,
+		GmailServiceAccountJSON: c.GmailServiceAccountJSON,
+		GmailServiceAccountFile: c.GmailServiceAccountFile,
+		GmailImpersonatedUser:   c.GmailImpersonatedUser,
+		GmailAPIURL:             c.GmailAPIURL,
+	}
 }
 
 func env(k, fallback string) string {

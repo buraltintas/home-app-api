@@ -292,11 +292,19 @@ func (s *Service) resolveIdentity(ctx context.Context, tx pgx.Tx, provider, subj
 	created := false
 	if errors.Is(e, pgx.ErrNoRows) {
 		user = uuid.New()
-		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email,preferred_locale) VALUES($1,$2,$3)`, user, email, i18n.FromContext(ctx)); e != nil {
+		locale := i18n.FromContext(ctx)
+		if _, e = tx.Exec(ctx, `INSERT INTO users(id,primary_email,preferred_locale) VALUES($1,$2,$3)`, user, email, locale); e != nil {
 			return uuid.Nil, false, e
 		}
 		_, e = tx.Exec(ctx, `INSERT INTO user_profiles(user_id,username,display_name) VALUES($1,$2,$3)`, user, "user_"+strings.ReplaceAll(user.String()[:8], "-", ""), strings.Split(email, "@")[0])
 		if e != nil {
+			return uuid.Nil, false, e
+		}
+		// Enqueued in the same transaction that creates the account, so a rolled back
+		// signup can never leave a welcome mail behind and the login response never waits
+		// on the mail provider. The user id keys the row, which makes the retried
+		// serializable transaction idempotent.
+		if _, e = tx.Exec(ctx, `INSERT INTO email_outbox(idempotency_key,template,recipient,payload,locale) VALUES($1,'welcome',$2,'{}'::jsonb,$3) ON CONFLICT(idempotency_key) DO NOTHING`, "welcome:"+user.String(), email, locale); e != nil {
 			return uuid.Nil, false, e
 		}
 		created = true
