@@ -145,6 +145,7 @@ func (s *Server) publicMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteError(w, e, r.Context())
 }
+
 // placePhoto streams a Google place photo. The photo name is validated against a
 // strict pattern before it reaches a provider URL, and bytes are never persisted.
 func (s *Server) placePhoto(w http.ResponseWriter, r *http.Request) {

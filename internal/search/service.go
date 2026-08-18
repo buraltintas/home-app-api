@@ -398,12 +398,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: platformScore(m, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: mergedScore(m, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
 			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
 			if id, ok := imported[p.PlaceID]; ok {
 				storeID := id
 				r.ID = &storeID
@@ -423,7 +423,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			results[i].score -= penalty
 		}
 	}
-	sort.SliceStable(results, func(i, j int) bool { return results[i].score > results[j].score })
+	rankResults(results, in.Latitude != nil)
 	if len(results) > 30 {
 		results = results[:30]
 	}

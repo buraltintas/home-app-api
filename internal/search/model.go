@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -364,6 +365,100 @@ func platformScore(p Platform, relevanceRank int) float64 {
 
 func googleScore(p Place, relevanceRank int) float64 {
 	return 100 + p.Rating*4 + math.Log1p(float64(p.RatingCount))*2 - float64(relevanceRank)
+}
+
+// A store we already carry must never rank below the same store seen only through
+// Google. Before this, a mapped store with no community reviews scored 80 while an
+// identical Google-only result scored well past 100, so knowing a place pushed it down.
+func mergedScore(p Platform, g Place, relevanceRank int) float64 {
+	if p.ReviewCount > 0 {
+		return platformScore(p, relevanceRank)
+	}
+	return googleScore(g, relevanceRank)
+}
+
+// cityKey reduces a formatted Turkish address to something two results can be compared
+// on. "Kızıltoprak, Aspendos Blv. No:41, 07230 Muratpaşa/Antalya, Türkiye" becomes
+// "antalya", which is what lets a searcher's own city be recognised without a reverse
+// geocoding round trip.
+func cityKey(city, address string) string {
+	value := strings.TrimSpace(city)
+	if value == "" {
+		parts := strings.Split(address, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			part := strings.TrimSpace(parts[i])
+			low := strings.ToLower(part)
+			if part == "" || low == "türkiye" || low == "turkey" || strings.ToUpper(part) == "TR" {
+				continue
+			}
+			value = part
+			break
+		}
+	}
+	if slash := strings.LastIndex(value, "/"); slash >= 0 {
+		value = value[slash+1:]
+	}
+	value = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(value), "0123456789"))
+	return foldLatin(strings.ToLower(strings.TrimSpace(value)))
+}
+
+// The searcher's own city is the city of whatever turned out to be closest to them.
+// It costs nothing and is far more reliable than trusting a typed location string.
+func homeCity(results []Result) string {
+	nearest := math.MaxFloat64
+	home := ""
+	for _, r := range results {
+		if r.DistanceMeters != nil && *r.DistanceMeters < nearest {
+			if key := cityKey(r.City, r.Address); key != "" {
+				nearest, home = *r.DistanceMeters, key
+			}
+		}
+	}
+	return home
+}
+
+// Distance is banded rather than subtracted so that relevance can still order places
+// that are equally reachable, while a store in the next province can never overtake one
+// down the road no matter how many stars it collected.
+func distanceBand(distance *float64) int {
+	if distance == nil {
+		return 99
+	}
+	for band, limit := range []float64{1000, 3000, 7000, 15000, 30000, 60000, 120000} {
+		if *distance <= limit {
+			return band
+		}
+	}
+	return 7
+}
+
+// Ordering is tiered, not a single weighted score. One score let a five star store 169 km
+// away outrank a store 14 km away, because distance only cost distance/10000 points while
+// ratings and review counts were worth far more. Tier one is what the product promises
+// first: places in the searcher's own city that our own community has already reviewed.
+// Everything after that runs nearest to farthest, with relevance deciding the order inside
+// each band.
+func rankResults(results []Result, located bool) {
+	if !located {
+		sort.SliceStable(results, func(i, j int) bool { return results[i].score > results[j].score })
+		return
+	}
+	home := homeCity(results)
+	reviewedHere := func(r Result) bool {
+		return r.Platform != nil && r.Platform.ReviewCount > 0 && home != "" && cityKey(r.City, r.Address) == home
+	}
+	sort.SliceStable(results, func(i, j int) bool {
+		a, b := results[i], results[j]
+		if first, second := reviewedHere(a), reviewedHere(b); first != second {
+			return first
+		} else if first {
+			return a.score > b.score
+		}
+		if first, second := distanceBand(a.DistanceMeters), distanceBand(b.DistanceMeters); first != second {
+			return first < second
+		}
+		return a.score > b.score
+	})
 }
 
 var guidanceRotation atomic.Uint64
