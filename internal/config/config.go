@@ -62,7 +62,7 @@ func Load() (Config, error) {
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
 		AppReviewEmail: os.Getenv("APP_REVIEW_EMAIL"), AppReviewCode: os.Getenv("APP_REVIEW_CODE"),
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-5-mini"),
+		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
@@ -91,7 +91,10 @@ func Load() (Config, error) {
 	if c.OTPTTL, err = duration("OTP_TTL", 10*time.Minute); err != nil {
 		return c, err
 	}
-	if c.OpenAITimeout, err = duration("OPENAI_TIMEOUT", 3*time.Second); err != nil {
+	// Intent parsing measured between 1s and 6s against the live API. At three seconds
+	// most searches timed out and silently degraded to the deterministic parser, which
+	// answers "unclear" for anything it does not recognise word for word.
+	if c.OpenAITimeout, err = duration("OPENAI_TIMEOUT", 8*time.Second); err != nil {
 		return c, err
 	}
 	if c.OTPMaxAttempts, err = integer("OTP_MAX_ATTEMPTS", 5); err != nil {

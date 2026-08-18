@@ -7,19 +7,27 @@ description: Shared visual, interaction, content, accessibility, and responsive 
 
 Use this skill for both `ui` and `mobile`. Keep one conceptual design system; implement it with platform-native primitives. Read the backend handoff, OpenAPI, and canonical fixtures before designing data-backed states. Never invent DTO fields or backend capability.
 
+## Authority and workflow
+
+Use Impeccable first as the general craft, audit, and anti-pattern foundation, then apply this skill as the product-specific authority. If the two conflict, this skill wins. Impeccable's ambition means exceptional hierarchy, composition, typography, photography, interaction detail, and production quality here—not louder effects or more decoration.
+
+Before changing a surface, inspect the existing implementation and identify the smallest coherent correction. Do not replace an established screen merely because a different composition is possible. After implementation, run the platform checks and inspect the actual UI at representative sizes; a passing build is not visual verification.
+
 ## Product thesis
 
 Help people decide which real home/living store is worth visiting. Make the loop obvious: discover, visit, review, help someone else discover. Treat Boşa Gezme! as a visual consumer social product—not ecommerce, a marketplace, a merchant dashboard, or a generic review directory.
 
 Prioritize three experiences above all others: home feed, natural-language search, and store detail. A user should understand within three seconds that real people share real visits to physical home stores.
 
+Design mobile-first. Keep search a hero experience while hiding AI behind the scenes: use a familiar search interaction, never a chatbot, assistant persona, prompt theater, or “AI magic” treatment.
+
 ## Visual character
 
-Create a warm, quiet, editorial composition where photography and authored content dominate. Express “light entering a home and making things clearer” through openness, clarity, contrast, and natural hierarchy—not literal rays or sun motifs.
+Create a warm, editorial, sophisticated, approachable, distinctive, and confident consumer-product composition where photography and authored content dominate. Express “light entering a home and making things clearer” through openness, clarity, contrast, and natural hierarchy—not literal rays or sun motifs.
 
-Avoid generic AI/SaaS styling: no giant gradients, decorative glassmorphism, glowing cards, corporate blue, excessive pills, excessive shadows, dashboard grids, or bordered cards around every section. A floating navigation rail may use one restrained platform-native material blur when it improves spatial separation; do not repeat that glass treatment across content. Prefer generous space, strong type, large imagery, fine separators, and restrained surfaces.
+Avoid generic AI/SaaS styling. Do not use blue/purple AI gradients, random decorative gradients, glassmorphism everywhere, glowing elements, meaningless abstract blobs, generic startup landing-page visuals, generic dashboard components, excessive rounded cards, card-inside-card layouts, pill overload, unnecessary borders, oversized empty whitespace without purpose, excessive centered layouts, or repeated icon + title + description cards. Avoid a uniform component rhythm that makes every screen feel templated. A floating navigation rail may use one restrained platform-native material blur when it improves spatial separation; do not repeat that glass treatment across content. Prefer purposeful space, strong type, large imagery, fine separators, and restrained surfaces. Let typography, spacing, composition, photography, store content, and hierarchy do most of the visual work.
 
-Use the approved `Boşa Gezme!` product name and the supplied square logo in `docs/brand/bosa-gezme-logo.png`. Preserve the Turkish diacritics and exclamation mark in display copy. Do not redraw, recolor, stretch, or crop essential lettering/mascot details. The source PNG has an opaque white background; do not simulate transparency with blend modes. Use the text name when the full illustrated mark would be illegible at small sizes.
+Use the approved `Boşa Gezme!` product name and the role-specific supplied assets documented in `docs/brand/README.md`. Preserve the Turkish diacritics and exclamation mark in display copy. Use `brand-logo-transparent.png` on product surfaces, `app-icon-mascot.png` for small platform icons, the light/dark splash pair for native launch screens, and `social-share-banner.png` for wide social previews. Do not redraw, recolor, stretch, or crop essential lettering or mascot details. Use the text name when the full illustrated mark would be illegible at small sizes.
 
 ## Shared tokens
 
@@ -46,6 +54,10 @@ Give store, interior, product, and visit photography strong visual presence. Use
 - Profile/photo grid: square.
 
 Always set an explicit aspect ratio, meaningful alt text/accessibility labels, cover behavior, and a calm fallback surface. Never fabricate a backend cover image; fixture/development imagery must stay in a clearly separated presentation adapter.
+
+## Mascot
+
+Use the hunting-dog mascot sparingly for search empty states, discovery/loading states, no-results moments, onboarding, or another small branded beat. Keep it subordinate to store photography and community content. Do not repeat it across ordinary surfaces, surround it with cartoon decoration, or make the product feel childish. If animated, use one subtle entrance or micro-response; never add repetitive bouncing or noisy loops.
 
 ## Core compositions
 
@@ -92,6 +104,8 @@ Write repository documentation, READMEs, contributor instructions, developer-fac
 
 Test long German labels, Cyrillic, Turkish dotted/dotless I and diacritics, empty plurals, and narrow screens. Use direct, warm, useful copy. Avoid hype, AI language, and merchant language.
 
+Build flexible text containers and layouts from the start. Never approve a component because it works only with short English copy; validate all four locales before treating the component as complete.
+
 ## State and accessibility requirements
 
 Design loading, empty, error, anonymous, authenticated, selected, disabled, pressed, and focused states. Prefer content-shaped skeletons for feed, search, and store detail. Explicitly cover community store, Google-only store, mixed search, zero results, degraded provider, and anonymous protected-action attempts.
@@ -102,19 +116,21 @@ Use semantic HTML, logical heading order, keyboard navigation, accessible dialog
 
 Design mobile and desktop intentionally; do not stretch one layout. Validate web at 375, 390, 430, 768, 1024, 1280, and 1440 px. Use editorial desktop width for large imagery and optional results/map composition only when geography materially helps. Check clipping, crops, empty space, navigation, localization, and target sizes.
 
-## Implementation gate
+## Anti-slop implementation gate
 
-Before accepting a core screen, verify:
+Before accepting any screen, answer every question. Refine the design when an answer is weak.
 
-1. The purpose is understandable in three seconds.
-2. Content and photography outweigh interface chrome.
-3. The screen looks like a serious home/living consumer product.
-4. The primary action and anonymous behavior are clear.
-5. Community and Google data are unambiguously separate.
-6. No unsupported backend field or capability appears.
-7. Loading, empty, failure, and protected-action states work.
-8. Keyboard/screen-reader/touch behavior is sound.
-9. Turkish, English, German, and Russian render without clipping.
-10. The result avoids generic AI-generated aesthetics.
+1. Is the visual hierarchy obvious within three seconds?
+2. Is there one clear primary action?
+3. Are any containers, cards, pills, borders, or decorative effects unnecessary?
+4. Does this resemble a generic AI-generated SaaS or startup template?
+5. Could typography, spacing, composition, or photography replace decorative UI?
+6. Is real store and community content carrying the interface?
+7. Are hover, focus, pressed, selected, disabled, loading, empty, error, anonymous, and authenticated states intentional where relevant?
+8. Does mobile usage feel natural and platform-appropriate?
+9. Are touch targets at least 44×44 and keyboard/screen-reader behavior sound?
+10. Does the screen work without clipping or awkward wrapping in `tr`, `en`, `de`, and `ru`?
+11. Are community and Google data separate, and is every field backend-supported?
+12. Does this feel specifically like Boşa Gezme! rather than any random app?
 
-Inspect the running UI at target sizes and iterate on visible issues. A passing build alone does not satisfy this gate.
+Inspect the running UI at target sizes and iterate on visible issues in bounded passes. A passing build alone does not satisfy this gate. Do not add animation for animation's sake; motion must explain state, continuity, or feedback and must respect reduced motion.

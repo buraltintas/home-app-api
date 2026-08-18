@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"unicode"
@@ -15,18 +16,22 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// The enum tags are the contract handed to the model as a structured-output schema.
+// Without them the model answers with display copy such as "yemek takımı", Validate
+// rejects the whole intent, and every search silently degrades to the deterministic
+// parser. Keep these in sync with Validate below.
 type Intent struct {
-	Scope           string      `json:"scope"`
-	QueryLanguage   i18n.Locale `json:"query_language"`
+	Scope           string      `json:"scope" jsonschema:"enum=home_living,enum=out_of_scope,enum=unclear"`
+	QueryLanguage   i18n.Locale `json:"query_language" jsonschema:"enum=tr,enum=en,enum=de,enum=ru"`
 	NormalizedQuery string      `json:"normalized_query"`
 	StoreName       string      `json:"store_name"`
 	LocationText    string      `json:"location_text"`
-	Categories      []string    `json:"categories"`
+	Categories      []string    `json:"categories" jsonschema:"enum=furniture,enum=home_textile,enum=lighting,enum=decoration,enum=kitchenware,enum=bathroom,enum=carpet,enum=curtain,enum=bedding,enum=tableware,enum=storage,enum=home_accessories,enum=household"`
 	ProductTerms    []string    `json:"product_terms"`
 	StyleTerms      []string    `json:"style_terms"`
-	PriceIntent     string      `json:"price_intent"`
+	PriceIntent     string      `json:"price_intent" jsonschema:"enum=,enum=budget,enum=midrange,enum=premium"`
 	Attributes      []string    `json:"attributes"`
-	SortPreference  string      `json:"sort_preference"`
+	SortPreference  string      `json:"sort_preference" jsonschema:"enum=,enum=relevance,enum=distance,enum=rating,enum=popularity"`
 	SemanticTerms   []string    `json:"semantic_terms"`
 }
 type Context struct {
@@ -43,11 +48,21 @@ type Place struct {
 	RatingCount            int
 	Types                  []string
 	Attributions           []string
+	PhotoName              string
+	PhotoAttributions      []string
 }
 type PlacesProvider interface {
 	TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error)
 	PlaceDetails(context.Context, string) (Place, error)
 }
+
+// photoNamePattern constrains a Google photo resource name. The value is
+// interpolated into a provider URL, so anything outside this shape is rejected.
+// The character class is what prevents escaping that URL; the length only has to
+// admit a real reference, which Google issues at well over four hundred characters.
+var photoNamePattern = regexp.MustCompile(`^places/[A-Za-z0-9_-]{1,300}/photos/[A-Za-z0-9_-]{1,1000}$`)
+
+func ValidPhotoName(name string) bool { return photoNamePattern.MatchString(name) }
 
 type LocationResult struct {
 	Provider     string   `json:"provider"`
@@ -70,10 +85,12 @@ type Platform struct {
 	PostCount     int       `json:"post_count"`
 }
 type External struct {
-	Provider    string  `json:"provider"`
-	PlaceID     string  `json:"place_id"`
-	Rating      float64 `json:"rating"`
-	RatingCount int     `json:"rating_count"`
+	Provider          string   `json:"provider"`
+	PlaceID           string   `json:"place_id"`
+	Rating            float64  `json:"rating"`
+	RatingCount       int      `json:"rating_count"`
+	PhotoName         string   `json:"photo_name,omitempty"`
+	PhotoAttributions []string `json:"photo_attributions,omitempty"`
 }
 type Result struct {
 	ID              *uuid.UUID `json:"id,omitempty"`
@@ -253,6 +270,17 @@ func foldLatin(raw string) string {
 func containsNormalized(normalized, folded, term string) bool {
 	term = normalizeText(term)
 	return strings.Contains(normalized, term) || strings.Contains(folded, foldLatin(term))
+}
+
+// nameMatches reports whether a result name contains the store name the user asked
+// for, ignoring case and Turkish diacritics.
+func nameMatches(resultName, storeName string) bool {
+	storeName = strings.TrimSpace(storeName)
+	if storeName == "" {
+		return false
+	}
+	normalized := normalizeText(resultName)
+	return containsNormalized(normalized, foldLatin(normalized), storeName)
 }
 
 func containsAnyFolded(normalized, folded string, terms ...string) bool {

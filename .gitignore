@@ -5,3 +5,5 @@ coverage.out
 .DS_Store
 .data/
 gmail-service-account*.json
+.impeccable/*
+!.impeccable/config.json

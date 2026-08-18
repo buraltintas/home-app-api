@@ -189,7 +189,7 @@ Keep these credentials out of the application UI and provide them only in App St
 
 ## Migrations
 
-`make migrate` records each applied version in `schema_migrations` and applies each file atomically. `make migrate-down` reverts only the latest applied migration. Production deploys should back up first and run migrations as a dedicated release step.
+`make migrate` records each applied version in `schema_migrations` and applies each file atomically. `make migrate-down` reverts only the latest applied migration. Production deploys should back up first and run migrations as a dedicated release step. The current client contract assumes migrations through `000008_reactivatable_accounts` are applied; an unseeded database is valid and returns stable empty collection arrays.
 
 ## Email behavior
 

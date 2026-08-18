@@ -164,3 +164,44 @@ func TestPlacesQueryUsesRawAndParsedTerms(t *testing.T) {
 		t.Fatalf("places query too long: %d", len([]rune(long)))
 	}
 }
+
+func TestNameMatchesIgnoresCaseAndTurkishDiacritics(t *testing.T) {
+	cases := []struct {
+		result, storeName string
+		want              bool
+	}{
+		{"IKEA Bornova", "ikea", true},
+		{"Koçtaş Ankara", "koctas", true},
+		{"Madame Coco Kadıköy", "madame coco", true},
+		{"Perde Dünyası", "ikea", false},
+		{"IKEA Bornova", "", false},
+	}
+	for _, c := range cases {
+		if got := nameMatches(c.result, c.storeName); got != c.want {
+			t.Fatalf("nameMatches(%q,%q)=%v want %v", c.result, c.storeName, got, c.want)
+		}
+	}
+}
+
+func TestValidPhotoNameRejectsUnsafeInput(t *testing.T) {
+	if !ValidPhotoName("places/ChIJabc-123_x/photos/AelY_Cs9-xY") {
+		t.Fatal("expected a well formed photo name to be accepted")
+	}
+	// Google issues photo references well past four hundred characters, so a bound
+	// that only fits a short reference silently drops every real photo.
+	if !ValidPhotoName("places/ChIJmwFY8_OPwxQRb39DXDLxwcY/photos/" + strings.Repeat("A", 452)) {
+		t.Fatal("expected a real length photo reference to be accepted")
+	}
+	for _, bad := range []string{
+		"",
+		"places/../photos/x",
+		"https://evil.example/places/a/photos/b",
+		"places/a/photos/b?key=leak",
+		"places/a/photos/b/media",
+		"places/a/photos/" + strings.Repeat("x", 1001),
+	} {
+		if ValidPhotoName(bad) {
+			t.Fatalf("expected %q to be rejected", bad)
+		}
+	}
+}

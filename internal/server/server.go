@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -83,6 +84,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
+		r.With(searchLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
@@ -108,6 +110,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Patch("/me", s.updateMe)
 			r.With(writeLimit.Middleware).Put("/me/discovery-location", s.updateDiscoveryLocation)
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
+			r.Get("/me/favorites", s.myFavorites)
 			r.Get("/me/searches", s.mySearches)
 			r.Delete("/me/searches", s.deleteMySearches)
 			r.Delete("/me/searches/{id}", s.deleteMySearch)
@@ -142,6 +145,33 @@ func (s *Server) publicMedia(w http.ResponseWriter, r *http.Request) {
 	}
 	WriteError(w, e, r.Context())
 }
+// placePhoto streams a Google place photo. The photo name is validated against a
+// strict pattern before it reaches a provider URL, and bytes are never persisted.
+func (s *Server) placePhoto(w http.ResponseWriter, r *http.Request) {
+	name := r.URL.Query().Get("name")
+	if !searchpkg.ValidPhotoName(name) {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	width, _ := strconv.Atoi(r.URL.Query().Get("max_width"))
+	if width == 0 {
+		width = 520
+	}
+	body, contentType, e := s.search.PlacePhoto(r.Context(), name, width)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	defer body.Close()
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(200)
+	_, _ = io.Copy(w, io.LimitReader(body, 8<<20))
+}
+
 func (s *Server) createMediaUpload(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	var in media.CreateRequest
@@ -590,6 +620,15 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	x, e := s.stores.Favorites(r.Context(), p.UserID, queryInt(r, "limit", 50))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": x})
 }
 func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())

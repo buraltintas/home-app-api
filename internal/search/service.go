@@ -3,6 +3,8 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -48,39 +50,116 @@ func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (u
 	if p.PlaceID != placeID || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
 		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
 	}
+	ids, err := s.materializePlaces(ctx, []Place{p})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	id, ok := ids[placeID]
+	if !ok {
+		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
+	}
+	return id, nil
+}
+
+// materializePlaces imports every valid place into stores and returns the store id
+// for each place id. Import is idempotent: a place that already has a
+// store_external_sources row resolves to the existing store.
+func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[string]uuid.UUID, error) {
+	out := map[string]uuid.UUID{}
+	pending := make([]Place, 0, len(places))
+	seen := map[string]bool{}
+	for _, p := range places {
+		id := strings.TrimSpace(p.PlaceID)
+		if id == "" || len(id) > 300 || seen[id] || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
+			continue
+		}
+		p.PlaceID = id
+		seen[id] = true
+		pending = append(pending, p)
+	}
+	if len(pending) == 0 {
+		return out, nil
+	}
+	// Deterministic lock order keeps concurrent searches over overlapping result
+	// sets from deadlocking on pg_advisory_xact_lock.
+	sort.Slice(pending, func(i, j int) bool { return pending[i].PlaceID < pending[j].PlaceID })
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return uuid.Nil, err
+		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('google:'||$1,0))`, placeID); err != nil {
-		return uuid.Nil, err
+	for _, p := range pending {
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('google:'||$1,0))`, p.PlaceID); err != nil {
+			return nil, err
+		}
+		// The store detail page reads its Google block straight out of this jsonb, so
+		// the provider figures are kept here rather than mixed into store_stats, which
+		// holds community data only.
+		attribution := map[string]any{"provider": "Google", "attributions": p.Attributions}
+		if p.RatingCount > 0 {
+			attribution["rating"] = p.Rating
+			attribution["rating_count"] = p.RatingCount
+		}
+		if p.PhotoName != "" {
+			attribution["photo_name"] = p.PhotoName
+			attribution["photo_attributions"] = p.PhotoAttributions
+		}
+		attr, _ := json.Marshal(attribution)
+		var existing uuid.UUID
+		err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, p.PlaceID).Scan(&existing)
+		if err == nil {
+			// Ratings and photos move, and this place was just fetched, so the stored
+			// copy is refreshed rather than left to age indefinitely.
+			if _, err = tx.Exec(ctx, `UPDATE store_external_sources SET attribution=$2,refreshed_at=now() WHERE store_id=$1 AND provider='google'`, existing, attr); err != nil {
+				return nil, err
+			}
+			out[p.PlaceID] = existing
+			continue
+		}
+		if err != pgx.ErrNoRows {
+			return nil, err
+		}
+		id := uuid.New()
+		slug := storeSlug(p.Name, id)
+		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography)`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) VALUES($1,'google',$2,$3,now())`, id, p.PlaceID, attr); err != nil {
+			return nil, err
+		}
+		if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreImportedGoogle, IdempotencyKey: "google-store:" + p.PlaceID, StoreID: &id}); err != nil {
+			return nil, err
+		}
+		out[p.PlaceID] = id
 	}
-	var existing uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, placeID).Scan(&existing)
-	if err == nil {
-		return existing, tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
 	}
-	if err != pgx.ErrNoRows {
-		return uuid.Nil, err
+	return out, nil
+}
+
+// PhotoProvider is implemented by places providers that can stream place photos.
+type PhotoProvider interface {
+	PhotoMedia(ctx context.Context, name string, maxWidth int) (io.ReadCloser, string, error)
+}
+
+// PlacePhoto streams a provider photo by resource name. The caller must close the reader.
+func (s *Service) PlacePhoto(ctx context.Context, name string, maxWidth int) (io.ReadCloser, string, error) {
+	if !ValidPhotoName(name) {
+		return nil, "", httpapi.ErrInvalidInput
 	}
-	id := uuid.New()
-	slug := storeSlug(p.Name, id)
-	_, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography)`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude)
+	provider, ok := s.places.(PhotoProvider)
+	if !ok || s.places == nil {
+		return nil, "", httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
+	}
+	body, contentType, err := provider.PhotoMedia(ctx, name, maxWidth)
 	if err != nil {
-		return uuid.Nil, err
+		return nil, "", httpapi.E(502, "PLACES_UNAVAILABLE", "Store provider is temporarily unavailable")
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
-		return uuid.Nil, err
-	}
-	attr, _ := json.Marshal(map[string]any{"provider": "Google", "attributions": p.Attributions})
-	if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) VALUES($1,'google',$2,$3,now())`, id, placeID, attr); err != nil {
-		return uuid.Nil, err
-	}
-	if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreImportedGoogle, IdempotencyKey: "google-store:" + placeID, StoreID: &id}); err != nil {
-		return uuid.Nil, err
-	}
-	return id, tx.Commit(ctx)
+	return body, contentType, nil
 }
 
 func storeSlug(name string, id uuid.UUID) string {
@@ -224,10 +303,18 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	fallback := ""
 	if s.ai != nil {
 		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, requestLocale})
-		if e == nil && Validate(enriched) == nil {
+		if e == nil {
+			e = Validate(enriched)
+		}
+		if e == nil {
 			intent = merge(intent, enriched)
 			aiUsed = true
 		} else {
+			// Every silent degradation here reaches the user as "we did not understand
+			// you", so the reason has to survive in the logs. The query is the user's
+			// own words and is already stored in searches; the cause is usually a
+			// timeout or a value the schema does not allow.
+			slog.Default().Warn("search intent parsing failed", "error", e, "model", s.model, "query", in.Query)
 			fallback = "ai_unavailable_or_invalid"
 		}
 	}
@@ -240,9 +327,15 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	googleUsed := false
 	if intent.Scope == ScopeHomeLiving {
 		group, providerContext := errgroup.WithContext(ctx)
+		// A named store is worth finding wherever it is, so the radius filter is
+		// dropped for name-led intents. Generic queries keep the near-to-far filter.
+		searchRadius := in.RadiusMeters
+		if intent.StoreName != "" {
+			searchRadius = 0
+		}
 		group.Go(func() error {
 			var providerErr error
-			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, in.RadiusMeters, 20, user)
+			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, 20, user)
 			return providerErr
 		})
 		if s.places != nil {
@@ -279,12 +372,25 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	if e != nil {
 		return Response{}, e
 	}
+	// Every Google result must resolve to a store id: without one the client cannot
+	// open a detail page, verify a visit, or write a review, and search_results.store_id
+	// stays NULL so history cannot be replayed without calling Google again.
+	unmapped := make([]Place, 0, len(external))
+	for _, p := range external {
+		if _, ok := mapped[p.PlaceID]; !ok {
+			unmapped = append(unmapped, p)
+		}
+	}
+	imported, e := s.materializePlaces(ctx, unmapped)
+	if e != nil {
+		return Response{}, e
+	}
 	for rank, p := range external {
 		if m, ok := mapped[p.PlaceID]; ok {
 			if localIDs[m.StoreID] {
 				for i := range results {
 					if results[i].ID != nil && *results[i].ID == m.StoreID {
-						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}
+						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}
 						results[i].Source = "google+platform"
 						results[i].externalPlaceID = p.PlaceID
 					}
@@ -292,17 +398,29 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: platformScore(m, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: platformScore(m, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
-			results = append(results, Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount}, score: googleScore(p, rank), externalPlaceID: p.PlaceID})
+			// Platform stays nil: a freshly imported store has no community data, and
+			// an empty Platform block would render a fabricated 0.0 community rating.
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			if id, ok := imported[p.PlaceID]; ok {
+				storeID := id
+				r.ID = &storeID
+			}
+			results = append(results, r)
 		}
 	}
 	for i := range results {
 		if in.Latitude != nil {
 			d := haversine(*in.Latitude, *in.Longitude, results[i].Latitude, results[i].Longitude)
 			results[i].DistanceMeters = &d
-			results[i].score -= d / 10000
+			penalty := d / 10000
+			// An explicit name match should not be buried by distance alone.
+			if intent.StoreName != "" && nameMatches(results[i].Name, intent.StoreName) {
+				penalty = math.Min(penalty, 3)
+			}
+			results[i].score -= penalty
 		}
 	}
 	sort.SliceStable(results, func(i, j int) bool { return results[i].score > results[j].score })

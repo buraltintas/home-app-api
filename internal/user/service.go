@@ -250,31 +250,74 @@ func validateUpdate(in *Update) error {
 }
 
 type SearchHistory struct {
-	ID          uuid.UUID `json:"id"`
-	RawQuery    string    `json:"raw_query"`
-	Intent      any       `json:"intent"`
-	CreatedAt   time.Time `json:"created_at"`
-	ResultCount int       `json:"result_count"`
+	ID          uuid.UUID             `json:"id"`
+	RawQuery    string                `json:"raw_query"`
+	Intent      any                   `json:"intent"`
+	CreatedAt   time.Time             `json:"created_at"`
+	ResultCount int                   `json:"result_count"`
+	Results     []SearchHistoryResult `json:"results"`
+}
+
+type SearchHistoryResult struct {
+	StoreID        uuid.UUID `json:"store_id"`
+	Name           string    `json:"name"`
+	Address        string    `json:"address"`
+	City           string    `json:"city"`
+	District       string    `json:"district"`
+	Rank           int       `json:"rank"`
+	DistanceMeters *int      `json:"distance_meters,omitempty"`
+	Source         string    `json:"source"`
 }
 
 func (s *Service) Searches(ctx context.Context, user uuid.UUID, limit int) ([]SearchHistory, error) {
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
-	rows, e := s.db.Query(ctx, `SELECT id,raw_query,parsed_intent,created_at,total_result_count FROM searches WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, user, limit)
+	// Searching the same thing twice is normal behaviour, not two pieces of history.
+	// Every search is still recorded for attribution; the list shows the latest of each
+	// distinct query so the same words never stack up three times in a row.
+	rows, e := s.db.Query(ctx, `SELECT id,raw_query,parsed_intent,created_at,total_result_count FROM (SELECT DISTINCT ON (lower(coalesce(nullif(normalized_query,''),raw_query))) id,raw_query,parsed_intent,created_at,total_result_count FROM searches WHERE user_id=$1 AND status='completed' ORDER BY lower(coalesce(nullif(normalized_query,''),raw_query)),created_at DESC) recent ORDER BY created_at DESC LIMIT $2`, user, limit)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
-	var out []SearchHistory
+	out := []SearchHistory{}
+	index := map[uuid.UUID]int{}
+	ids := make([]uuid.UUID, 0, limit)
 	for rows.Next() {
 		var x SearchHistory
 		if e = rows.Scan(&x.ID, &x.RawQuery, &x.Intent, &x.CreatedAt, &x.ResultCount); e != nil {
 			return nil, e
 		}
+		x.Results = []SearchHistoryResult{}
+		index[x.ID] = len(out)
+		ids = append(ids, x.ID)
 		out = append(out, x)
 	}
-	return out, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	// Stored results let history render straight from our own data, with no
+	// provider round-trip. This relies on search_results.store_id being populated.
+	resultRows, e := s.db.Query(ctx, `SELECT r.search_id,r.store_id,st.name,coalesce(st.address,''),st.city,coalesce(st.district,''),r.rank,r.distance_meters,r.source FROM search_results r JOIN stores st ON st.id=r.store_id AND st.deleted_at IS NULL WHERE r.search_id=ANY($1) AND r.rank<=5 ORDER BY r.search_id,r.rank`, ids)
+	if e != nil {
+		return nil, e
+	}
+	defer resultRows.Close()
+	for resultRows.Next() {
+		var searchID uuid.UUID
+		var x SearchHistoryResult
+		if e = resultRows.Scan(&searchID, &x.StoreID, &x.Name, &x.Address, &x.City, &x.District, &x.Rank, &x.DistanceMeters, &x.Source); e != nil {
+			return nil, e
+		}
+		if i, ok := index[searchID]; ok {
+			out[i].Results = append(out[i].Results, x)
+		}
+	}
+	return out, resultRows.Err()
 }
 func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.UUID) error {
 	if id == nil {
@@ -284,7 +327,9 @@ func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.U
 		}
 		return e
 	}
-	tag, e := s.db.Exec(ctx, `DELETE FROM searches WHERE id=$1 AND user_id=$2`, *id, user)
+	// The list collapses repeats, so removing an entry has to remove every search that
+	// produced it. Otherwise deleting one makes an older identical row reappear.
+	tag, e := s.db.Exec(ctx, `DELETE FROM searches WHERE user_id=$2 AND lower(coalesce(nullif(normalized_query,''),raw_query))=(SELECT lower(coalesce(nullif(normalized_query,''),raw_query)) FROM searches WHERE id=$1 AND user_id=$2)`, *id, user)
 	if e == nil && tag.RowsAffected() == 0 {
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
 	}
