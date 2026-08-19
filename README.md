@@ -173,9 +173,16 @@ The OTP template follows the Boşa Gezme! warm editorial palette and includes ex
 
 ### App Store review login
 
-Set `APP_REVIEW_EMAIL=app-review@bosagezme.com` and `APP_REVIEW_CODE=123456` together. The reviewer follows the ordinary email login flow: request a code, then enter `123456`. The request still creates a short-lived, single-use, attempt-limited verification record and uses the normal rate limits, but it does not queue or send an email for that exact address. All other addresses keep the ordinary random-code delivery flow.
+`APP_REVIEW_EMAIL` and `APP_REVIEW_CODE` are set together to let a store reviewer sign in without receiving mail. The reviewer follows the ordinary email login flow: request a code, then enter the configured one. The request still creates a short-lived, single-use, attempt-limited verification record and uses the normal rate limits, but it does not queue or send an email for that exact address. All other addresses keep the ordinary random-code delivery flow.
 
-Keep these credentials out of the application UI and provide them only in App Store Connect review notes. The account should contain synthetic/minimal review data. Remove both environment variables to disable the exception, or rotate the code between review windows.
+**Never write the actual address or code in this repository.** Both are a working authentication bypass for whatever environment they are set in, and this repository is public: publishing them here hands an account to anyone who reads it. Keep them in the deployment's secret store, pass them to reviewers only through App Store Connect review notes, and keep them out of the application UI.
+
+Operational rules:
+
+- The code must be long and random, not a memorable sequence. It is a password.
+- The review account should hold synthetic, minimal data and no elevated privileges.
+- Rotate the code after every review window.
+- Remove both environment variables to disable the exception entirely between reviews.
 
 ## Operational and privacy notes
 
