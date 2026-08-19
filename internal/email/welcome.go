@@ -21,8 +21,8 @@ type welcomeCopy struct {
 }
 
 type welcomeTemplateData struct {
-	Locale, Brand, URL string
-	Copy               welcomeCopy
+	Locale, Brand, Tagline, URL string
+	Copy                        welcomeCopy
 }
 
 // RenderWelcome builds the welcome message in the locale the account was created in,
@@ -34,7 +34,7 @@ func RenderWelcome(locale i18n.Locale) (Message, error) {
 		locale = i18n.DefaultLocale
 		copy = welcomeTemplates[locale]
 	}
-	data := welcomeTemplateData{Locale: string(locale), Brand: brand.ProductName, URL: brand.WebsiteURL, Copy: copy}
+	data := welcomeTemplateData{Locale: string(locale), Brand: brand.ProductName, Tagline: brand.Tagline, URL: brand.WebsiteURL, Copy: copy}
 	var html, text bytes.Buffer
 	if e := welcomeHTMLTemplate.Execute(&html, data); e != nil {
 		return Message{}, e
@@ -167,7 +167,7 @@ var welcomeHTMLTemplate = template.Must(template.New("welcome-html").Parse(`<!do
               <table role="presentation">
                 <tr>
                   <td width="4" bgcolor="#A34A32" style="width:4px; background-color:#A34A32; font-size:0; line-height:0;">&nbsp;</td>
-                  <td class="email-ink" style="padding-left:12px; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:20px; line-height:26px; font-weight:700; letter-spacing:-0.2px;">{{.Brand}}</td>
+                  <td class="email-ink" style="padding-left:12px; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:20px; line-height:26px; font-weight:700; letter-spacing:-0.2px;">{{.Brand}}<br><span class="email-muted" style="color:#6B6559; font-size:13px; line-height:18px; font-weight:400; letter-spacing:0;">{{.Tagline}}</span></td>
                 </tr>
               </table>
             </td>
@@ -212,7 +212,7 @@ var welcomeHTMLTemplate = template.Must(template.New("welcome-html").Parse(`<!do
 </body>
 </html>`))
 
-var welcomeTextTemplate = template.Must(template.New("welcome-text").Parse(`{{.Brand}}
+var welcomeTextTemplate = template.Must(template.New("welcome-text").Parse(`{{.Brand}} {{.Tagline}}
 
 {{.Copy.Title}}
 {{.Copy.Intro}}

@@ -432,7 +432,7 @@ func RenderLoginCode(locale i18n.Locale, code string, minutes int) (Message, err
 		copy = loginCodeTemplates[locale]
 	}
 	copy = resolveLoginCodeCopy(copy, code, minutes)
-	data := loginCodeTemplateData{Locale: string(locale), Brand: brand.ProductName, Code: code, Minutes: minutes, Copy: copy}
+	data := loginCodeTemplateData{Locale: string(locale), Brand: brand.ProductName, Tagline: brand.Tagline, Code: code, Minutes: minutes, Copy: copy}
 	var html, text bytes.Buffer
 	if e := loginCodeHTMLTemplate.Execute(&html, data); e != nil {
 		return Message{}, e
@@ -457,6 +457,7 @@ type localizedEmailTemplate struct {
 }
 
 type loginCodeTemplateData struct {
+	Tagline string
 	Locale  string
 	Brand   string
 	Code    string
@@ -538,7 +539,7 @@ var loginCodeHTMLTemplate = template.Must(template.New("login-code-html").Parse(
               <table role="presentation">
                 <tr>
                   <td width="4" bgcolor="#A34A32" style="width:4px; background-color:#A34A32; font-size:0; line-height:0;">&nbsp;</td>
-                  <td class="email-ink" style="padding-left:12px; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:20px; line-height:26px; font-weight:700; letter-spacing:-0.2px;">{{.Brand}}</td>
+                  <td class="email-ink" style="padding-left:12px; color:#262521; font-family:Arial,'Helvetica Neue',sans-serif; font-size:20px; line-height:26px; font-weight:700; letter-spacing:-0.2px;">{{.Brand}}<br><span class="email-muted" style="color:#6B6559; font-size:13px; line-height:18px; font-weight:400; letter-spacing:0;">{{.Tagline}}</span></td>
                 </tr>
               </table>
             </td>
@@ -577,7 +578,7 @@ var loginCodeHTMLTemplate = template.Must(template.New("login-code-html").Parse(
 </body>
 </html>`))
 
-var loginCodeTextTemplate = template.Must(template.New("login-code-text").Parse(`{{.Brand}}
+var loginCodeTextTemplate = template.Must(template.New("login-code-text").Parse(`{{.Brand}} {{.Tagline}}
 
 {{.Copy.Title}}
 {{.Copy.Intro}}
