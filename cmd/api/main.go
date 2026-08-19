@@ -17,6 +17,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/email"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	"github.com/burakaltintas/home-app-api/internal/observability"
+	"github.com/burakaltintas/home-app-api/internal/privacy"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -116,6 +117,11 @@ func main() {
 	// Requesting a code still only enqueues a row; nothing here makes the HTTP handler
 	// wait on the mail provider. Run returns when ctx is cancelled, which is the normal
 	// shutdown path and not worth reporting as a failure.
+	go privacy.Run(ctx, db, privacy.Config{
+		SearchRetentionDays:         cfg.SearchRetentionDays,
+		SearchLocationRetentionDays: cfg.SearchLocationRetentionDays,
+		VisitorRetentionDays:        cfg.VisitorRetentionDays,
+	}, log)
 	go func() {
 		log.Info("email worker started", "email_provider", cfg.EmailProvider)
 		if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {
