@@ -205,3 +205,23 @@ func TestValidPhotoNameRejectsUnsafeInput(t *testing.T) {
 		}
 	}
 }
+
+// A store we already hold has its photograph on file. Before this, only stores that the
+// live Google response happened to include showed a picture, so our own catalogue -- and
+// every promoted store, which never goes through Google -- rendered as blank tiles.
+func TestFromStoreCarriesTheStoredPhoto(t *testing.T) {
+	name := "places/ChIJmwFY8_OPwxQRb39DXDLxwcY/photos/AelY_Cs9xY"
+	r := fromStore(storepkg.Item{ID: uuid.New(), Name: "Salihler Halı Perde", Photo: &storepkg.Photo{Name: name, Attributions: []string{"Bir Kullanıcı"}}}, 0)
+	if r.Photo == nil || r.Photo.Name != name {
+		t.Fatalf("expected the stored photo to reach the result, got %+v", r.Photo)
+	}
+	if len(r.Photo.Attributions) != 1 {
+		t.Fatal("the provider terms require the credit to travel with the photograph")
+	}
+	// A malformed reference would render as a broken image, so it is dropped here rather
+	// than handed to the client.
+	bad := fromStore(storepkg.Item{ID: uuid.New(), Name: "Taç", Photo: &storepkg.Photo{Name: "https://evil.example/x"}}, 0)
+	if bad.Photo != nil {
+		t.Fatal("expected an invalid photo reference to be dropped")
+	}
+}
