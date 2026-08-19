@@ -42,6 +42,21 @@ func (DevSender) Send(_ context.Context, m Message) (string, error) {
 	return "dev-" + uuid.NewString(), nil
 }
 
+// ProductionRefusalSender fails loudly instead of pretending. The outbox row lands in
+// failed with a readable reason, which is the difference between an hour of guessing and
+// one row that says what is wrong. It deliberately does not stop the service: browsing and
+// search have nothing to do with mail, and taking the whole site down over an unset
+// variable is the larger outage.
+type ProductionRefusalSender struct{ Provider string }
+
+func (s ProductionRefusalSender) Send(context.Context, Message) (string, error) {
+	provider := s.Provider
+	if provider == "" {
+		provider = "unset"
+	}
+	return "", fmt.Errorf("email provider is %q in production: set EMAIL_PROVIDER to gmail or resend and supply its credentials", provider)
+}
+
 type FileSender struct{ Dir string }
 
 func (s FileSender) Send(_ context.Context, m Message) (string, error) {

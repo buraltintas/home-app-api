@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -253,10 +254,38 @@ func Load() (Config, error) {
 // EmailSenderOptions maps the process configuration onto the shared sender constructor.
 // The API process and the standalone worker drain the same outbox, so they read the same
 // fields through the same path and cannot end up on different providers.
+// DeliversMail reports whether this process should drain the shared email outbox.
+//
+// It must not when a development process is pointed at a remote database. Both this and
+// the deployed service poll the same table with SKIP LOCKED, so whichever claims a row
+// first owns it -- and a developer's machine "sends" by writing a file. Nine of thirteen
+// sign-in codes on 19 August were delivered to a laptop's .data/mailbox that way, and the
+// people waiting for them saw nothing at all. Reading a queue is not the risk; claiming a
+// row you cannot deliver is.
+func (c Config) DeliversMail() bool {
+	if c.Environment == "production" {
+		return true
+	}
+	return localDatabase(c.DatabaseURL)
+}
+
+func localDatabase(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	switch parsed.Hostname() {
+	case "localhost", "127.0.0.1", "::1", "host.docker.internal", "postgres", "db", "":
+		return true
+	}
+	return false
+}
+
 func (c Config) EmailSenderOptions() email.SenderOptions {
 	return email.SenderOptions{
 		Provider:                c.EmailProvider,
 		DevelopmentDir:          c.EmailDevelopmentDir,
+		Production:              c.Environment == "production",
 		APIURL:                  c.EmailAPIURL,
 		APIKey:                  c.EmailAPIKey,
 		GmailServiceAccountJSON: c.GmailServiceAccountJSON,

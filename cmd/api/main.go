@@ -138,12 +138,16 @@ func main() {
 			log.Error("reporting aggregation stopped", "error", e)
 		}
 	}()
-	go func() {
-		log.Info("email worker started", "email_provider", cfg.EmailProvider)
-		if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {
-			log.Error("email worker stopped", "error", e)
-		}
-	}()
+	if cfg.DeliversMail() {
+		go func() {
+			log.Info("email worker started", "email_provider", cfg.EmailProvider)
+			if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {
+				log.Error("email worker stopped", "error", e)
+			}
+		}()
+	} else {
+		log.Warn("email worker disabled: this is a development process pointed at a remote database, and draining the shared outbox here would deliver other people's sign-in codes to this machine")
+	}
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
