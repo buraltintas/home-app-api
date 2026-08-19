@@ -6,6 +6,8 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -128,6 +130,111 @@ func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, erro
 		return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
 	return id, e
+}
+
+// SearchByName matches only the store and brand name, deliberately not the city or
+// district. The general search indexes those too, which is right for "perde Antalya" but
+// useless here: a bare city name would match every store in that city rather than the one
+// actually called that.
+//
+// This exists so that typing part of a store's name finds it. Somebody who remembers
+// "güney antalya" should not have to produce "GÜNEY ANTALYA HALI ve YATAK SATIŞ MAĞAZASI"
+// word for word, and should certainly not be told the request was not understood.
+func (s *Service) SearchByName(ctx context.Context, q string, lat, lon *float64, limit int, viewer *uuid.UUID) ([]Item, error) {
+	q = strings.TrimSpace(q)
+	if q == "" || limit < 1 {
+		return nil, nil
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	// Three readings of the same words, tried strongest first, because they are not
+	// equally good evidence that this is the store somebody meant.
+	//
+	// All words is the precise reading. Then consecutive phrases, longest first: for
+	// "güney antalya home" the phrase "güney antalya" finds GÜNEY ANTALYA HALI ve YATAK
+	// SATIŞ MAĞAZASI, which is unmistakably the intended store. Ranking alone could not
+	// do this -- "ANTALYA DECOR HOME" also matches two of the three words, so a scattered
+	// match scored the same as an exact run of them and won on distance.
+	//
+	// Any word is the last resort, so a half-remembered name still returns something.
+	out, e := s.searchByNameQuery(ctx, "websearch_to_tsquery", q, lat, lon, limit, viewer)
+	if e != nil || len(out) > 0 {
+		return out, e
+	}
+	for _, phrase := range PhrasePrefixes(q) {
+		out, e = s.searchByNameQuery(ctx, "phraseto_tsquery", phrase, lat, lon, limit, viewer)
+		if e != nil || len(out) > 0 {
+			return out, e
+		}
+	}
+	if any := anyWordQuery(q); any != "" {
+		return s.searchByNameQuery(ctx, "to_tsquery", any, lat, lon, limit, viewer)
+	}
+	return nil, nil
+}
+
+// Consecutive runs of the query words, longest first and at least two words long. A single
+// word is left to the any-word pass, where it belongs: one word in common is weak evidence
+// and should not outrank a genuine phrase.
+func PhrasePrefixes(raw string) []string {
+	words := queryWords(raw)
+	var out []string
+	for length := len(words); length >= 2; length-- {
+		for start := 0; start+length <= len(words); start++ {
+			out = append(out, strings.Join(words[start:start+length], " "))
+		}
+	}
+	return out
+}
+
+func queryWords(raw string) []string {
+	words := strings.FieldsFunc(raw, func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+	kept := make([]string, 0, len(words))
+	for _, word := range words {
+		if utf8.RuneCountInString(word) > 1 {
+			kept = append(kept, word)
+		}
+	}
+	return kept
+}
+
+// to_tsquery parses operators, so the words are extracted and rejoined rather than passed
+// through. Anything that is not a letter or digit is dropped, which makes injection of
+// tsquery syntax impossible by construction.
+func anyWordQuery(raw string) string {
+	kept := queryWords(raw)
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, " | ")
+}
+
+func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon *float64, limit int, viewer *uuid.UUID) ([]Item, error) {
+	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
+ CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,
+ EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6)
+ FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
+ WHERE s.deleted_at IS NULL AND to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')) @@ `+fn+`('simple',$1)
+ GROUP BY s.id,ss.store_id
+ ORDER BY ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1)) DESC,
+ CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END LIMIT $4`, q, lat, lon, limit, i18n.FromContext(ctx), viewer)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var out []Item
+	for rows.Next() {
+		var x Item
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.ViewerFavorited); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
 }
 
 // Search returns matching stores. A radius of zero or less disables the distance

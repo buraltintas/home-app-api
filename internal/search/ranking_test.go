@@ -1,7 +1,11 @@
 package search
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 
 	"github.com/google/uuid"
 )
@@ -27,7 +31,7 @@ func TestNearbyStoresOutrankFarBetterRatedOnes(t *testing.T) {
 		{Name: "Yataş Bedding Aspendos", Address: "Kızıltoprak, 07230 Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(13900), Platform: &Platform{}, score: mergedScore(Platform{}, Place{Rating: 4, RatingCount: 141}, 5)},
 		{Name: "Moda Yorgan House", Address: "Fevzi Çakmak, 07210 Kepez/Antalya, Türkiye", DistanceMeters: meters(9000), score: googleScore(Place{Rating: 4, RatingCount: 4}, 0)},
 	}
-	rankResults(results, true)
+	rankResults(results, true, false)
 	for _, far := range []string{"Cotton Box", "Denizli Tekstil Dünyası"} {
 		for _, near := range []string{"Moda Yorgan House", "Yataş Bedding Aspendos"} {
 			if indexOf(results, far) < indexOf(results, near) {
@@ -45,7 +49,7 @@ func TestReviewedStoresInTheSearchersCityComeFirst(t *testing.T) {
 		{Name: "Reviewed Antalya", Address: "Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(11000), Platform: &Platform{ReviewCount: 6, AverageRating: 4.2}, score: platformScore(Platform{ReviewCount: 6, AverageRating: 4.2}, 4)},
 		{Name: "Reviewed Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(160000), Platform: &Platform{ReviewCount: 40, AverageRating: 5}, score: platformScore(Platform{ReviewCount: 40, AverageRating: 5}, 1)},
 	}
-	rankResults(results, true)
+	rankResults(results, true, false)
 	if results[0].Name != "Reviewed Antalya" {
 		t.Fatalf("expected the reviewed Antalya store first, got %v", names(results))
 	}
@@ -84,7 +88,7 @@ func TestCityKeyReadsTurkishAddresses(t *testing.T) {
 // instead of silently treating every result as equally distant.
 func TestRankingWithoutALocationFallsBackToRelevance(t *testing.T) {
 	results := []Result{{Name: "low", score: 10}, {Name: "high", score: 90}}
-	rankResults(results, false)
+	rankResults(results, false, false)
 	if results[0].Name != "high" {
 		t.Fatalf("expected relevance order, got %v", names(results))
 	}
@@ -127,7 +131,7 @@ func TestCityResultsReadNearestFirst(t *testing.T) {
 		{Name: "Kültür", Address: antalya, DistanceMeters: meters(7400), score: googleScore(Place{Rating: 4.5, RatingCount: 10}, 3)},
 		{Name: "Bebemsi", Address: antalya, DistanceMeters: meters(8300), score: googleScore(Place{Rating: 4.6, RatingCount: 102}, 4)},
 	}
-	rankResults(results, true)
+	rankResults(results, true, false)
 	want := []string{"Kültür", "Bebemsi", "El-DE", "Evdek", "Yataş"}
 	for i, name := range want {
 		if results[i].Name != name {
@@ -163,5 +167,44 @@ func TestFarResultsSurviveWhenNothingIsNearby(t *testing.T) {
 	results := []Result{{Name: "Far 1", DistanceMeters: meters(169400)}, {Name: "Far 2", DistanceMeters: meters(479400)}}
 	if len(withinLocalHorizon(results)) != 2 {
 		t.Fatal("a sparse area must keep its distant results rather than show nothing")
+	}
+}
+
+// One label for three different incidents meant a production failure could not be told
+// apart without log access: a missing key, a slow provider and a model answering
+// off-schema need different fixes.
+func TestAIFallbackReasonsAreDistinguishable(t *testing.T) {
+	if got := aiFallbackReason(errors.New("schema"), true); got != "ai_invalid_response" {
+		t.Fatalf("invalid response = %q", got)
+	}
+	if got := aiFallbackReason(context.DeadlineExceeded, false); got != "ai_timeout" {
+		t.Fatalf("timeout = %q", got)
+	}
+	for _, text := range []string{"status 401", "Unauthorized", "invalid_api_key", "status 429", "insufficient_quota"} {
+		if got := aiFallbackReason(errors.New(text), false); got != "ai_unauthorized" {
+			t.Fatalf("aiFallbackReason(%q) = %q, want ai_unauthorized", text, got)
+		}
+	}
+	if got := aiFallbackReason(errors.New("connection reset"), false); got != "ai_unavailable" {
+		t.Fatalf("network error = %q", got)
+	}
+}
+
+// "güney antalya home" must reach GÜNEY ANTALYA HALI ve YATAK SATIŞ MAĞAZASI. Ranking
+// alone could not do it: "ANTALYA DECOR HOME" also matches two of the three words, so a
+// scattered match scored the same as a consecutive run and then won on distance.
+func TestPhrasePrefixesPreferLongerConsecutiveRuns(t *testing.T) {
+	got := storepkg.PhrasePrefixes("güney antalya home")
+	want := []string{"güney antalya home", "güney antalya", "antalya home"}
+	if len(got) != len(want) {
+		t.Fatalf("phrasePrefixes = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("phrasePrefixes = %v, want %v", got, want)
+		}
+	}
+	if single := storepkg.PhrasePrefixes("debu"); len(single) != 0 {
+		t.Fatalf("a single word is not a phrase: %v", single)
 	}
 }

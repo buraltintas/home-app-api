@@ -3,6 +3,7 @@ package search
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"math"
@@ -306,8 +307,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	fallback := ""
 	if s.ai != nil {
 		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, requestLocale})
+		invalid := false
 		if e == nil {
-			e = Validate(enriched)
+			if e = Validate(enriched); e != nil {
+				invalid = true
+			}
 		}
 		if e == nil {
 			intent = merge(intent, enriched)
@@ -315,10 +319,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		} else {
 			// Every silent degradation here reaches the user as "we did not understand
 			// you", so the reason has to survive in the logs. The query is the user's
-			// own words and is already stored in searches; the cause is usually a
-			// timeout or a value the schema does not allow.
-			slog.Default().Warn("search intent parsing failed", "error", e, "model", s.model, "query", in.Query)
-			fallback = "ai_unavailable_or_invalid"
+			// own words and is already stored in searches.
+			slog.Default().Warn("search intent parsing failed", "error", e, "model", s.model, "reason", aiFallbackReason(e, invalid), "query", in.Query)
+			// The three ways this fails need different fixes -- a missing key, a slow
+			// provider, and a model answering off-schema are not the same incident -- and
+			// they were previously indistinguishable without log access. Naming them in
+			// the response makes a single request enough to tell them apart.
+			fallback = aiFallbackReason(e, invalid)
 		}
 	}
 	if !i18n.IsSupported(intent.QueryLanguage) {
@@ -362,7 +369,24 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			return Response{}, e
 		}
 	} else {
-		guidance = guidanceFor(requestLocale, intent.Scope)
+		// Before telling somebody we did not understand them, check whether they named a
+		// store we actually carry. "güney antalya" reads as a place rather than a request
+		// and was classified out of scope, while GÜNEY ANTALYA HALI ve YATAK SATIŞ
+		// MAĞAZASI sat in our own catalogue the whole time. Nobody should have to type a
+		// store's full registered name to find it.
+		named, e := s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 10, user)
+		if e != nil {
+			return Response{}, e
+		}
+		if len(named) > 0 {
+			internal = named
+			intent.Scope = ScopeHomeLiving
+			// Recording what this turned out to be keeps the ordering honest downstream:
+			// this is a search for a store by name, and is ranked as one.
+			intent.StoreName = strings.TrimSpace(in.Query)
+		} else {
+			guidance = guidanceFor(requestLocale, intent.Scope)
+		}
 	}
 	results := make([]Result, 0, len(internal)+20)
 	localIDs := map[uuid.UUID]bool{}
@@ -430,7 +454,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	if intent.StoreName == "" && in.Latitude != nil {
 		results = withinLocalHorizon(results)
 	}
-	rankResults(results, in.Latitude != nil)
+	rankResults(results, in.Latitude != nil, intent.StoreName != "")
 	if len(results) > 30 {
 		results = results[:30]
 	}
@@ -688,6 +712,31 @@ func placesQuery(i Intent, raw string) string {
 	}
 	return query
 }
+
+// aiFallbackReason names why the parser did not answer, without leaking provider detail
+// into a public response.
+func aiFallbackReason(e error, invalid bool) string {
+	switch {
+	case invalid:
+		return "ai_invalid_response"
+	case errors.Is(e, context.DeadlineExceeded):
+		return "ai_timeout"
+	case isAuthFailure(e):
+		return "ai_unauthorized"
+	default:
+		return "ai_unavailable"
+	}
+}
+
+// The provider returns its status in the error text; 401 and 429 are the two that mean
+// "the deployment is misconfigured" rather than "the network wobbled".
+func isAuthFailure(e error) bool {
+	text := strings.ToLower(e.Error())
+	return strings.Contains(text, "401") || strings.Contains(text, "unauthorized") ||
+		strings.Contains(text, "invalid_api_key") || strings.Contains(text, "429") ||
+		strings.Contains(text, "quota") || strings.Contains(text, "insufficient_quota")
+}
+
 func haversine(a, b, c, d float64) float64 {
 	const r = 6371000
 	la1, la2 := a*math.Pi/180, c*math.Pi/180

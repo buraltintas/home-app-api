@@ -471,8 +471,12 @@ func withinLocalHorizon(results []Result) []Result {
 // first: places in the searcher's own city that our own community has already reviewed.
 // Everything after that runs nearest to farthest, with relevance deciding the order inside
 // each band.
-func rankResults(results []Result, located bool) {
-	if !located {
+func rankResults(results []Result, located, nameLed bool) {
+	// Somebody who typed a store's name is looking for that store, not for whatever is
+	// closest. The radius filter already steps aside for name-led intents; the ordering
+	// has to as well, or the store they named finishes last because it happens to be
+	// across town.
+	if nameLed || !located {
 		sort.SliceStable(results, func(i, j int) bool { return results[i].score > results[j].score })
 		return
 	}
