@@ -253,3 +253,18 @@ func TestPremiumSurvivesTheLocalHorizon(t *testing.T) {
 		t.Fatalf("the promoted store was dropped: %v", names(kept))
 	}
 }
+
+// Promotion that only reorders is not promotion: the candidate list comes from Google, so
+// a paid-for store Google did not return could never be lifted into it. These pin the two
+// halves of the contract the injection has to keep.
+func TestPromotedStoreLeadsEvenWhenFurtherAway(t *testing.T) {
+	antalya := "Muratpaşa/Antalya, Türkiye"
+	results := []Result{
+		{Name: "Organic 5km", Address: antalya, DistanceMeters: meters(5900), score: googleScore(Place{Rating: 5, RatingCount: 104}, 0)},
+		{Name: "Promoted 15km", Address: antalya, DistanceMeters: meters(15500), Premium: true, score: platformScore(Platform{}, 9)},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Promoted 15km" {
+		t.Fatalf("promoted store did not lead: %v", names(results))
+	}
+}

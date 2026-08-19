@@ -388,6 +388,26 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			guidance = guidanceFor(requestLocale, intent.Scope)
 		}
 	}
+	// Promoted stores are added to the candidate list, not merely sorted within it. Google
+	// decides what it returns, so a paid-for store it did not include could never be lifted
+	// to the top -- it was not there to lift. Merged before the results are built, and
+	// deduplicated, so a promoted store that Google did return is not listed twice.
+	if intent.Scope == ScopeHomeLiving && in.Latitude != nil && len(intent.Categories) > 0 {
+		promoted, e := s.stores.PremiumNearby(ctx, intent.Categories, in.Latitude, in.Longitude, localHorizonMeters, 5, user)
+		if e != nil {
+			return Response{}, e
+		}
+		seen := make(map[uuid.UUID]bool, len(internal))
+		for _, x := range internal {
+			seen[x.ID] = true
+		}
+		for _, x := range promoted {
+			if !seen[x.ID] {
+				internal = append(internal, x)
+			}
+		}
+	}
+
 	results := make([]Result, 0, len(internal)+20)
 	localIDs := map[uuid.UUID]bool{}
 	for rank, x := range internal {

@@ -133,6 +133,48 @@ func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, erro
 	return id, e
 }
 
+// PremiumNearby returns promoted stores close to the searcher that match the categories
+// being searched for.
+//
+// It exists because promotion that only reorders is not promotion. The candidate list comes
+// from Google, and Google decides what it returns: a paid-for store that Google did not
+// happen to include could not be lifted to the top, because it was not in the list at all.
+// A search for carpets in Antalya missed the promoted carpet shop in Antalya for exactly
+// that reason.
+//
+// Categories are required. Promotion buys priority among the things somebody asked for, not
+// a place in every search.
+func (s *Service) PremiumNearby(ctx context.Context, categories []string, lat, lon *float64, radius, limit int, viewer *uuid.UUID) ([]Item, error) {
+	if lat == nil || lon == nil || len(categories) == 0 {
+		return nil, nil
+	}
+	if limit < 1 || limit > 20 {
+		limit = 5
+	}
+	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$6),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
+ ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$6 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$6),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
+ EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$5)
+ FROM stores s JOIN store_stats ss ON ss.store_id=s.id JOIN store_category_links l ON l.store_id=s.id JOIN store_categories c ON c.id=l.category_id
+ WHERE s.deleted_at IS NULL AND s.is_premium AND c.slug=ANY($4)
+ AND ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography,$3)
+ GROUP BY s.id,ss.store_id ORDER BY ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) LIMIT $7`,
+		lat, lon, radius, categories, viewer, i18n.FromContext(ctx), limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var out []Item
+	for rows.Next() {
+		var x Item
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
 // SearchByName matches only the store and brand name, deliberately not the city or
 // district. The general search indexes those too, which is right for "perde Antalya" but
 // useless here: a bare city name would match every store in that city rather than the one
