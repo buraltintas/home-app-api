@@ -129,6 +129,15 @@ func main() {
 		SearchLocationRetentionDays: cfg.SearchLocationRetentionDays,
 		VisitorRetentionDays:        cfg.VisitorRetentionDays,
 	}, log)
+	// Daily metrics are rolled up here for the same reason the retention sweep is: the
+	// separate worker binary that used to own this is not deployed, so nothing aggregated
+	// and every report in the admin panel read empty over data that was all in the tables.
+	// Aggregation takes a database lock, so running it in every instance is safe.
+	go func() {
+		if e := reportSvc.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {
+			log.Error("reporting aggregation stopped", "error", e)
+		}
+	}()
 	go func() {
 		log.Info("email worker started", "email_provider", cfg.EmailProvider)
 		if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {

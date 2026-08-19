@@ -14,16 +14,30 @@ func (s *Service) dayBounds(day time.Time) (time.Time, time.Time, time.Time) {
 	return d, d.UTC(), d.AddDate(0, 0, 1).UTC()
 }
 
+// aggregateLockKey serialises aggregation across processes. The rollup now runs inside the
+// API, which is horizontally scaled, so several instances wake to the same hour and would
+// otherwise rewrite the same days at the same time.
+const aggregateLockKey = 774_1991
+
 func (s *Service) AggregateDay(ctx context.Context, day time.Time) error {
 	d, start, end := s.dayBounds(day)
 	metricDate := d.Format("2006-01-02")
-	runID := uuid.New()
-	_, _ = s.db.Exec(ctx, `INSERT INTO reporting_runs(id,run_type,from_date,to_date,status) VALUES($1,'daily',$2,$2,'running')`, runID, metricDate)
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
 		return e
 	}
 	defer tx.Rollback(ctx)
+	var locked bool
+	if e = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, aggregateLockKey).Scan(&locked); e != nil {
+		return e
+	}
+	if !locked {
+		// Somebody else holds it and is aggregating the same window. Skipping is correct:
+		// the next hourly tick recomputes the day from scratch anyway.
+		return nil
+	}
+	runID := uuid.New()
+	_, _ = s.db.Exec(ctx, `INSERT INTO reporting_runs(id,run_type,from_date,to_date,status) VALUES($1,'daily',$2,$2,'running')`, runID, metricDate)
 	_, e = tx.Exec(ctx, `INSERT INTO platform_daily_metrics(metric_date,registered_users_total,new_users_count,active_users_count,anonymous_visitors_count,stores_total,new_stores_count,google_imported_stores_total,posts_current_total,posts_created_lifetime,new_posts_count,posts_deleted_count,verified_posts_count,location_rejected_post_attempts,comments_current_total,new_comments_count,likes_current_total,new_likes_count,follows_current_total,new_follows_count,favorites_current_total,new_favorites_count,searches_total,searches_count,searches_with_results_count,zero_result_searches_count,authenticated_searches_count,anonymous_searches_count,ai_searches_count,google_places_searches_count,search_result_impressions_count,search_result_clicks_count,store_opens_from_search_count,favorites_from_search_count,reviews_from_search_count,media_current_total,new_media_count,otp_requests_count,successful_auth_count,failed_auth_count,updated_at)
 	SELECT $1,
 	 (SELECT count(*) FROM users WHERE created_at<$3 AND (deleted_at IS NULL OR deleted_at>=$3)),(SELECT count(*) FROM users WHERE created_at>=$2 AND created_at<$3),

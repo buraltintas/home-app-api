@@ -93,6 +93,7 @@ type External struct {
 	PhotoName         string   `json:"photo_name,omitempty"`
 	PhotoAttributions []string `json:"photo_attributions,omitempty"`
 }
+
 // Photo mirrors the stored provider photograph. Attribution travels with it because the
 // provider terms require the credit to be displayed wherever the photograph is.
 type Photo struct {
