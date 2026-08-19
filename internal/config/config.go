@@ -112,7 +112,14 @@ func Load() (Config, error) {
 	if c.OTPIPRequestLimit, err = integer("OTP_IP_REQUEST_LIMIT", 10); err != nil {
 		return c, err
 	}
-	if c.OTPVisitorRequestLimit, err = integer("OTP_VISITOR_REQUEST_LIMIT", 5); err != nil {
+	// Five per hour per browser was the tightest of the three limits and the weakest of
+	// them. It keys on a cookie, so anybody abusing the endpoint clears it and carries on,
+	// while an honest person who mistypes an address twice and then tries another one is
+	// locked out for an hour. The address limit (three per ten minutes) stops flooding one
+	// inbox and the address-independent IP limit is the real backstop; this one only has to
+	// stop a single browser running away, so it now matches the IP limit instead of
+	// undercutting it.
+	if c.OTPVisitorRequestLimit, err = integer("OTP_VISITOR_REQUEST_LIMIT", 10); err != nil {
 		return c, err
 	}
 	if c.SearchLocationDecimals, err = integer("SEARCH_LOCATION_DECIMALS", 3); err != nil {
