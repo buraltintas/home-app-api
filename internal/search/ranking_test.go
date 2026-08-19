@@ -286,3 +286,31 @@ func TestWrappedTimeoutIsNotReportedAsUnreachable(t *testing.T) {
 		t.Fatalf("dns failure = %q, want ai_unavailable", got)
 	}
 }
+
+// Imported stores used to carry no categories at all, so a shop plainly named "... HALI"
+// could not be found by anything that filtered on one -- which is what limited promotion.
+func TestStoreCategoriesComeFromTheStoreItself(t *testing.T) {
+	got := StoreCategories("GÜNEY ANTALYA HALI ve YATAK SATIŞ MAĞAZASI", nil)
+	has := func(slug string) bool {
+		for _, c := range got {
+			if c == slug {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("carpet") {
+		t.Fatalf("a carpet shop got %v, expected carpet from its own name", got)
+	}
+	if !has("bedding") {
+		t.Fatalf("expected bedding from \"YATAK\" in the name, got %v", got)
+	}
+	// Google's types are the other source, and are used even when the name says nothing.
+	if got := StoreCategories("Salihler", []string{"furniture_store"}); len(got) == 0 || got[0] != "furniture" {
+		t.Fatalf("google types ignored: %v", got)
+	}
+	// Neither source saying anything must not invent a category.
+	if got := StoreCategories("Ada", []string{"restaurant"}); len(got) != 0 {
+		t.Fatalf("expected no categories, got %v", got)
+	}
+}

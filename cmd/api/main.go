@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -63,6 +64,12 @@ func main() {
 	stores := storepkg.NewService(db, reportSvc)
 	socialSvc := social.NewService(db, social.Config{ReviewRadiusMeters: cfg.StoreReviewRadiusMeters, VisitProofTTL: cfg.StoreVisitProofTTL, MaxLocationAccuracyMeters: cfg.StoreLocationMaxAccuracyMeters}, reportSvc)
 	var ai searchpkg.IntentParser
+	// A key that does not look like a key is almost always a paste that carried the variable
+	// name with it. Refusing to boot over it would trade a degraded search for a dead site,
+	// so this warns as loudly as a log can instead.
+	if cfg.OpenAIAPIKey != "" && !strings.HasPrefix(cfg.OpenAIAPIKey, "sk-") {
+		log.Warn("OPENAI_API_KEY does not start with sk- and will be rejected by the provider; search will fall back to the deterministic parser")
+	}
 	if cfg.OpenAIAPIKey != "" {
 		ai = searchpkg.NewOpenAIParser(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout)
 	}

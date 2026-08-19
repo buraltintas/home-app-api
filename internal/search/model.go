@@ -367,6 +367,50 @@ func platformScore(p Platform, relevanceRank int) float64 {
 	return 80 - float64(relevanceRank)
 }
 
+// googleTypeCategories maps the Places types worth trusting onto our own taxonomy. Google's
+// types are coarse -- a carpet shop and a sofa shop are both home_goods_store -- so this
+// only carries the ones that are unambiguous.
+var googleTypeCategories = map[string]string{
+	"furniture_store":        "furniture",
+	"home_goods_store":       "home_accessories",
+	"lighting_store":         "lighting",
+	"rug_store":              "carpet",
+	"carpet_store":           "carpet",
+	"bed_and_mattress_store": "bedding",
+	"kitchen_supply_store":   "kitchenware",
+	"curtain_store":          "curtain",
+	"home_improvement_store": "household",
+	"department_store":       "home_accessories",
+}
+
+// StoreCategories works out what a store actually sells, for a store being imported from
+// Google. Until now imported stores were given no categories at all, and the categories
+// shown next to a result came from the search that happened to find it -- so a shop plainly
+// named "... HALI ..." carried no carpet category, and could not be found by anything that
+// filtered on one.
+//
+// Two sources, because neither is enough alone. Google's types are reliable but coarse, and
+// Turkish shops very often carry the category in the name ("... HALI", "... PERDE"), which
+// the deterministic parser already knows how to read. Reusing that parser keeps one
+// vocabulary rather than a second list that drifts from the first.
+func StoreCategories(name string, types []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	add := func(slug string) {
+		if slug != "" && !seen[slug] {
+			seen[slug] = true
+			out = append(out, slug)
+		}
+	}
+	for _, t := range types {
+		add(googleTypeCategories[strings.ToLower(strings.TrimSpace(t))])
+	}
+	for _, slug := range Deterministic(name).Categories {
+		add(slug)
+	}
+	return out
+}
+
 func googleScore(p Place, relevanceRank int) float64 {
 	return 100 + p.Rating*4 + math.Log1p(float64(p.RatingCount))*2 - float64(relevanceRank)
 }

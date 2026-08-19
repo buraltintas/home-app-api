@@ -126,6 +126,14 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography)`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude); err != nil {
 			return nil, err
 		}
+		// A store now carries the categories it actually sells, worked out from its own
+		// Google types and its own name. Before this an imported store had none at all, and
+		// the categories shown beside a result came from the search that found it.
+		if categories := StoreCategories(p.Name, p.Types); len(categories) > 0 {
+			if _, err = tx.Exec(ctx, `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug=ANY($2) AND active ON CONFLICT DO NOTHING`, id, categories); err != nil {
+				return nil, err
+			}
+		}
 		if _, err = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
 			return nil, err
 		}

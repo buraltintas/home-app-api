@@ -24,25 +24,3 @@ func TestSecretsAreTrimmedOfSurroundingWhitespace(t *testing.T) {
 		t.Fatalf("whitespace-only value = %q, want the fallback", got)
 	}
 }
-
-// The production key was stored as the whole "NAME=value" line, so every request was
-// rejected with a 401 that only appeared in the logs while search quietly ran on the
-// deterministic parser. Refusing to start is louder than a log nobody reads.
-func TestKeyThatCarriesItsVariableNameIsRejected(t *testing.T) {
-	base := func() {
-		t.Setenv("DATABASE_URL", "postgres://u:p@localhost:5432/db")
-		t.Setenv("BFF_SECRETS", "secret")
-		t.Setenv("ACCESS_TOKEN_SECRET", "0123456789abcdef0123456789abcdef")
-		t.Setenv("OTP_HASH_SECRET", "0123456789abcdef0123456789abcdef")
-	}
-	base()
-	t.Setenv("OPENAI_API_KEY", "OPENAI_API_KEY=sk-real-looking-value")
-	if _, e := Load(); e == nil {
-		t.Fatal("a key carrying its own variable name was accepted")
-	}
-	base()
-	t.Setenv("OPENAI_API_KEY", "sk-real-looking-value")
-	if _, e := Load(); e != nil {
-		t.Fatalf("a well-formed key was rejected: %v", e)
-	}
-}
