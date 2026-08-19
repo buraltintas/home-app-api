@@ -142,24 +142,32 @@ func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, erro
 // A search for carpets in Antalya missed the promoted carpet shop in Antalya for exactly
 // that reason.
 //
-// Categories are required. Promotion buys priority among the things somebody asked for, not
-// a place in every search.
-func (s *Service) PremiumNearby(ctx context.Context, categories []string, lat, lon *float64, radius, limit int, viewer *uuid.UUID) ([]Item, error) {
-	if lat == nil || lon == nil || len(categories) == 0 {
+// Category is deliberately not a condition. Somebody paid to be seen in their own city,
+// and a filter that quietly excluded them from most searches would be selling placement
+// that does not place. Every store here is a home and living store, so a promoted one is
+// never wholly irrelevant to a home and living search.
+//
+// The trade is real and worth naming: a promoted carpet shop will appear above organic
+// results for a lighting search. It is labelled, it is bounded to the searcher's own city,
+// and it is capped, so it costs relevance without hiding what it is.
+func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, limit int, viewer *uuid.UUID) ([]Item, error) {
+	if lat == nil || lon == nil {
 		return nil, nil
 	}
 	if limit < 1 || limit > 20 {
 		limit = 5
 	}
-	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$6),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
+	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$6 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$6),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
- EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$5)
- FROM stores s JOIN store_stats ss ON ss.store_id=s.id JOIN store_category_links l ON l.store_id=s.id JOIN store_categories c ON c.id=l.category_id
- WHERE s.deleted_at IS NULL AND s.is_premium AND c.slug=ANY($4)
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
+ EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$4)
+ FROM stores s JOIN store_stats ss ON ss.store_id=s.id
+ LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
+ WHERE s.deleted_at IS NULL AND s.is_premium
  AND ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography,$3)
- GROUP BY s.id,ss.store_id ORDER BY ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) LIMIT $7`,
-		lat, lon, radius, categories, viewer, i18n.FromContext(ctx), limit)
+ GROUP BY s.id,ss.store_id
+ ORDER BY ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) LIMIT $6`,
+		lat, lon, radius, viewer, i18n.FromContext(ctx), limit)
 	if e != nil {
 		return nil, e
 	}

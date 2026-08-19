@@ -282,3 +282,43 @@ func (s *Server) adminDeleteReview(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (s *Server) adminCategories(w http.ResponseWriter, r *http.Request) {
+	items, e := s.admin.Categories(r.Context())
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+// The editor replaces a store's categories outright rather than adding to them, so the
+// screen shows the whole truth and saving it cannot leave a stale one behind.
+func (s *Server) adminSetStoreCategories(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var body struct {
+		Slugs []string `json:"slugs"`
+	}
+	if e = json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body); e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if len(body.Slugs) > 13 {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if e = s.admin.SetStoreCategories(r.Context(), actor, email, id, body.Slugs); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"id": id, "slugs": body.Slugs})
+}

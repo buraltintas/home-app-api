@@ -71,6 +71,7 @@ type StoreRow struct {
 	Slug        string    `json:"slug"`
 	City        string    `json:"city"`
 	IsPremium   bool      `json:"is_premium"`
+	Categories  []string  `json:"categories"`
 	ReviewCount int       `json:"review_count"`
 	Rating      float64   `json:"average_rating"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -78,7 +79,9 @@ type StoreRow struct {
 
 func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, limit, offset int) ([]StoreRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,ss.review_count,ss.average_rating,s.created_at
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,
+ coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),
+ ss.review_count,ss.average_rating,s.created_at
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id
  WHERE s.deleted_at IS NULL AND (NOT $1 OR s.is_premium)
  AND ($2='' OR lower(s.name) LIKE '%'||$2||'%' OR lower(s.city) LIKE '%'||$2||'%')
@@ -90,7 +93,7 @@ func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, li
 	out := []StoreRow{}
 	for rows.Next() {
 		var x StoreRow
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -232,6 +235,81 @@ func record(ctx context.Context, tx pgx.Tx, actor uuid.UUID, email, action, targ
 	_, e := tx.Exec(ctx, `INSERT INTO admin_actions(actor_user_id,actor_email,action,target_type,target_id,metadata) VALUES($1,$2,$3,$4,$5,$6)`,
 		actor, email, action, targetType, target, metadata)
 	return e
+}
+
+type Category struct {
+	Slug string `json:"slug"`
+	Name string `json:"name"`
+}
+
+func (s *Service) Categories(ctx context.Context) ([]Category, error) {
+	rows, e := s.db.Query(ctx, `SELECT slug,name_tr FROM store_categories WHERE active ORDER BY name_tr`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Category{}
+	for rows.Next() {
+		var x Category
+		if e = rows.Scan(&x.Slug, &x.Name); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// StoreCategorySlugs is what the editor loads to show current state.
+func (s *Service) StoreCategorySlugs(ctx context.Context, store uuid.UUID) ([]string, error) {
+	rows, e := s.db.Query(ctx, `SELECT c.slug FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=$1 ORDER BY c.slug`, store)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var slug string
+		if e = rows.Scan(&slug); e != nil {
+			return nil, e
+		}
+		out = append(out, slug)
+	}
+	return out, rows.Err()
+}
+
+// SetStoreCategories replaces a store's categories outright. Imports guess from the name
+// and Google's types, which is right often enough to be worth doing and wrong often enough
+// to need correcting by hand -- a shop that sells across the whole range has no single
+// category to guess at.
+//
+// An empty list is allowed and means "unclassified", which is not the same as "not a home
+// store": every store here is one, and search treats an unclassified promoted store as
+// matching any home search rather than none.
+func (s *Service) SetStoreCategories(ctx context.Context, actor uuid.UUID, email string, store uuid.UUID, slugs []string) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	var exists bool
+	if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stores WHERE id=$1 AND deleted_at IS NULL)`, store).Scan(&exists); e != nil {
+		return e
+	}
+	if !exists {
+		return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	}
+	if _, e = tx.Exec(ctx, `DELETE FROM store_category_links WHERE store_id=$1`, store); e != nil {
+		return e
+	}
+	if len(slugs) > 0 {
+		if _, e = tx.Exec(ctx, `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug=ANY($2) AND active`, store, slugs); e != nil {
+			return e
+		}
+	}
+	if e = record(ctx, tx, actor, email, "store.categories", "store", store, map[string]any{"slugs": slugs}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 
 func (s *Service) SetStorePremium(ctx context.Context, actor uuid.UUID, email string, store uuid.UUID, premium bool) error {

@@ -401,8 +401,8 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// decides what it returns, so a paid-for store it did not include could never be lifted
 	// to the top -- it was not there to lift. Merged before the results are built, and
 	// deduplicated, so a promoted store that Google did return is not listed twice.
-	if intent.Scope == ScopeHomeLiving && in.Latitude != nil && len(intent.Categories) > 0 {
-		promoted, e := s.stores.PremiumNearby(ctx, intent.Categories, in.Latitude, in.Longitude, localHorizonMeters, 5, user)
+	if intent.Scope == ScopeHomeLiving && in.Latitude != nil {
+		promoted, e := s.stores.PremiumNearby(ctx, in.Latitude, in.Longitude, localHorizonMeters, 5, user)
 		if e != nil {
 			return Response{}, e
 		}
