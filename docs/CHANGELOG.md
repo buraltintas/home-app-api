@@ -1,0 +1,92 @@
+# Changelog — API
+
+What has changed and why, newest first. Written for whoever picks this up next.
+
+**No secrets here.** No keys, credentials, addresses or deployment values appear in this
+file. Where a change was security-relevant it is described by its effect, never by
+repeating the value involved.
+
+---
+
+## Admin surface, paid placement, contributor levels
+
+- **`/v1/admin/*`** exposes the operator surface. Most of it is wiring rather than new SQL:
+  `internal/reporting` already computed sixteen read metrics and none of them had a route.
+  Raw-data reads that reporting does not cover live in a new `internal/admin` package, kept
+  apart from the services that serve visitors so it stays obvious which queries need an
+  administrator.
+- Authorisation reuses the ordinary email sign-in rather than inventing a second credential
+  to protect. `RequireAdmin` compares the signed-in address against an allowlist supplied by
+  `ADMIN_EMAILS`. An empty allowlist closes the surface rather than opening it, and a caller
+  who is not on the list is answered as if the route did not exist, because a 403 confirms
+  that it does.
+- **The allowlist is never hardcoded.** A privileged address committed to a public
+  repository is a mistake this project has already had to undo once.
+- Every privileged change writes an `admin_actions` row in the same transaction as the
+  change, so the record cannot disagree with what happened.
+- Account deletion runs through the existing user service rather than a second
+  implementation, so administrator and self-service deletion cannot drift apart and the
+  published account-deletion page keeps describing both accurately. Suspension revokes live
+  sessions, or it would not take effect until a token happened to expire.
+- **Paid placement** (`stores.is_premium`) leads results in the searcher's own city and no
+  further. The flag reaches the client so the result can be labelled.
+- **Contributor levels** — five tiers at 1/5/15/40/100 reviews, derived from the review
+  count rather than stored, so deleting a review moves somebody back down instead of leaving
+  a badge they no longer earned. Posts carry their author's level.
+
+## Search
+
+- **Ordering is tiered, not one weighted score.** A single score let a five-star store
+  169 km away outrank one 14 km down the road, because distance cost only `distance/10000`
+  while ratings were worth far more. Distance now bands the list: 500 m granularity below
+  25 km, so the order reads nearest-first inside a city, with relevance deciding among
+  stores that are genuinely equally reachable.
+- A store already in the catalogue scored 80 when it had no community reviews, while the
+  identical result seen only through Google scored past 100 — knowing a place pushed it
+  down. Mapped stores now keep their Google standing until the community gives them a
+  better one.
+- Google is queried with `locationBias`, which it treats as a hint, so a search for bed
+  linen in Antalya returned shops in Denizli and İstanbul. Results beyond 50 km are dropped
+  while nearer ones remain, and kept only when the nearby area genuinely has nothing.
+- **Store-name rescue.** Typing part of a store's name used to be answered with "request not
+  understood" while the store sat in our own catalogue. The query is now matched against
+  store and brand names — deliberately not city or district, since a bare city name would
+  otherwise return every store in it. Three readings are tried strongest-first: all words,
+  then consecutive phrases longest-first, then any word. Name-led searches rank by match
+  quality rather than distance.
+- Slug generation dropped every non-ASCII letter, so Turkish store names became unreadable
+  in their own URLs. Letters are now folded to their Latin base. Slugs written before this
+  still resolve.
+- `ai_unavailable_or_invalid` covered three different incidents at once. They are now
+  reported separately as `ai_unauthorized`, `ai_timeout`, `ai_invalid_response` and
+  `ai_unavailable`, so one request is enough to tell a missing key from a slow provider
+  from a model answering off-schema.
+
+## Catalogue and email
+
+- `GET /v1/stores/index` enumerates published stores for sitemap generation; search is
+  query-driven and can never answer "every store you have".
+- `GET /v1/stores/{id}` also accepts a slug, so shared links carry the store's name.
+- A welcome email is sent to newly created accounts in their own language. It is enqueued
+  inside the transaction that creates the account, so a rolled-back signup cannot leave mail
+  behind, and it is keyed by user id so the serializable retry cannot send it twice.
+  Reactivated accounts do not receive it: they are returning, not new.
+
+## Documentation
+
+- The README described Resend as the production email adapter. Production delivers through
+  Gmail Workspace; Resend exists and is selectable but is not what runs, and saying
+  otherwise sends anyone debugging delivery to the wrong provider.
+- The README also published the store-review sign-in credentials in full. They were removed;
+  because they remain in git history and this repository is public, **the code still has to
+  be rotated in the deployment.**
+
+---
+
+## Known follow-ups
+
+- `cmd/privacy-maintenance` implements every retention period the legal pages state, but it
+  is a one-shot binary rather than a scheduler. If it is not scheduled in production, none
+  of those stated periods is true.
+- Premium has no expiry: nothing switches it off by itself. The audit log records when it
+  was turned on, which at least makes the question answerable.
