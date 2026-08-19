@@ -268,3 +268,21 @@ func TestPromotedStoreLeadsEvenWhenFurtherAway(t *testing.T) {
 		t.Fatalf("promoted store did not lead: %v", names(results))
 	}
 }
+
+// A wrapped deadline is still a deadline. Reporting one as an unreachable network sends
+// whoever is debugging production to the wrong setting.
+func TestWrappedTimeoutIsNotReportedAsUnreachable(t *testing.T) {
+	for _, text := range []string{
+		`Post "https://api.openai.com/v1/responses": context deadline exceeded`,
+		`Post "https://api.openai.com/v1/responses": net/http: request canceled (Client.Timeout exceeded)`,
+		`dial tcp 1.2.3.4:443: i/o timeout`,
+	} {
+		if got := aiFallbackReason(errors.New(text), false); got != "ai_timeout" {
+			t.Fatalf("aiFallbackReason(%q) = %q, want ai_timeout", text, got)
+		}
+	}
+	// A genuine connection failure must stay distinguishable from a slow one.
+	if got := aiFallbackReason(errors.New("dial tcp: lookup api.openai.com: no such host"), false); got != "ai_unavailable" {
+		t.Fatalf("dns failure = %q, want ai_unavailable", got)
+	}
+}

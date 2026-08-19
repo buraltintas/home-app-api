@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -747,13 +748,24 @@ func aiFallbackReason(e error, invalid bool) string {
 	switch {
 	case invalid:
 		return "ai_invalid_response"
-	case errors.Is(e, context.DeadlineExceeded):
+	case isTimeout(e):
 		return "ai_timeout"
 	case isAuthFailure(e):
 		return "ai_unauthorized"
 	default:
 		return "ai_unavailable"
 	}
+}
+
+// A deadline that arrives wrapped by the provider SDK is still a deadline. Matching only
+// the sentinel let a plain timeout fall through and be reported as an unreachable network,
+// which sends whoever is debugging it to the wrong setting entirely.
+func isTimeout(e error) bool {
+	if errors.Is(e, context.DeadlineExceeded) || os.IsTimeout(e) {
+		return true
+	}
+	text := strings.ToLower(e.Error())
+	return strings.Contains(text, "deadline exceeded") || strings.Contains(text, "timeout") || strings.Contains(text, "timed out")
 }
 
 // The provider returns its status in the error text; 401 and 429 are the two that mean
