@@ -114,3 +114,54 @@ func TestStoreSlugFoldsTurkishLettersInsteadOfDroppingThem(t *testing.T) {
 		}
 	}
 }
+
+// The real list from an Antalya search for bed linen. Every Antalya store fell into one
+// coarse 7-15 km band, so relevance sorted the whole city and the list opened at 11.4 km,
+// went to 13.9, then back to 7.4. Inside a city the order has to read nearest first.
+func TestCityResultsReadNearestFirst(t *testing.T) {
+	antalya := "Muratpaşa/Antalya, Türkiye"
+	results := []Result{
+		{Name: "Evdek", Address: antalya, DistanceMeters: meters(11400), score: googleScore(Place{Rating: 4.8, RatingCount: 50}, 0)},
+		{Name: "Yataş", Address: antalya, DistanceMeters: meters(13900), score: googleScore(Place{Rating: 4, RatingCount: 141}, 1)},
+		{Name: "El-DE", Address: antalya, DistanceMeters: meters(8400), score: googleScore(Place{Rating: 4.2, RatingCount: 25}, 2)},
+		{Name: "Kültür", Address: antalya, DistanceMeters: meters(7400), score: googleScore(Place{Rating: 4.5, RatingCount: 10}, 3)},
+		{Name: "Bebemsi", Address: antalya, DistanceMeters: meters(8300), score: googleScore(Place{Rating: 4.6, RatingCount: 102}, 4)},
+	}
+	rankResults(results, true)
+	want := []string{"Kültür", "Bebemsi", "El-DE", "Evdek", "Yataş"}
+	for i, name := range want {
+		if results[i].Name != name {
+			t.Fatalf("expected nearest first %v, got %v", want, names(results))
+		}
+	}
+}
+
+// Nobody drives 169 km for a duvet cover because a list offered it. Google is queried with
+// locationBias, which it treats as a hint, so far cities have to be dropped while the
+// searcher's own city still has results.
+func TestFarCitiesAreDroppedWhileNearbyResultsRemain(t *testing.T) {
+	results := []Result{
+		{Name: "Antalya 1", DistanceMeters: meters(7400)}, {Name: "Antalya 2", DistanceMeters: meters(8300)},
+		{Name: "Antalya 3", DistanceMeters: meters(8400)}, {Name: "Antalya 4", DistanceMeters: meters(9000)},
+		{Name: "Antalya 5", DistanceMeters: meters(11400)},
+		{Name: "Denizli", DistanceMeters: meters(169400)}, {Name: "İstanbul", DistanceMeters: meters(479400)},
+	}
+	kept := withinLocalHorizon(results)
+	if len(kept) != 5 {
+		t.Fatalf("expected the five nearby stores, got %v", names(kept))
+	}
+	for _, r := range kept {
+		if *r.DistanceMeters > localHorizonMeters {
+			t.Fatalf("a far city survived: %v", names(kept))
+		}
+	}
+}
+
+// A genuinely empty area must not produce an empty page. When there is nothing nearby,
+// the far results are all there is and they are kept.
+func TestFarResultsSurviveWhenNothingIsNearby(t *testing.T) {
+	results := []Result{{Name: "Far 1", DistanceMeters: meters(169400)}, {Name: "Far 2", DistanceMeters: meters(479400)}}
+	if len(withinLocalHorizon(results)) != 2 {
+		t.Fatal("a sparse area must keep its distant results rather than show nothing")
+	}
+}

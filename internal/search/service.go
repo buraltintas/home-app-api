@@ -426,6 +426,10 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			results[i].score -= penalty
 		}
 	}
+	// A named store is worth finding wherever it is; a generic query is not.
+	if intent.StoreName == "" && in.Latitude != nil {
+		results = withinLocalHorizon(results)
+	}
 	rankResults(results, in.Latitude != nil)
 	if len(results) > 30 {
 		results = results[:30]

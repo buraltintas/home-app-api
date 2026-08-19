@@ -417,19 +417,52 @@ func homeCity(results []Result) string {
 	return home
 }
 
-// Distance is banded rather than subtracted so that relevance can still order places
-// that are equally reachable, while a store in the next province can never overtake one
-// down the road no matter how many stars it collected.
+// Distance is banded rather than subtracted so that relevance can still order places that
+// are genuinely equally reachable, while a store in the next province can never overtake
+// one down the road no matter how many stars it collected.
+//
+// The bands have to be fine enough to matter inside a single city. An earlier version
+// jumped straight from 7 km to 15 km, which put every store in Antalya into one band and
+// left relevance sorting the whole city: the list opened at 11.4 km, went to 13.9, then
+// back to 7.4. Below 25 km the granularity is now 500 m, which reads as nearest first
+// while still letting two stores on the same street be ordered by how well they match.
+const nearBandMeters = 500
+const nearBandLimit = 25000
+
 func distanceBand(distance *float64) int {
 	if distance == nil {
-		return 99
+		return math.MaxInt32
 	}
-	for band, limit := range []float64{1000, 3000, 7000, 15000, 30000, 60000, 120000} {
-		if *distance <= limit {
-			return band
+	if *distance <= nearBandLimit {
+		return int(*distance / nearBandMeters)
+	}
+	// Beyond the city the exact figure stops being a decision the searcher acts on, so
+	// bands widen to 5 km and relevance is given more room again.
+	return int(nearBandLimit/nearBandMeters) + int((*distance-nearBandLimit)/5000) + 1
+}
+
+// Google is asked with locationBias, which is a hint rather than a restriction, so a
+// search for bed linen in Antalya cheerfully comes back with shops in Denizli and
+// İstanbul. Those are not useful while there are still nine shops in the searcher's own
+// city: nobody drives 169 km for a duvet cover because a list offered it.
+//
+// Far results are kept only as a fallback, for the genuinely sparse case where the
+// nearby area really has run out. A query that names a particular store is exempt, since
+// finding that brand in the next province is exactly what was asked for.
+const localHorizonMeters = 50000
+const minLocalResults = 5
+
+func withinLocalHorizon(results []Result) []Result {
+	local := make([]Result, 0, len(results))
+	for _, r := range results {
+		if r.DistanceMeters == nil || *r.DistanceMeters <= localHorizonMeters {
+			local = append(local, r)
 		}
 	}
-	return 7
+	if len(local) < minLocalResults {
+		return results
+	}
+	return local
 }
 
 // Ordering is tiered, not a single weighted score. One score let a five star store 169 km
