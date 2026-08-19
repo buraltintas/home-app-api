@@ -203,6 +203,13 @@ func Load() (Config, error) {
 			}
 		}
 	}
+	// A key that does not look like a key is almost always a paste that carried the
+	// variable name with it, as in OPENAI_API_KEY=sk-... stored whole. That fails only at
+	// the provider, as a 401 buried in a log, and search silently falls back to the
+	// deterministic parser for as long as nobody looks. Refusing to start says it at once.
+	if c.OpenAIAPIKey != "" && !strings.HasPrefix(c.OpenAIAPIKey, "sk-") {
+		return c, errors.New("OPENAI_API_KEY does not look like an API key: it must be the key itself, starting with sk-, not a NAME=value line")
+	}
 	if c.SearchLocationDecimals < 0 || c.SearchLocationDecimals > 5 {
 		return c, errors.New("SEARCH_LOCATION_DECIMALS must be 0..5")
 	}
