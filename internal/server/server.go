@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	adminpkg "github.com/burakaltintas/home-app-api/internal/admin"
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/brand"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
@@ -18,6 +19,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/observability"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
 	"github.com/burakaltintas/home-app-api/internal/social"
@@ -37,22 +39,27 @@ type Server struct {
 	search  *searchpkg.Service
 	users   *userpkg.Service
 	media   *media.Service
+	admin   *adminpkg.Service
+	report  *reporting.Service
 	hashKey []byte
 }
 
-func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, u, m, hashKey}
+func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, hashKey []byte) *Server {
+	return &Server{db, a, st, so, se, u, m, ad, rp, hashKey}
 }
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
 	metricsToken := ""
 	defaultLocale := i18n.DefaultLocale
+	var adminEmails []string
 	for _, option := range options {
 		switch value := option.(type) {
 		case string:
 			metricsToken = value
 		case i18n.Locale:
 			defaultLocale = value
+		case []string:
+			adminEmails = value
 		}
 	}
 	r := chi.NewRouter()
@@ -95,6 +102,24 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/posts/{id}/comments", s.comments)
 		r.Get("/users/{id}", s.userPublic)
 		r.Get("/users/{id}/posts", s.postsByUser)
+		// The operator surface. RequireAdmin runs after RequireAuth: administration reuses
+		// the ordinary email sign-in rather than introducing a second credential to guard.
+		r.Route("/admin", func(r chi.Router) {
+			r.Use(appmw.RequireAuth, appmw.RequireAdmin(s.db, adminEmails), appmw.NewLimiter(120, 30).Middleware)
+			r.Get("/overview", s.adminOverview)
+			r.Get("/search-insights", s.adminSearchInsights)
+			r.Get("/store-insights", s.adminStoreInsights)
+			r.Get("/users", s.adminUsers)
+			r.Get("/stores", s.adminStores)
+			r.Get("/reviews", s.adminReviews)
+			r.Get("/searches", s.adminSearches)
+			r.Get("/searches/{id}/results", s.adminSearchResults)
+			r.Get("/audit", s.adminAudit)
+			r.Post("/stores/{id}/premium", s.adminSetPremium)
+			r.Post("/users/{id}/status", s.adminSetUserStatus)
+			r.Delete("/users/{id}", s.adminDeleteUser)
+			r.Delete("/reviews/{id}", s.adminDeleteReview)
+		})
 		r.Route("/auth", func(r chi.Router) {
 			r.Use(appmw.NewLimiter(30, 8).Middleware)
 			r.Post("/email/request-code", s.requestCode)

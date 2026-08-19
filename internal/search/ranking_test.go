@@ -208,3 +208,48 @@ func TestPhrasePrefixesPreferLongerConsecutiveRuns(t *testing.T) {
 		t.Fatalf("a single word is not a phrase: %v", single)
 	}
 }
+
+// Paid placement reaches the top of the searcher's own city. The badge in the UI is what
+// makes this lawful; the ordering here is what makes it worth paying for.
+func TestPremiumStoresLeadTheSearchersOwnCity(t *testing.T) {
+	antalya := "Muratpaşa/Antalya, Türkiye"
+	results := []Result{
+		{Name: "Reviewed", Address: antalya, DistanceMeters: meters(3000), Platform: &Platform{ReviewCount: 9, AverageRating: 4.8}, score: platformScore(Platform{ReviewCount: 9, AverageRating: 4.8}, 0)},
+		{Name: "Closest", Address: antalya, DistanceMeters: meters(300), score: googleScore(Place{Rating: 5, RatingCount: 400}, 0)},
+		{Name: "Premium", Address: antalya, DistanceMeters: meters(12000), Premium: true, score: googleScore(Place{Rating: 3.9, RatingCount: 12}, 6)},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Premium" {
+		t.Fatalf("expected the promoted store first, got %v", names(results))
+	}
+	if indexOf(results, "Reviewed") > indexOf(results, "Closest") {
+		t.Fatalf("community reviews still outrank an unreviewed store: %v", names(results))
+	}
+}
+
+// Premium is not a way to buy your way into another province's results.
+func TestPremiumDoesNotTravelToAnotherCity(t *testing.T) {
+	results := []Result{
+		{Name: "Local", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(4000), score: googleScore(Place{Rating: 4, RatingCount: 20}, 1)},
+		{Name: "Premium Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(165000), Premium: true, score: googleScore(Place{Rating: 5, RatingCount: 300}, 0)},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Local" {
+		t.Fatalf("a promoted store in another city jumped the queue: %v", names(results))
+	}
+}
+
+// A premium store inside the horizon must survive the far-city filter, or paid placement
+// would silently vanish from exactly the searches it was bought for.
+func TestPremiumSurvivesTheLocalHorizon(t *testing.T) {
+	results := []Result{
+		{Name: "Premium nearby", DistanceMeters: meters(9000), Premium: true},
+		{Name: "A", DistanceMeters: meters(1000)}, {Name: "B", DistanceMeters: meters(2000)},
+		{Name: "C", DistanceMeters: meters(3000)}, {Name: "D", DistanceMeters: meters(4000)},
+		{Name: "Far", DistanceMeters: meters(400000)},
+	}
+	kept := withinLocalHorizon(results)
+	if indexOf(kept, "Premium nearby") < 0 {
+		t.Fatalf("the promoted store was dropped: %v", names(kept))
+	}
+}

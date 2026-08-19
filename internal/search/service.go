@@ -414,9 +414,9 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	for rank, p := range external {
 		if m, ok := mapped[p.PlaceID]; ok {
-			if localIDs[m.StoreID] {
+			if localIDs[m.Platform.StoreID] {
 				for i := range results {
-					if results[i].ID != nil && *results[i].ID == m.StoreID {
+					if results[i].ID != nil && *results[i].ID == m.Platform.StoreID {
 						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}
 						results[i].Source = "google+platform"
 						results[i].externalPlaceID = p.PlaceID
@@ -424,8 +424,8 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				}
 				continue
 			}
-			id := m.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: mergedScore(m, p, rank), externalPlaceID: p.PlaceID})
+			id := m.Platform.StoreID
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m.Platform, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
@@ -505,27 +505,35 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
 }
-func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]Platform, error) {
+
+// mapped is what we already know about a place that exists in our own catalogue: its
+// community stats, and whether its placement is paid for.
+type mappedStore struct {
+	Platform Platform
+	Premium  bool
+}
+
+func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]mappedStore, error) {
 	ids := make([]string, 0, len(places))
 	for _, p := range places {
 		ids = append(ids, p.PlaceID)
 	}
-	out := map[string]Platform{}
+	out := map[string]mappedStore{}
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
+	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
-		var p Platform
-		if e = rows.Scan(&id, &p.StoreID, &p.AverageRating, &p.ReviewCount, &p.FavoriteCount, &p.PostCount); e != nil {
+		var m mappedStore
+		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium); e != nil {
 			return nil, e
 		}
-		out[id] = p
+		out[id] = m
 	}
 	return out, rows.Err()
 }

@@ -94,19 +94,23 @@ type External struct {
 	PhotoAttributions []string `json:"photo_attributions,omitempty"`
 }
 type Result struct {
-	ID              *uuid.UUID `json:"id,omitempty"`
-	ImpressionID    uuid.UUID  `json:"search_result_impression_id"`
-	Source          string     `json:"source"`
-	Name            string     `json:"name"`
-	Address         string     `json:"address"`
-	City            string     `json:"city,omitempty"`
-	District        string     `json:"district,omitempty"`
-	Latitude        float64    `json:"latitude"`
-	Longitude       float64    `json:"longitude"`
-	DistanceMeters  *float64   `json:"distance_meters,omitempty"`
-	Categories      []string   `json:"categories"`
-	Platform        *Platform  `json:"platform,omitempty"`
-	Google          *External  `json:"google,omitempty"`
+	ID             *uuid.UUID `json:"id,omitempty"`
+	ImpressionID   uuid.UUID  `json:"search_result_impression_id"`
+	Source         string     `json:"source"`
+	Name           string     `json:"name"`
+	Address        string     `json:"address"`
+	City           string     `json:"city,omitempty"`
+	District       string     `json:"district,omitempty"`
+	Latitude       float64    `json:"latitude"`
+	Longitude      float64    `json:"longitude"`
+	DistanceMeters *float64   `json:"distance_meters,omitempty"`
+	Categories     []string   `json:"categories"`
+	Platform       *Platform  `json:"platform,omitempty"`
+	Google         *External  `json:"google,omitempty"`
+	// Paid placement. The client must label it: promotion that cannot be told apart from
+	// an organic result is exactly what consumer rules prohibit, and /about and /terms
+	// already promise it is marked wherever it applies.
+	Premium         bool `json:"premium,omitempty"`
 	score           float64
 	externalPlaceID string
 }
@@ -353,7 +357,7 @@ func containsAny(s string, terms ...string) bool {
 }
 func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Premium: x.IsPremium, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {
@@ -481,11 +485,20 @@ func rankResults(results []Result, located, nameLed bool) {
 		return
 	}
 	home := homeCity(results)
+	inHomeCity := func(r Result) bool { return home != "" && cityKey(r.City, r.Address) == home }
+	// Paid placement reaches the top of the searcher's own city, and no further: a premium
+	// store in another province is still a store in another province.
+	promotedHere := func(r Result) bool { return r.Premium && inHomeCity(r) }
 	reviewedHere := func(r Result) bool {
-		return r.Platform != nil && r.Platform.ReviewCount > 0 && home != "" && cityKey(r.City, r.Address) == home
+		return r.Platform != nil && r.Platform.ReviewCount > 0 && inHomeCity(r)
 	}
 	sort.SliceStable(results, func(i, j int) bool {
 		a, b := results[i], results[j]
+		if first, second := promotedHere(a), promotedHere(b); first != second {
+			return first
+		} else if first {
+			return a.score > b.score
+		}
 		if first, second := reviewedHere(a), reviewedHere(b); first != second {
 			return first
 		} else if first {

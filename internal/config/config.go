@@ -47,6 +47,7 @@ type Config struct {
 	SearchAttributionWindow                                                time.Duration
 	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
 	MetricsToken                                                           string
+	AdminEmails                                                            []string
 	OTELEnabled                                                            bool
 	OTLPEndpoint                                                           string
 	DefaultLocale                                                          i18n.Locale
@@ -75,7 +76,10 @@ func Load() (Config, error) {
 		ObjectStorageLocalDir:    env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),
 		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
 		MetricsToken:      os.Getenv("METRICS_TOKEN"),
-		OTLPEndpoint:      os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		// Never hardcode an administrator address. A privileged address committed to a
+		// public repository is the mistake this project already had to undo once.
+		AdminEmails:  split(os.Getenv("ADMIN_EMAILS")),
+		OTLPEndpoint: os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
 	}
 	defaultLocale, ok := i18n.Normalize(env("DEFAULT_LOCALE", string(i18n.DefaultLocale)))
 	if !ok {

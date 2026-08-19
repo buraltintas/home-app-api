@@ -28,6 +28,23 @@ var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 func NewService(db *pgxpool.Pool, report *reporting.Service) *Service { return &Service{db, report} }
 
+// Contributor levels. The thresholds live here and nowhere else, and the level is derived
+// from the review count rather than stored, so deleting a review moves somebody back down
+// instead of leaving a badge they no longer earned.
+var levelThresholds = [5]int{1, 5, 15, 40, 100}
+
+// Level returns 1..5, or 0 for somebody who has not published a review yet. Zero is a real
+// answer, not a missing one: the client renders nothing rather than a "level 0" badge.
+func Level(reviewCount int) int {
+	level := 0
+	for i, threshold := range levelThresholds {
+		if reviewCount >= threshold {
+			level = i + 1
+		}
+	}
+	return level
+}
+
 type PublicProfile struct {
 	ID             uuid.UUID `json:"id"`
 	Username       string    `json:"username"`
@@ -39,6 +56,7 @@ type PublicProfile struct {
 	FollowerCount  int       `json:"follower_count"`
 	FollowingCount int       `json:"following_count"`
 	PostCount      int       `json:"post_count"`
+	Level          int       `json:"level"`
 }
 type Me struct {
 	PublicProfile
@@ -100,6 +118,7 @@ func (s *Service) Public(ctx context.Context, id uuid.UUID) (PublicProfile, erro
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "USER_NOT_FOUND", "User not found")
 	}
+	p.Level = Level(p.PostCount)
 	return p, e
 }
 func (s *Service) Me(ctx context.Context, id uuid.UUID) (Me, error) {
@@ -108,6 +127,7 @@ func (s *Service) Me(ctx context.Context, id uuid.UUID) (Me, error) {
 	var latitude, longitude, accuracy *float64
 	var locationUpdatedAt *time.Time
 	e := s.db.QueryRow(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),coalesce(p.bio,''),coalesce(p.bio_language::text,''),coalesce(p.city,''),(SELECT count(*) FROM follows WHERE following_id=u.id),(SELECT count(*) FROM follows WHERE follower_id=u.id),(SELECT count(*) FROM posts WHERE user_id=u.id AND deleted_at IS NULL),(SELECT count(*) FROM favorites WHERE user_id=u.id),x.relationship_status,x.has_children,coalesce(x.children_age_ranges,'{}'),x.housing_status,x.occupation,x.age_range,coalesce(x.home_style_interests,'{}'),u.preferred_locale::text,x.discovery_location_source,x.discovery_location_label,x.discovery_location_address,x.discovery_location_place_id,ST_Y(x.discovery_location::geometry),ST_X(x.discovery_location::geometry),x.discovery_location_accuracy_meters::double precision,x.discovery_location_updated_at FROM users u JOIN user_profiles p ON p.user_id=u.id LEFT JOIN user_private_profiles x ON x.user_id=u.id WHERE u.id=$1 AND u.deleted_at IS NULL`, id).Scan(&m.ID, &m.Email, &m.Username, &m.DisplayName, &m.AvatarURL, &m.Bio, &m.BioLanguage, &m.City, &m.FollowerCount, &m.FollowingCount, &m.PostCount, &m.FavoriteCount, &m.RelationshipStatus, &m.HasChildren, &m.ChildrenAgeRanges, &m.HousingStatus, &m.Occupation, &m.AgeRange, &m.HomeStyleInterests, &m.PreferredLocale, &locationSource, &locationLabel, &locationAddress, &locationPlaceID, &latitude, &longitude, &accuracy, &locationUpdatedAt)
+	m.Level = Level(m.PostCount)
 	if e == nil && locationSource != nil && latitude != nil && longitude != nil && locationUpdatedAt != nil {
 		m.DiscoveryLocation = &DiscoveryLocation{Source: *locationSource, Label: derefString(locationLabel), Address: derefString(locationAddress), PlaceID: derefString(locationPlaceID), Latitude: *latitude, Longitude: *longitude, AccuracyMeters: accuracy, UpdatedAt: *locationUpdatedAt}
 	}
