@@ -19,11 +19,14 @@ type Service struct{ db *pgxpool.Pool }
 
 func NewService(db *pgxpool.Pool) *Service { return &Service{db} }
 
-// clamp keeps a page size sane whatever the caller asks for. Admin pages are read by a
-// person, and an unbounded limit here would be a way to pull the whole database in one
-// request.
+// clamp keeps a page size sane whatever the caller asks for. The ceiling is high enough
+// for an export of the whole catalogue in one request and low enough that it stays a
+// bounded read; an out-of-range value falls back to a screenful rather than the maximum,
+// so a mistyped limit cannot quietly become the largest possible query.
+const maxAdminPage = 5000
+
 func clamp(limit int) int {
-	if limit < 1 || limit > 200 {
+	if limit < 1 || limit > maxAdminPage {
 		return 50
 	}
 	return limit
