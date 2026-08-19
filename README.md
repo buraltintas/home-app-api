@@ -10,14 +10,17 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - mandatory, rotation-ready constant-time `X-BFF-Secret` validation for every `/v1/*` request
 - anonymous browsing with strict optional-auth semantics (an invalid supplied bearer token is rejected)
 - email OTP outbox with hashed codes, encrypted delivery payloads, attempt/expiry controls and a worker
-- production Resend email adapter plus a private local development mailbox
+- Gmail Workspace delivery in production, an alternative Resend adapter, and a private local development mailbox
 - Google ID-token verification and transactionally safe verified-email identity linking
 - short access JWTs and hashed, rotating, family-revocable refresh tokens with reuse detection
 - public/private profile separation
 - PostGIS physical stores, categories, external IDs, aggregate statistics and favorite uniqueness
 - proximity-verified 1–5 star reviews, media metadata links, feed cursor pagination, likes, comments and follows
 - first-class Turkish, English, German and Russian locale resolution, localized API copy/email/notification foundations and canonical localized taxonomy
-- Unicode-aware multilingual search, optional official OpenAI Go SDK/Responses API structured enrichment, locale-aware Google Places, explicit source-separated ratings, deduplication, ranking and fallback
+- Unicode-aware multilingual search, optional official OpenAI Go SDK/Responses API structured enrichment, locale-aware Google Places, explicit source-separated ratings, deduplication and fallback
+- proximity-tiered ranking: community-reviewed stores in the searcher's own city first, then nearest to farthest in 500 m bands, with relevance deciding order inside a band
+- store-name rescue, so part of a name finds the store instead of answering "not understood", and name-led searches rank by match quality rather than distance
+- a catalogue index endpoint and slug addressing, so stores have readable URLs and can be enumerated for a sitemap
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
 - rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
@@ -120,6 +123,25 @@ Every application endpoint requires the client credential:
 curl -H "X-BFF-Secret: ${BFF_SECRETS%%,*}" http://localhost:8080/v1/feed
 ```
 
+A store is addressed by id or by slug, so shared links carry the store's name:
+
+```bash
+curl -H "X-BFF-Secret: ${BFF_SECRETS%%,*}" http://localhost:8080/v1/stores/gumushan-perde-a6b49c3a
+```
+
+The catalogue can be enumerated for sitemap generation. Search is query driven
+and cannot answer "every store you have", which is what a sitemap needs:
+
+```bash
+curl -H "X-BFF-Secret: ${BFF_SECRETS%%,*}" "http://localhost:8080/v1/stores/index?limit=1000&offset=0"
+```
+
+A search response carries `fallback_state` when part of the pipeline degraded.
+The AI values are distinct on purpose, because they need different fixes:
+`ai_unauthorized` (key or quota), `ai_timeout` (`OPENAI_TIMEOUT` too tight),
+`ai_invalid_response` (model answered off-schema), `ai_unavailable` (network).
+An empty `fallback_state` means the full pipeline ran.
+
 Clients may explicitly select `tr`, `en`, `de`, or `ru` using `X-Locale`.
 Regional variants such as `de-DE` are normalized. Resolution order is explicit
 `X-Locale`, authenticated private `preferred_locale`, `Accept-Language`, then
@@ -200,13 +222,22 @@ Operational rules:
 
 ## Email behavior
 
+Two templates are sent, both transactional: the one-time login code, and a
+welcome message for a newly created account. No marketing mail is sent.
+
 The development sender never prints OTP content. The worker renders queued mail
-and writes it to the git-ignored `.data/mailbox` directory. Production uses
-Resend's HTTPS API, stores provider message IDs, records delivery attempts, and
-retries transient failures through the PostgreSQL outbox. Queue claiming uses
-`FOR UPDATE SKIP LOCKED`; stale `processing` jobs are recovered after five
-minutes. Permanent failures are not retried and transient failures use bounded
-exponential backoff.
+and writes it to the git-ignored `.data/mailbox` directory. Production delivers
+through the Gmail Workspace API; a Resend adapter is also implemented and
+selectable with `EMAIL_PROVIDER=resend`. Either provider stores message IDs,
+records delivery attempts, and retries transient failures through the PostgreSQL
+outbox. Queue claiming uses `FOR UPDATE SKIP LOCKED`; stale `processing` jobs are
+recovered after five minutes. Permanent failures are not retried and transient
+failures use bounded exponential backoff.
+
+The welcome mail is enqueued inside the same transaction that creates the
+account, so a rolled-back signup cannot leave mail behind, and it is keyed by
+user id so the serializable retry cannot send it twice. Reactivated accounts do
+not receive it: they are returning, not new.
 
 ## Local media flow
 
@@ -246,7 +277,7 @@ queries or URLs.
 
 Set `OTEL_ENABLED=true` and `OTEL_EXPORTER_OTLP_ENDPOINT` to enable OTLP/HTTP
 tracing. When disabled, no collector is required. Incoming HTTP and OpenAI,
-Google Places, Resend and object-storage calls propagate request context. JSON
+Google Places, OpenAI, email and object-storage calls propagate request context. JSON
 request logs include request ID, method, matched route pattern, status, duration,
 client type and authenticated/visitor identifiers when available. Headers,
 tokens, OTPs and provider keys are not logged.
@@ -278,7 +309,7 @@ make provider-smoke # GCS_TEST_BUCKET + ADC/IAM, creates and removes one smoke o
 
 The suite itself checks the required variables, so `make provider-smoke` is safe
 without them and reports skips. Normal `go test` never uses the internet or
-incurs provider cost. Resend and Google Places also have local fake-transport
+incurs provider cost. Email providers and Google Places also have local fake-transport
 contract tests.
 
 ## Reproducible smoke journey
@@ -322,7 +353,7 @@ move to Redis when horizontal coordination is actually required.
 
 - `search.IntentParser`: OpenAI Responses API or another validated parser
 - `search.PlacesProvider`: Google Places or future physical-store sources
-- `email.Sender`: development and Resend implementations
+- `email.Sender`: development, Gmail and Resend implementations
 - `media.ObjectStorage`: signed-upload implementation for S3/GCS/R2
 - `notification.PushProvider`: future APNs/FCM/web push provider
 
