@@ -86,12 +86,17 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Use(appmw.ActiveAccount(s.db))
 		r.Use(appmw.UserLocale(s.db))
 		searchLimit := appmw.NewLimiter(30, 8)
+		// Photos need their own budget. One results page loads twenty at once, so sharing
+		// the search limiter meant eight arrived and twelve were rejected -- which is what
+		// the broken thumbnails were. A search is an AI call plus a provider round trip; a
+		// photo is proxied bytes, and the two do not belong on the same allowance.
+		photoLimit := appmw.NewLimiter(300, 60)
 		writeLimit := appmw.NewLimiter(20, 6)
 		socialLimit := appmw.NewLimiter(60, 15)
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
-		r.With(searchLimit.Middleware).Get("/places/photo", s.placePhoto)
+		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
