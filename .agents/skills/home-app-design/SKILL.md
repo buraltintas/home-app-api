@@ -33,16 +33,19 @@ Use the approved `Boşa Gezme!` product name and the role-specific supplied asse
 
 Name tokens semantically and map them to native/web implementations.
 
-- Color: canvas `#F7F5F0`, surface `#FFFEFB`, surface-muted `#EFECE5`, ink `#262521`, ink-muted `#706D65`, line `#D9D5CC`, accent `#A34A32`, accent-strong `#833522`, success `#3F6B55`, warning `#9A672C`, error `#A63D35`. Preserve WCAG AA contrast; do not make the product entirely beige.
-- Typography: use Source Sans 3 or another verified Latin Extended + Cyrillic sans for UI/body. Use Source Serif 4 only for selective editorial headings if the implementation can load both efficiently. Provide system fallbacks. Never select a font without confirming Turkish, German, English, and Russian coverage.
-- Type scale: 12/16 meta, 14/20 secondary, 16/24 body, 20/26 title, 28/34 section display, 40/46 desktop editorial display. Prefer weight and spacing over oversized text.
+- Color: canvas `#FAF8F4`, surface `#FFFFFF`, surface-muted `#F1EEE7`, ink `#16140F`, ink-muted `#6B6559`, line `#E4E0D7`, line-strong `#CDC7B9`, accent `#EDA92B` (honey), accent-wash `#FDF1D7`, accent-ink `#8A5D05`, clay `#C2452D`, success `#2E6A4F`, error `#B3372B`. Honey is an area colour: use it as a wash behind a zone, never as text on a light ground and never as a lone border. Clay carries the few values that must be read first. Preserve WCAG AA contrast.
+- Typography: one family, Onest, at 400/500/600/700. It carries Latin, Latin Extended and Cyrillic, which the four shipped locales require. There is no second family; hierarchy comes from size, weight and space. Provide system fallbacks. Never select a font without confirming Turkish, German, English and Russian coverage -- Satoshi, for example, has no Cyrillic and is therefore not an option.
+- Type scale: 13 meta (uppercase, .08em), 15/22 secondary, 18/29 body, 20/26 title, 24/29 card title, 34/37 section, clamp(38px,5.4vw,60px) page display. Body is 18px: this is read on a phone in a street. Prefer weight and spacing over oversized text; on narrow screens a page title is a masthead, not a hero, and must not fill the first screen.
 - Spacing: use a 4-point base: 4, 8, 12, 16, 20, 24, 32, 40, 56, 72.
-- Radius: 6 controls, 10 compact media, 16 feature media/sheets, 999 only for avatars, tags, and true capsules. Do not round every container.
+- Radius: 12 controls, fields and buttons; 20 media, panels and sheets; 8 small chips; 999 only for avatars and true pills. Nothing is square and nothing is a bubble.
 - Border: one-pixel neutral line; use whitespace first, borders second.
-- Elevation: none by default; one subtle shadow only for floating navigation, menus, dialogs, or bottom sheets.
+- Elevation: flat by default; one soft shadow, `0 8px 24px rgba(22,20,15,.08)`, only for floating navigation, menus, dialogs, or bottom sheets. Separate major zones with a full-width accent-wash band rather than with rules everywhere.
 - Icons: use one consistent outline icon family at 1.75–2 px. Keep common actions recognizable. Do not put every icon in a colored circle.
 - Motion: 140–220 ms for feedback/transitions; use ease-out, respect reduced motion, avoid decorative looping animation.
-- Touch/focus: minimum 44×44 pt mobile targets; provide a clearly visible accent focus ring on web.
+- Touch/focus: minimum 44x44 pt mobile targets, and a flex parent may not squeeze one below that. On web the focus ring is `3px solid var(--accent)` at `2px` offset -- visible, not violent, and it lands on the control rather than wrapping the row.
+
+
+The web implementation of this system is Daylight; `ui/DESIGN.md` is its authority and carries the full token list. Keep the two in step.
 
 ## Photography and ratios
 
