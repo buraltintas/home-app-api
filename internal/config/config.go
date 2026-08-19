@@ -60,11 +60,11 @@ func Load() (Config, error) {
 	}
 	c := Config{
 		Environment: env("APP_ENV", "development"), HTTPAddr: env("HTTP_ADDR", ":8080"),
-		DatabaseURL: os.Getenv("DATABASE_URL"), BFFSecrets: split(os.Getenv("BFF_SECRETS")),
+		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")), BFFSecrets: split(os.Getenv("BFF_SECRETS")),
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
 		AppReviewEmail: os.Getenv("APP_REVIEW_EMAIL"), AppReviewCode: os.Getenv("APP_REVIEW_CODE"),
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
-		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
+		OpenAIAPIKey: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
@@ -75,7 +75,7 @@ func Load() (Config, error) {
 		GCSSigningServiceAccount: os.Getenv("GCS_SIGNING_SERVICE_ACCOUNT"),
 		ObjectStorageLocalDir:    env("OBJECT_STORAGE_LOCAL_DIR", ".data/uploads"), ObjectStoragePublicURL: env("OBJECT_STORAGE_PUBLIC_URL", "http://localhost:8080/uploads"),
 		ReportingTimezone: env("REPORTING_TIMEZONE", "Europe/Istanbul"),
-		MetricsToken:      os.Getenv("METRICS_TOKEN"),
+		MetricsToken:      strings.TrimSpace(os.Getenv("METRICS_TOKEN")),
 		// Never hardcode an administrator address. A privileged address committed to a
 		// public repository is the mistake this project already had to undo once.
 		AdminEmails:  split(os.Getenv("ADMIN_EMAILS")),
@@ -266,8 +266,15 @@ func (c Config) EmailSenderOptions() email.SenderOptions {
 	}
 }
 
+// Secret managers hand back exactly what was stored, and a value created with `echo`
+// carries a trailing newline. That newline is invisible everywhere until it reaches a
+// place that rejects it: Go's HTTP client refuses to send a header whose value contains
+// one, so an API key with a stray newline fails as "invalid header field value" before the
+// request leaves the process -- which reads like a network outage and is not one.
+//
+// Production spent a long time with AI search silently disabled for exactly this reason.
 func env(k, fallback string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := strings.TrimSpace(os.Getenv(k)); v != "" {
 		return v
 	}
 	return fallback
