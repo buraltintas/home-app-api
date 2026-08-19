@@ -322,3 +322,38 @@ func (s *Server) adminSetStoreCategories(w http.ResponseWriter, r *http.Request)
 	}
 	JSON(w, 200, map[string]any{"id": id, "slugs": body.Slugs})
 }
+
+func (s *Server) adminFeedback(w http.ResponseWriter, r *http.Request) {
+	limit, offset := adminPage(r)
+	items, e := s.admin.Feedback(r.Context(), r.URL.Query().Get("q"), limit, offset)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+func (s *Server) adminSetFeedbackStatus(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var in struct {
+		Status string `json:"status"`
+	}
+	if e := Decode(w, r, &in, 1<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	if e := s.admin.SetFeedbackStatus(r.Context(), actor, email, id, in.Status); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	w.WriteHeader(204)
+}

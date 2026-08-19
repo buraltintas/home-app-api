@@ -14,6 +14,7 @@ import (
 	adminpkg "github.com/burakaltintas/home-app-api/internal/admin"
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/brand"
+	"github.com/burakaltintas/home-app-api/internal/feedback"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
@@ -32,20 +33,21 @@ import (
 )
 
 type Server struct {
-	db      *pgxpool.Pool
-	auth    *auth.Service
-	stores  *storepkg.Service
-	social  *social.Service
-	search  *searchpkg.Service
-	users   *userpkg.Service
-	media   *media.Service
-	admin   *adminpkg.Service
-	report  *reporting.Service
-	hashKey []byte
+	db       *pgxpool.Pool
+	auth     *auth.Service
+	stores   *storepkg.Service
+	social   *social.Service
+	search   *searchpkg.Service
+	users    *userpkg.Service
+	media    *media.Service
+	admin    *adminpkg.Service
+	report   *reporting.Service
+	feedback *feedback.Service
+	hashKey  []byte
 }
 
-func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, u, m, ad, rp, hashKey}
+func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
+	return &Server{db, a, st, so, se, u, m, ad, rp, fb, hashKey}
 }
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
@@ -107,6 +109,10 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/posts/{id}/comments", s.comments)
 		r.Get("/users/{id}", s.userPublic)
 		r.Get("/users/{id}/posts", s.postsByUser)
+		// Telling us the product is wrong should not require an account, for the same reason
+		// browsing does not. OptionalAuth is already mounted above, so a signed-in sender is
+		// recorded and an anonymous one is simply anonymous.
+		r.With(writeLimit.Middleware).Post("/feedback", s.createFeedback)
 		// The operator surface. RequireAdmin runs after RequireAuth: administration reuses
 		// the ordinary email sign-in rather than introducing a second credential to guard.
 		r.Route("/admin", func(r chi.Router) {
@@ -120,6 +126,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Get("/searches", s.adminSearches)
 			r.Get("/searches/{id}/results", s.adminSearchResults)
 			r.Get("/audit", s.adminAudit)
+			r.Get("/feedback", s.adminFeedback)
+			r.Post("/feedback/{id}/status", s.adminSetFeedbackStatus)
 			r.Get("/categories", s.adminCategories)
 			r.Post("/stores/{id}/premium", s.adminSetPremium)
 			r.Post("/stores/{id}/categories", s.adminSetStoreCategories)
@@ -829,6 +837,30 @@ func (s *Server) idAction(w http.ResponseWriter, r *http.Request, fn func(uuid.U
 		e = fn(p.UserID, id)
 	}
 	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	w.WriteHeader(204)
+}
+
+// createFeedback records what somebody tells us about the product. It answers 204 whether
+// or not the sender was signed in: this is a message to us, not a contribution to the feed,
+// and there is nothing to give back.
+func (s *Server) createFeedback(w http.ResponseWriter, r *http.Request) {
+	var in feedback.Input
+	if e := Decode(w, r, &in, 16<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var user *uuid.UUID
+	if p, ok := appmw.PrincipalFrom(r.Context()); ok {
+		user = &p.UserID
+	}
+	var visitor *uuid.UUID
+	if v, ok := appmw.VisitorID(r); ok {
+		visitor = &v
+	}
+	if e := s.feedback.Create(r.Context(), in, user, visitor); e != nil {
 		WriteError(w, e, r.Context())
 		return
 	}

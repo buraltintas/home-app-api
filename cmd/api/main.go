@@ -16,6 +16,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/burakaltintas/home-app-api/internal/email"
+	"github.com/burakaltintas/home-app-api/internal/feedback"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/privacy"
@@ -111,7 +112,8 @@ func main() {
 	}
 	emailWorker := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
 	adminSvc := adminpkg.NewService(db)
-	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, adminSvc, reportSvc, []byte(cfg.OTPHashSecret))
+	feedbackSvc := feedback.NewService(db)
+	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, adminSvc, reportSvc, feedbackSvc, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
 		log.Info("api listening", "addr", cfg.HTTPAddr, "environment", cfg.Environment)

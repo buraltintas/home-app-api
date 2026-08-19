@@ -405,3 +405,64 @@ func (s *Service) RecordUserDeletion(ctx context.Context, actor uuid.UUID, email
 	}
 	return tx.Commit(ctx)
 }
+
+type FeedbackRow struct {
+	ID           uuid.UUID  `json:"id"`
+	Kind         string     `json:"kind"`
+	Message      string     `json:"message"`
+	ContactEmail string     `json:"contact_email,omitempty"`
+	Author       string     `json:"author,omitempty"`
+	Locale       string     `json:"locale"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
+	HandledAt    *time.Time `json:"handled_at,omitempty"`
+}
+
+// Feedback lists what people have told us about the product, newest first. The author is
+// resolved where the sender was signed in; anonymous rows simply have none, which is the
+// normal case and not a gap.
+func (s *Service) Feedback(ctx context.Context, q string, limit, offset int) ([]FeedbackRow, error) {
+	q = strings.TrimSpace(q)
+	rows, e := s.db.Query(ctx, `SELECT f.id,f.kind,f.message,coalesce(f.contact_email::text,''),
+ coalesce(p.display_name,p.username,''),f.locale::text,f.status,f.created_at,f.handled_at
+ FROM feedback f LEFT JOIN user_profiles p ON p.user_id=f.user_id
+ WHERE ($1='' OR f.message ILIKE '%'||$1||'%' OR f.contact_email::text ILIKE '%'||$1||'%')
+ ORDER BY f.created_at DESC LIMIT $2 OFFSET $3`, q, clamp(limit), offset)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []FeedbackRow{}
+	for rows.Next() {
+		var x FeedbackRow
+		if e = rows.Scan(&x.ID, &x.Kind, &x.Message, &x.ContactEmail, &x.Author, &x.Locale, &x.Status, &x.CreatedAt, &x.HandledAt); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// SetFeedbackStatus marks a message read or handled so a queue of one person's attention
+// does not have to be held in their head. Audited like every other operator write.
+func (s *Service) SetFeedbackStatus(ctx context.Context, actor uuid.UUID, email string, id uuid.UUID, status string) error {
+	if status != "new" && status != "read" && status != "handled" {
+		return httpapi.ErrInvalidInput
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, `UPDATE feedback SET status=$2,handled_at=CASE WHEN $2='handled' THEN now() ELSE NULL END WHERE id=$1`, id, status)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(404, "FEEDBACK_NOT_FOUND", "Feedback not found")
+	}
+	if e = record(ctx, tx, actor, email, "feedback.status", "feedback", id, map[string]any{"status": status}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
