@@ -400,6 +400,8 @@ func (w *Worker) render(j job) (Message, error) {
 		message, e = w.renderLoginCode(j)
 	case "welcome":
 		message, e = RenderWelcome(j.Locale)
+	case "feedback":
+		message, e = renderFeedback(j.Payload)
 	default:
 		return Message{}, fmt.Errorf("unknown template")
 	}

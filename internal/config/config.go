@@ -29,6 +29,7 @@ type Config struct {
 	OpenAIAPIKey, OpenAIModel                                              string
 	OpenAITimeout                                                          time.Duration
 	EmailProvider, EmailFrom                                               string
+	FeedbackNotifyEmail                                                    string
 	EmailDevelopmentDir                                                    string
 	EmailAPIURL, EmailAPIKey                                               string
 	GmailServiceAccountFile, GmailServiceAccountJSON                       string
@@ -67,6 +68,9 @@ func Load() (Config, error) {
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
 		OpenAIAPIKey: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
+		// Where product feedback is sent. Defaults to the address on the site so a deployment
+		// that sets nothing still delivers it rather than silently keeping it in the panel.
+		FeedbackNotifyEmail: env("FEEDBACK_NOTIFY_EMAIL", "info@"+brand.Domain),
 		EmailDevelopmentDir: env("EMAIL_DEVELOPMENT_DIR", ".data/mailbox"),
 		EmailAPIURL:         os.Getenv("EMAIL_API_URL"), EmailAPIKey: emailAPIKey,
 		GmailServiceAccountFile: os.Getenv("GMAIL_SERVICE_ACCOUNT_FILE"), GmailServiceAccountJSON: os.Getenv("GMAIL_SERVICE_ACCOUNT_JSON"),

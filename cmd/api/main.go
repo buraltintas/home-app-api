@@ -112,7 +112,7 @@ func main() {
 	}
 	emailWorker := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
 	adminSvc := adminpkg.NewService(db)
-	feedbackSvc := feedback.NewService(db)
+	feedbackSvc := feedback.NewService(db, cfg.FeedbackNotifyEmail)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, adminSvc, reportSvc, feedbackSvc, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
