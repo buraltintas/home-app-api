@@ -22,6 +22,10 @@ The product loop is deliberately narrow: **discover → visit → review → hel
 - store-name rescue, so part of a name finds the store instead of answering "not understood", and name-led searches rank by match quality rather than distance
 - a catalogue index endpoint and slug addressing, so stores have readable URLs and can be enumerated for a sitemap
 - user/anonymous search history, impression snapshots and ownership-bound interaction events
+- paid placement: a store can be promoted, is merged into the candidate list rather than merely reordered, and is labelled as promoted in the response
+- contributor levels derived from published review counts, so standing follows the content and cannot drift from it
+- product feedback: a private message to the operator, sent without an account, notified by email and answerable from the admin surface
+- an operator surface behind an address allowlist, with every mutating action written to an audit log in the same transaction as the change
 - rebuildable platform snapshots, Istanbul-day metrics, query/intent/store search aggregates and bounded conversion attribution
 - email and notification outboxes, push and object-storage boundaries
 - native GCS uploads through ADC/IAM, S3/R2-compatible signed uploads, and a real local filesystem upload provider with content sniffing
@@ -171,6 +175,7 @@ intentionally omitted. Important supported groups are:
 - Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - admin: `ADMIN_EMAILS` is a comma-separated allowlist of addresses permitted to use `/v1/admin`. An empty value closes the surface rather than opening it, so a deployment that forgets it fails safe. Administration reuses the ordinary email sign-in; this only decides who is authorised once signed in. A caller who is not on the list is answered 404, not 403, because a 403 confirms the route exists. Never commit an address here.
+- feedback: `FEEDBACK_NOTIFY_EMAIL` is where product feedback is sent as it arrives. It defaults to `info@` on the product domain, so a deployment that sets nothing still delivers; an empty value turns the mail off and leaves the admin surface as the only place feedback lands
 - email: `EMAIL_PROVIDER=development|gmail|resend`, `EMAIL_FROM`; Gmail Workspace uses `GMAIL_IMPERSONATED_USER` plus exactly one secret source (`GMAIL_SERVICE_ACCOUNT_FILE` recommended, or `GMAIL_SERVICE_ACCOUNT_JSON`) and optional `GMAIL_API_URL`; local development uses `EMAIL_DEVELOPMENT_DIR`; Resend remains available through `RESEND_API_KEY`
 - domain/privacy: `STORE_REVIEW_RADIUS_METERS`, `STORE_LOCATION_MAX_ACCURACY_METERS`, `STORE_VISIT_PROOF_TTL`, `SEARCH_LOCATION_DECIMALS`
 - media: `OBJECT_STORAGE_PROVIDER=development|gcs|s3|r2`; GCS uses Application Default Credentials plus `OBJECT_STORAGE_BUCKET` and optional `GCS_SIGNING_SERVICE_ACCOUNT`; S3/R2 use endpoint/region/static credentials; all providers use upload TTL and `MEDIA_MAX_BYTES`
@@ -223,11 +228,23 @@ Operational rules:
 
 ## Email behavior
 
-Two templates are sent, both transactional: the one-time login code, and a
-welcome message for a newly created account. No marketing mail is sent.
+Three templates are sent, all transactional: the one-time login code, a welcome
+message for a newly created account, and a notice to the operator when somebody
+sends product feedback. No marketing mail is sent.
 
 The development sender never prints OTP content. The worker renders queued mail
-and writes it to the git-ignored `.data/mailbox` directory. Production delivers
+and writes it to the git-ignored `.data/mailbox` directory. Two guards keep that
+convenience from reaching real people:
+
+- In production the on-disk sender is refused. A deployment that simply forgot
+  `EMAIL_PROVIDER` would otherwise write every sign-in code to a file inside the
+  container and mark the row sent, so the outbox would look healthy while nobody
+  could sign in. The message fails instead, with the reason in `last_error`. It
+  does not stop the service: browsing and search have nothing to do with mail.
+- A development process pointed at a remote database does not drain the outbox at
+  all. Both it and the deployed service claim rows with `SKIP LOCKED`, so whichever
+  arrives first owns the row -- and a developer's machine "sends" by writing a file.
+  Reading a shared queue is not the risk; claiming a row you cannot deliver is. Production delivers
 through the Gmail Workspace API; a Resend adapter is also implemented and
 selectable with `EMAIL_PROVIDER=resend`. Either provider stores message IDs,
 records delivery attempts, and retries transient failures through the PostgreSQL
@@ -334,12 +351,18 @@ pagination and domain error shape are in [docs/openapi.yaml](docs/openapi.yaml).
 
 ## Reporting and privacy operations
 
-`make rebuild-admin-metrics` rebuilds the canonical snapshot and every
-Europe/Istanbul reporting day from source-of-truth tables. Repeated rebuilds are
-idempotent. Database timestamps remain UTC; only day boundaries use the
-configured timezone. `make privacy-maintenance` removes expired anonymous/search
-data and old OTP/outbox rows, clears aged rounded search coordinates, then
-refreshes the snapshot. Run both as separately scheduled operational jobs.
+The API process runs both of these itself, hourly for the rollup and daily for
+the sweep. They were separate binaries that had to be scheduled, and nothing
+scheduled them: the daily rollup last ran on 17 August against a database that
+had recorded searches since, so every report in the admin surface read empty over
+data that was sitting in the tables. Aggregation takes a database advisory lock,
+so running it in every instance of a horizontally scaled service is safe.
+
+`make rebuild-admin-metrics` remains, and rebuilds the canonical snapshot and
+every Europe/Istanbul reporting day from source-of-truth tables -- use it to
+backfill history, not as the routine path. Repeated rebuilds are idempotent.
+Database timestamps remain UTC; only day boundaries use the configured timezone.
+`make privacy-maintenance` likewise remains for a one-off sweep.
 
 ## Reverse proxy and scaling expectations
 
