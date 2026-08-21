@@ -99,6 +99,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
 		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
+		r.Get("/categories", s.storeCategories)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
@@ -865,4 +866,15 @@ func (s *Server) createFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// storeCategories lists browsable categories with how often each has been searched, so the
+// client can order them by what people actually want rather than alphabetically.
+func (s *Server) storeCategories(w http.ResponseWriter, r *http.Request) {
+	items, e := s.stores.Categories(r.Context())
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
 }

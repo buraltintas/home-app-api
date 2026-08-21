@@ -461,3 +461,36 @@ func ValidCoordinates(lat, lon float64) bool {
 }
 
 var _ = time.Time{}
+
+// Category is one browsable category with how often people have searched for it. The count
+// is what makes the list an answer rather than an alphabet: the categories somebody is
+// most likely to want come first, and the number says why they are there.
+type Category struct {
+	Slug        string `json:"slug"`
+	Name        string `json:"name"`
+	SearchCount int64  `json:"search_count"`
+}
+
+// Categories lists the active categories, most searched first. The counts come from the
+// last thirty days of aggregated searches, so a category nobody looks for sinks on its own
+// rather than needing a curated order that goes stale.
+func (s *Service) Categories(ctx context.Context) ([]Category, error) {
+	rows, e := s.db.Query(ctx, `SELECT c.slug,
+ coalesce((SELECT t.name FROM store_category_translations t WHERE t.category_id=c.id AND t.locale=$1),c.name_tr),
+ coalesce((SELECT sum(m.search_count) FROM search_intent_daily_metrics m
+   WHERE m.dimension='category' AND m.value=c.slug AND m.metric_date >= (now()-interval '30 days')::date),0)
+ FROM store_categories c WHERE c.active ORDER BY 3 DESC, 2`, i18n.FromContext(ctx))
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []Category{}
+	for rows.Next() {
+		var x Category
+		if e = rows.Scan(&x.Slug, &x.Name, &x.SearchCount); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
