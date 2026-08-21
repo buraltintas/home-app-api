@@ -100,6 +100,12 @@ type Photo struct {
 	Name         string   `json:"name"`
 	Attributions []string `json:"attributions,omitempty"`
 }
+
+// OwnPhoto is media uploaded with a review of this store, carried as an id the client
+// streams through the API.
+type OwnPhoto struct {
+	MediaID string `json:"media_id"`
+}
 type Result struct {
 	ID             *uuid.UUID `json:"id,omitempty"`
 	ImpressionID   uuid.UUID  `json:"search_result_impression_id"`
@@ -119,6 +125,9 @@ type Result struct {
 	// promoted one, which reaches the list without going through Google at all -- renders
 	// as a blank tile beside imported results that have a picture.
 	Photo *Photo `json:"photo,omitempty"`
+	// A photograph from a community review of this store. It outranks the provider's frame:
+	// somebody who went there took it.
+	OwnPhoto *OwnPhoto `json:"own_photo,omitempty"`
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
@@ -373,7 +382,11 @@ func fromStore(x storepkg.Item, rank int) Result {
 	if x.Photo != nil && ValidPhotoName(x.Photo.Name) {
 		photo = &Photo{Name: x.Photo.Name, Attributions: x.Photo.Attributions}
 	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Photo: photo, Premium: x.IsPremium, score: platformScore(*p, rank)}
+	var own *OwnPhoto
+	if x.OwnPhoto != nil && x.OwnPhoto.MediaID != "" {
+		own = &OwnPhoto{MediaID: x.OwnPhoto.MediaID}
+	}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Photo: photo, OwnPhoto: own, Premium: x.IsPremium, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {
