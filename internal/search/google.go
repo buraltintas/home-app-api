@@ -50,7 +50,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.attributions,places.photos")
+	req.Header.Set("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.attributions,places.photos,places.nationalPhoneNumber")
 	r, e := g.client.Do(req)
 	if e != nil {
 		return nil, e
@@ -75,6 +75,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 				ProviderURI string `json:"providerUri"`
 			}
 			Photos []googlePhoto `json:"photos"`
+			Phone  string        `json:"nationalPhoneNumber"`
 		}
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
@@ -82,7 +83,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	}
 	out := make([]Place, 0, len(payload.Places))
 	for _, x := range payload.Places {
-		p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.Address, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.Count, Types: x.Types}
+		p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.Address, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.Count, Types: x.Types, Phone: x.Phone}
 		for _, a := range x.Attributions {
 			p.Attributions = append(p.Attributions, a.Provider+" "+a.ProviderURI)
 		}
@@ -133,7 +134,7 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 	u := g.baseURL + "/places/" + url.PathEscape(id)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos")
+	req.Header.Set("X-Goog-FieldMask", "id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber")
 	r, e := g.client.Do(req)
 	if e != nil {
 		return Place{}, e
@@ -151,11 +152,12 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 		UserRatingCount  int
 		Types            []string
 		Photos           []googlePhoto `json:"photos"`
+		Phone            string        `json:"nationalPhoneNumber"`
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); e != nil {
 		return Place{}, e
 	}
-	p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.UserRatingCount, Types: x.Types}
+	p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.UserRatingCount, Types: x.Types, Phone: x.Phone}
 	p.PhotoName, p.PhotoAttributions = firstPhoto(x.Photos)
 	return p, nil
 }

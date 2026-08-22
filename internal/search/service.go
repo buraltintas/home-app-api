@@ -106,6 +106,9 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 			attribution["photo_name"] = p.PhotoName
 			attribution["photo_attributions"] = p.PhotoAttributions
 		}
+		if p.Phone != "" {
+			attribution["phone"] = p.Phone
+		}
 		attr, _ := json.Marshal(attribution)
 		var existing uuid.UUID
 		err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, p.PlaceID).Scan(&existing)
@@ -115,6 +118,14 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 			if _, err = tx.Exec(ctx, `UPDATE store_external_sources SET attribution=$2,refreshed_at=now() WHERE store_id=$1 AND provider='google'`, existing, attr); err != nil {
 				return nil, err
 			}
+			// A number we have never held is filled in; one we already hold is left alone,
+			// because a store that told us its own number directly knows it better than
+			// the directory does.
+			if p.Phone != "" {
+				if _, err = tx.Exec(ctx, `UPDATE stores SET phone=$2 WHERE id=$1 AND coalesce(phone,'')=''`, existing, p.Phone); err != nil {
+					return nil, err
+				}
+			}
 			out[p.PlaceID] = existing
 			continue
 		}
@@ -123,7 +134,7 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		}
 		id := uuid.New()
 		slug := storeSlug(p.Name, id)
-		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography)`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone); err != nil {
 			return nil, err
 		}
 		// A store now carries the categories it actually sells, worked out from its own
@@ -447,6 +458,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				for i := range results {
 					if results[i].ID != nil && *results[i].ID == m.Platform.StoreID {
 						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}
+						// Our own record wins: it is the number the store gave us, or one an
+						// admin corrected. The provider only fills a gap.
+						if results[i].Phone == "" {
+							results[i].Phone = p.Phone
+						}
 						results[i].Source = "google+platform"
 						results[i].externalPlaceID = p.PlaceID
 					}
@@ -454,12 +470,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m.Platform, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Platform: &m.Platform, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
 			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string(nil), intent.Categories...), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
 			if id, ok := imported[p.PlaceID]; ok {
 				storeID := id
 				r.ID = &storeID
@@ -567,7 +583,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	return out, rows.Err()
 }
 func (s *Service) Interaction(ctx context.Context, searchID uuid.UUID, user, visitor *uuid.UUID, resultID *uuid.UUID, event, key string) error {
-	allowed := map[string]bool{"result_impression": true, "result_click": true, "store_open": true, "favorite": true, "unfavorite": true, "review_started": true, "review_created": true, "share": true}
+	allowed := map[string]bool{"result_impression": true, "result_click": true, "store_open": true, "favorite": true, "unfavorite": true, "review_started": true, "review_created": true, "share": true, "call_click": true}
 	if !allowed[event] {
 		return httpapi.ErrInvalidInput
 	}

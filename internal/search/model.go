@@ -51,6 +51,10 @@ type Place struct {
 	Attributions           []string
 	PhotoName              string
 	PhotoAttributions      []string
+	// The number Google publishes in national format. It is asked for in the same field
+	// mask that already carries the rating, so it is billed at the tier we were already
+	// paying for -- no separate lookup and no extra request per store.
+	Phone string
 }
 type PlacesProvider interface {
 	TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error)
@@ -125,6 +129,10 @@ type Result struct {
 	// promoted one, which reaches the list without going through Google at all -- renders
 	// as a blank tile beside imported results that have a picture.
 	Photo *Photo `json:"photo,omitempty"`
+	// A store's public telephone number. Listing it is what lets someone ask a question
+	// without leaving for Google, and it is the one detail a person wants before making a
+	// trip that a photograph cannot answer.
+	Phone string `json:"phone,omitempty"`
 	// A photograph from a community review of this store. It outranks the provider's frame:
 	// somebody who went there took it.
 	OwnPhoto *OwnPhoto `json:"own_photo,omitempty"`
@@ -386,7 +394,7 @@ func fromStore(x storepkg.Item, rank int) Result {
 	if x.OwnPhoto != nil && x.OwnPhoto.MediaID != "" {
 		own = &OwnPhoto{MediaID: x.OwnPhoto.MediaID}
 	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Photo: photo, OwnPhoto: own, Premium: x.IsPremium, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Photo: photo, OwnPhoto: own, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

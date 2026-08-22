@@ -100,6 +100,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
 		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/categories", s.storeCategories)
+		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
@@ -866,6 +867,33 @@ func (s *Server) createFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// searchSuggestions answers with what people around a point have searched for. It needs
+// coordinates to mean anything, and it returns an empty list rather than an error when a
+// neighbourhood is too quiet to have any -- the client falls back to a seasonal list, and
+// an empty suggestion strip must never be reported as a broken page.
+func (s *Server) searchSuggestions(w http.ResponseWriter, r *http.Request) {
+	latitude, e := queryFloat(r, "latitude")
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	longitude, e := queryFloat(r, "longitude")
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	if latitude == nil || longitude == nil {
+		JSON(w, 200, map[string]any{"items": []any{}})
+		return
+	}
+	items, e := s.search.NearbySuggestions(r.Context(), *latitude, *longitude, queryInt(r, "limit", 60))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
 }
 
 // storeCategories lists browsable categories with how often each has been searched, so the
