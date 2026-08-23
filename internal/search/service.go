@@ -234,7 +234,7 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	return out, err
 }
 
-func (s *Service) ResolveLocations(ctx context.Context, query string, limit int) ([]LocationResult, error) {
+func (s *Service) ResolveLocations(ctx context.Context, query string, limit int, lat, lon *float64) ([]LocationResult, error) {
 	query = strings.TrimSpace(query)
 	if utf8.RuneCountInString(query) < 2 || utf8.RuneCountInString(query) > 120 || limit < 1 || limit > 10 {
 		return nil, httpapi.ErrInvalidInput
@@ -248,7 +248,7 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int)
 	var places []Place
 	var err error
 	if auto, ok := s.places.(AutocompleteProvider); ok {
-		places, err = auto.Autocomplete(ctx, query, i18n.FromContext(ctx))
+		places, err = auto.Autocomplete(ctx, query, i18n.FromContext(ctx), lat, lon)
 	} else if localized, ok := s.places.(LocalizedPlacesProvider); ok {
 		places, err = localized.TextSearchLocalized(ctx, query, nil, nil, 50000, i18n.FromContext(ctx))
 	} else {
@@ -298,6 +298,10 @@ func isGeographicPlace(types []string) bool {
 	for _, placeType := range types {
 		switch placeType {
 		case "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3", "administrative_area_level_4", "locality", "neighborhood", "postal_town", "sublocality", "sublocality_level_1", "sublocality_level_2":
+			return true
+		// A street name is where somebody is standing. Refusing it meant "İsmet Gökşen"
+		// found nothing while the neighbourhood around it found plenty.
+		case "route", "street_address", "premise":
 			return true
 		}
 	}

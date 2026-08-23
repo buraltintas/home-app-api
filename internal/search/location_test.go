@@ -46,7 +46,7 @@ func TestResolveLocationsFiltersBusinessesAndPreservesProviderOrder(t *testing.T
 		{PlaceID: "neighborhood", Name: "Moda", Address: "Kadıköy, İstanbul", Latitude: 40.98, Longitude: 29.02, Types: []string{"neighborhood", "political"}},
 	}}
 	service := &Service{places: provider}
-	items, err := service.ResolveLocations(i18n.WithLocale(context.Background(), i18n.LocaleTR), "Kadıköy", 1)
+	items, err := service.ResolveLocations(i18n.WithLocale(context.Background(), i18n.LocaleTR), "Kadıköy", 1, nil, nil)
 	if err != nil || len(items) != 1 || items[0].PlaceID != "district" || items[0].Provider != "google" || provider.locale != i18n.LocaleTR || len(items[0].Attributions) != 1 {
 		t.Fatalf("items=%+v locale=%q err=%v", items, provider.locale, err)
 	}
@@ -54,10 +54,10 @@ func TestResolveLocationsFiltersBusinessesAndPreservesProviderOrder(t *testing.T
 
 func TestResolveLocationsValidatesInputBeforeProviderCall(t *testing.T) {
 	service := &Service{}
-	if _, err := service.ResolveLocations(context.Background(), "x", 5); err == nil {
+	if _, err := service.ResolveLocations(context.Background(), "x", 5, nil, nil); err == nil {
 		t.Fatal("short location accepted")
 	}
-	if _, err := service.ResolveLocations(context.Background(), "Kadıköy", 11); err == nil {
+	if _, err := service.ResolveLocations(context.Background(), "Kadıköy", 11, nil, nil); err == nil {
 		t.Fatal("oversized limit accepted")
 	}
 }

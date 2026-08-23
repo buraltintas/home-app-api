@@ -211,16 +211,16 @@ func (g *GooglePlaces) photoMedia(ctx context.Context, name string, maxWidth int
 //
 // It is also cheaper: the store text search carries a field mask with ratings and photos
 // on it, none of which a location lookup ever reads.
-func (g *GooglePlaces) Autocomplete(ctx context.Context, input string, locale i18n.Locale) ([]Place, error) {
+func (g *GooglePlaces) Autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error) {
 	started := time.Now()
 	ctx, finish := observability.StartSpan(ctx, "provider.google_places.autocomplete")
-	out, err := g.autocomplete(ctx, input, locale)
+	out, err := g.autocomplete(ctx, input, locale, lat, lon)
 	finish(err)
 	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
 	return out, err
 }
 
-func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i18n.Locale) ([]Place, error) {
+func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error) {
 	if g.key == "" {
 		return nil, nil
 	}
@@ -230,12 +230,20 @@ func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i1
 		// The product operates in Turkey. Offering a Belgian village to somebody typing a
 		// district name is not a near miss, it is a wrong answer that costs a tap.
 		"includedRegionCodes": []string{"tr"},
-		// Places rather than businesses: a location field is asking where you are. The
-		// "(regions)" collection is the obvious choice and the wrong one -- it leaves out
-		// neighbourhoods, so Uncalı and every other mahalle vanished from the list, which
-		// is most of what people actually type here. These are named explicitly instead:
-		// il, ilçe, semt, mahalle. Five is the maximum the endpoint accepts.
-		"includedPrimaryTypes": []string{"administrative_area_level_1", "administrative_area_level_2", "locality", "sublocality", "neighborhood"},
+		// No type restriction is sent. Both obvious ways of writing one were wrong: the
+		// "(regions)" collection omits neighbourhoods, and naming types by hand misses
+		// whichever level a given place happens to use -- Uncalı, an ordinary Antalya
+		// mahalle, is an administrative_area_level_4. Filtering happens on our side
+		// instead, where the full list of acceptable kinds already lives.
+	}
+	// Ranking without a bias is ranking by fame: someone in Antalya typing "bostanl" was
+	// offered the Bostanlı in Afyonkarahisar. Where the caller knows roughly where the
+	// person is, say so, and the nearby answer comes first.
+	if lat != nil && lon != nil {
+		body["locationBias"] = map[string]any{"circle": map[string]any{
+			"center": map[string]float64{"latitude": *lat, "longitude": *lon},
+			"radius": 50000.0,
+		}}
 	}
 	b, _ := json.Marshal(body)
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/places:autocomplete", bytes.NewReader(b))

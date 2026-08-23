@@ -410,7 +410,15 @@ func (s *Server) feed(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) searchLocations(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 5)
-	items, e := s.search.ResolveLocations(r.Context(), r.URL.Query().Get("q"), limit)
+	// Optional, and only a hint: where the caller believes the person is, so the nearby
+	// answer sorts above the famous one. It never becomes the searched point -- that is
+	// always resolved separately from the place they actually pick.
+	lat, latErr := queryFloat(r, "latitude")
+	lon, lonErr := queryFloat(r, "longitude")
+	if latErr != nil || lonErr != nil || (lat == nil) != (lon == nil) {
+		lat, lon = nil, nil
+	}
+	items, e := s.search.ResolveLocations(r.Context(), r.URL.Query().Get("q"), limit, lat, lon)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
