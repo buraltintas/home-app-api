@@ -40,7 +40,12 @@ func (p *OpenAIParser) parseSearchIntent(ctx context.Context, query string, c Co
 	ctx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 	prompt := intentPrompt(query, c)
-	r, e := p.client.Responses.New(ctx, responses.ResponseNewParams{Model: p.model, Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)}, Text: responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigParamOfJSONSchema("search_intent", p.schema)}})
+	// The same query has to produce the same intent. At the default temperature it did
+	// not: "Salon için büyük bir ayna" came back as decoration, then decoration+furniture,
+	// then decoration+home_accessories+furniture on three identical requests -- which is
+	// why the same search returned different stores each time. This is a classification
+	// task with one right answer, so there is nothing for sampling to contribute.
+	r, e := p.client.Responses.New(ctx, responses.ResponseNewParams{Model: p.model, Temperature: openai.Float(0), Input: responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)}, Text: responses.ResponseTextConfigParam{Format: responses.ResponseFormatTextConfigParamOfJSONSchema("search_intent", p.schema)}})
 	if e != nil {
 		return Intent{}, e
 	}

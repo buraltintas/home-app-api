@@ -355,6 +355,15 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
  AND ($8='' OR lower(s.city) LIKE '%'||$8||'%' OR lower(coalesce(s.district,'')) LIKE '%'||$8||'%')
  AND ($2::float8 IS NULL OR $3::float8 IS NULL OR $4<=0 OR ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography,$4))
  GROUP BY s.id,ss.store_id ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank(to_tsvector('simple',s.name||' '||coalesce(s.brand_name,'')),websearch_to_tsquery('simple',$1)) END DESC,
+ -- How much of this store the matched categories actually account for. A store that
+ -- carries ten categories matched every query on one of them and then sorted purely by
+ -- distance, so a bedding shop that happens to list "decoration" outranked a shop that
+ -- sells nothing else. Banded rather than continuous, so that within a band results are
+ -- still ordered nearest to farthest -- which is what the product promises.
+ CASE WHEN $7::text[] IS NULL THEN 0
+      WHEN count(*) FILTER (WHERE c.slug = ANY($7)) = 0 THEN 0
+      WHEN count(*) FILTER (WHERE c.slug = ANY($7))::float / greatest(count(DISTINCT c.slug),1) >= 0.5 THEN 2
+      ELSE 1 END DESC,
  CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,ss.review_count DESC LIMIT $5`, q, lat, lon, radius, limit, viewer, nilStrings(categories), location, i18n.FromContext(ctx))
 	if e != nil {
 		return nil, e
