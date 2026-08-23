@@ -242,9 +242,14 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int)
 	if s.places == nil {
 		return nil, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Location provider is not configured")
 	}
+	// Autocomplete where the provider offers it. Text search was the wrong tool for this
+	// field: it matches whole tokens, so "unca" returned nothing while "Uncalı" worked,
+	// and with no country restriction "Bos" answered with a village in Belgium.
 	var places []Place
 	var err error
-	if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+	if auto, ok := s.places.(AutocompleteProvider); ok {
+		places, err = auto.Autocomplete(ctx, query, i18n.FromContext(ctx))
+	} else if localized, ok := s.places.(LocalizedPlacesProvider); ok {
 		places, err = localized.TextSearchLocalized(ctx, query, nil, nil, 50000, i18n.FromContext(ctx))
 	} else {
 		places, err = s.places.TextSearch(ctx, query, nil, nil, 50000)
@@ -254,7 +259,11 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int)
 	}
 	results := make([]LocationResult, 0, limit)
 	for _, place := range places {
-		if !isGeographicPlace(place.Types) || strings.TrimSpace(place.PlaceID) == "" || strings.TrimSpace(place.Name) == "" || !storepkg.ValidCoordinates(place.Latitude, place.Longitude) {
+		// Coordinates are deliberately not required here. A prediction does not carry
+		// any, and the one the person picks is resolved through ResolveLocationPlace --
+		// so the coordinates a search is run against are always fetched by us, never
+		// taken from the client.
+		if !isGeographicPlace(place.Types) || strings.TrimSpace(place.PlaceID) == "" || strings.TrimSpace(place.Name) == "" {
 			continue
 		}
 		results = append(results, LocationResult{Provider: "google", PlaceID: place.PlaceID, Name: place.Name, Address: place.Address, Latitude: place.Latitude, Longitude: place.Longitude, Types: append([]string{}, place.Types...), Attributions: append([]string{}, place.Attributions...)})

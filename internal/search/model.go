@@ -79,6 +79,13 @@ type LocationResult struct {
 	Types        []string `json:"types"`
 	Attributions []string `json:"attributions"`
 }
+
+// A provider that can answer partial input. Kept separate from PlacesProvider so the
+// test doubles for store search do not have to grow a method they never exercise.
+type AutocompleteProvider interface {
+	Autocomplete(ctx context.Context, input string, locale i18n.Locale) ([]Place, error)
+}
+
 type LocalizedPlacesProvider interface {
 	TextSearchLocalized(context.Context, string, *float64, *float64, int, i18n.Locale) ([]Place, error)
 }

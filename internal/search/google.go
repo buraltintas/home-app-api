@@ -201,3 +201,86 @@ func (g *GooglePlaces) photoMedia(ctx context.Context, name string, maxWidth int
 	}
 	return r.Body, r.Header.Get("Content-Type"), nil
 }
+
+// Autocomplete answers partial input. It is a different Places endpoint from the text
+// search used for stores, and the difference is the whole point: text search matches whole
+// tokens against a corpus, so "unca" finds nothing while "Uncalı" finds the district, and
+// with no country restriction "Bos" happily returns a village in Belgium. Autocomplete is
+// built for prefixes and takes a region restriction, which is what a person typing a
+// Turkish neighbourhood name into a Turkish product actually needs.
+//
+// It is also cheaper: the store text search carries a field mask with ratings and photos
+// on it, none of which a location lookup ever reads.
+func (g *GooglePlaces) Autocomplete(ctx context.Context, input string, locale i18n.Locale) ([]Place, error) {
+	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.google_places.autocomplete")
+	out, err := g.autocomplete(ctx, input, locale)
+	finish(err)
+	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
+	return out, err
+}
+
+func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i18n.Locale) ([]Place, error) {
+	if g.key == "" {
+		return nil, nil
+	}
+	body := map[string]any{
+		"input":        input,
+		"languageCode": string(locale),
+		// The product operates in Turkey. Offering a Belgian village to somebody typing a
+		// district name is not a near miss, it is a wrong answer that costs a tap.
+		"includedRegionCodes": []string{"tr"},
+		// Places rather than businesses: a location field is asking where you are.
+		"includedPrimaryTypes": []string{"(regions)"},
+	}
+	b, _ := json.Marshal(body)
+	req, e := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/places:autocomplete", bytes.NewReader(b))
+	if e != nil {
+		return nil, e
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Goog-Api-Key", g.key)
+	r, e := g.client.Do(req)
+	if e != nil {
+		return nil, e
+	}
+	defer r.Body.Close()
+	if r.StatusCode < 200 || r.StatusCode >= 300 {
+		return nil, fmt.Errorf("places autocomplete status %d", r.StatusCode)
+	}
+	var payload struct {
+		Suggestions []struct {
+			PlacePrediction struct {
+				PlaceID          string   `json:"placeId"`
+				Types            []string `json:"types"`
+				Text             struct{ Text string }
+				StructuredFormat struct {
+					MainText      struct{ Text string }
+					SecondaryText struct{ Text string }
+				} `json:"structuredFormat"`
+			} `json:"placePrediction"`
+		} `json:"suggestions"`
+	}
+	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); e != nil {
+		return nil, e
+	}
+	out := make([]Place, 0, len(payload.Suggestions))
+	for _, s := range payload.Suggestions {
+		p := s.PlacePrediction
+		if p.PlaceID == "" {
+			continue
+		}
+		name := p.StructuredFormat.MainText.Text
+		if name == "" {
+			name = p.Text.Text
+		}
+		address := p.StructuredFormat.SecondaryText.Text
+		if address == "" {
+			address = p.Text.Text
+		}
+		// A prediction carries no coordinates. Callers resolve the one the person picks,
+		// which is one lookup per choice instead of one per keystroke.
+		out = append(out, Place{PlaceID: p.PlaceID, Name: name, Address: address, Types: p.Types})
+	}
+	return out, nil
+}

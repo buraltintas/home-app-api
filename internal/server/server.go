@@ -98,6 +98,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
+		r.With(searchLimit.Middleware).Get("/locations/resolve", s.resolveLocation)
 		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/categories", s.storeCategories)
 		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
@@ -416,6 +417,19 @@ func (s *Server) searchLocations(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, http.StatusOK, map[string]any{"items": items})
 }
+
+// resolveLocation turns a chosen prediction into coordinates. The list a person picks
+// from carries no coordinates, and it should not: the point someone is searched around is
+// fetched by us from the provider rather than submitted by the browser.
+func (s *Server) resolveLocation(w http.ResponseWriter, r *http.Request) {
+	location, e := s.search.ResolveLocationPlace(r.Context(), r.URL.Query().Get("place_id"))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusOK, location)
+}
+
 func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	lat, e := queryFloat(r, "latitude")
