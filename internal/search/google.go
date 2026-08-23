@@ -230,8 +230,12 @@ func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i1
 		// The product operates in Turkey. Offering a Belgian village to somebody typing a
 		// district name is not a near miss, it is a wrong answer that costs a tap.
 		"includedRegionCodes": []string{"tr"},
-		// Places rather than businesses: a location field is asking where you are.
-		"includedPrimaryTypes": []string{"(regions)"},
+		// Places rather than businesses: a location field is asking where you are. The
+		// "(regions)" collection is the obvious choice and the wrong one -- it leaves out
+		// neighbourhoods, so Uncalı and every other mahalle vanished from the list, which
+		// is most of what people actually type here. These are named explicitly instead:
+		// il, ilçe, semt, mahalle. Five is the maximum the endpoint accepts.
+		"includedPrimaryTypes": []string{"administrative_area_level_1", "administrative_area_level_2", "locality", "sublocality", "neighborhood"},
 	}
 	b, _ := json.Marshal(body)
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/places:autocomplete", bytes.NewReader(b))
