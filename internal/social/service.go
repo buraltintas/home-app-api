@@ -218,8 +218,11 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 
 func (s *Service) VerifyVisit(ctx context.Context, user, store uuid.UUID, latitude, longitude, accuracy float64) (VisitVerification, error) {
 	var out VisitVerification
-	if user == uuid.Nil || store == uuid.Nil || !storepkg.ValidCoordinates(latitude, longitude) || accuracy <= 0 || accuracy > s.cfg.MaxLocationAccuracyMeters {
+	if user == uuid.Nil || store == uuid.Nil || !storepkg.ValidCoordinates(latitude, longitude) || accuracy <= 0 {
 		return out, httpapi.ErrInvalidInput
+	}
+	if accuracy > s.cfg.MaxLocationAccuracyMeters {
+		return out, httpapi.E(422, "LOCATION_ACCURACY_TOO_LOW", "Location accuracy is insufficient to verify a visit")
 	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {

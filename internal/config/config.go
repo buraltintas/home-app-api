@@ -132,7 +132,7 @@ func Load() (Config, error) {
 	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 500); err != nil {
 		return c, err
 	}
-	if c.StoreLocationMaxAccuracyMeters, err = number("STORE_LOCATION_MAX_ACCURACY_METERS", 100); err != nil {
+	if c.StoreLocationMaxAccuracyMeters, err = number("STORE_LOCATION_MAX_ACCURACY_METERS", 200); err != nil {
 		return c, err
 	}
 	if c.StoreVisitProofTTL, err = duration("STORE_VISIT_PROOF_TTL", 30*24*time.Hour); err != nil {

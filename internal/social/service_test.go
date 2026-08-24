@@ -62,6 +62,8 @@ func TestVisitVerificationRejectsUnusableLocationBeforeDatabaseWrite(t *testing.
 	}
 	if _, err := svc.VerifyVisit(context.Background(), uuid.New(), uuid.New(), 41, 29, 101); err == nil {
 		t.Fatal("inaccurate location accepted")
+	} else if app, ok := err.(*httpapi.Error); !ok || app.Code != "LOCATION_ACCURACY_TOO_LOW" {
+		t.Fatalf("inaccurate location returned the wrong error: %v", err)
 	}
 }
 
