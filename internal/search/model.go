@@ -178,30 +178,32 @@ const (
 	ScopeUnclear    = "unclear"
 )
 
+type homeConcept struct {
+	category string
+	product  string
+	terms    []string
+	extra    []string
+}
+
+var homeConcepts = []homeConcept{
+	{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "lighting", "chandelier", "lamp", "beleuchtung", "leuchter", "lampe", "освещение", "люстра", "лампа"}, nil},
+	{"curtain", "curtain", []string{"perde", "curtain", "gardine", "vorhang", "штор", "занавес"}, []string{"home_textile"}},
+	{"furniture", "furniture", []string{"mobilya", "koltuk", "masa", "sandalye", "furniture", "sofa", "table", "chair", "möbel", "sofa", "tisch", "stuhl", "мебел", "диван", "стол", "стул"}, nil},
+	{"home_textile", "home_textile", []string{"tekstil", "nevresim", "çarşaf", "yorgan", "battaniye", "havlu", "pike", "home textile", "duvet cover", "bed linen", "blanket", "towel", "bedding textile", "heimtextil", "bettwäsche", "handtuch", "домашний текстиль", "постельное белье", "одеяло", "полотенце"}, nil},
+	{"carpet", "carpet", []string{"halı", "kilim", "carpet", "rug", "teppich", "ковер", "ковёр"}, nil},
+	{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор", "ayna", "mirror", "spiegel", "зеркало"}, nil},
+	{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
+	{"bathroom", "bathroom", []string{"banyo", "bathroom", "badezimmer", "ванная"}, nil},
+	{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
+	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
+	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+}
+
 func Deterministic(raw string) Intent {
 	n := normalizeText(raw)
 	folded := foldLatin(n)
 	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, Categories: []string{}, ProductTerms: []string{}, StyleTerms: []string{}, Attributes: []string{}, SortPreference: "relevance", SemanticTerms: []string{}}
-	type concept struct {
-		category string
-		product  string
-		terms    []string
-		extra    []string
-	}
-	concepts := []concept{
-		{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "lighting", "chandelier", "lamp", "beleuchtung", "leuchter", "lampe", "освещение", "люстра", "лампа"}, nil},
-		{"curtain", "curtain", []string{"perde", "curtain", "gardine", "vorhang", "штор", "занавес"}, []string{"home_textile"}},
-		{"furniture", "furniture", []string{"mobilya", "koltuk", "masa", "sandalye", "furniture", "sofa", "table", "chair", "möbel", "sofa", "tisch", "stuhl", "мебел", "диван", "стол", "стул"}, nil},
-		{"home_textile", "home_textile", []string{"tekstil", "nevresim", "çarşaf", "yorgan", "battaniye", "havlu", "pike", "home textile", "duvet cover", "bed linen", "blanket", "towel", "bedding textile", "heimtextil", "bettwäsche", "handtuch", "домашний текстиль", "постельное белье", "одеяло", "полотенце"}, nil},
-		{"carpet", "carpet", []string{"halı", "kilim", "carpet", "rug", "teppich", "ковер", "ковёр"}, nil},
-		{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор"}, nil},
-		{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
-		{"bathroom", "bathroom", []string{"banyo", "bathroom", "badezimmer", "ванная"}, nil},
-		{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
-		{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
-		{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
-	}
-	knownHomeStores := []string{"ikea", "koçtaş", "koctas", "madame coco", "english home", "karaca", "paşabahçe", "pasabahce", "vivense", "bellona", "istikbal", "istikbal mobilya", "taç", "tac"}
+	knownHomeStores := []string{"ikea", "koçtaş", "koctas", "madame coco", "english home", "karaca", "paşabahçe", "pasabahce", "vivense", "bellona", "istikbal", "istikbal mobilya", "taç", "tac", "işbir", "isbir", "yataş", "yatas", "lova"}
 	for _, storeName := range knownHomeStores {
 		if containsNormalized(n, folded, storeName) {
 			i.StoreName = storeName
@@ -222,7 +224,7 @@ func Deterministic(raw string) Intent {
 		i.Categories = appendUnique(i.Categories, "bedding")
 		i.ProductTerms = appendUnique(i.ProductTerms, "bedding_set")
 	}
-	for _, concept := range concepts {
+	for _, concept := range homeConcepts {
 		for _, term := range concept.terms {
 			if containsNormalized(n, folded, term) {
 				i.Categories = appendUnique(i.Categories, concept.category)
@@ -401,7 +403,7 @@ func fromStore(x storepkg.Item, rank int) Result {
 	if x.OwnPhoto != nil && x.OwnPhoto.MediaID != "" {
 		own = &OwnPhoto{MediaID: x.OwnPhoto.MediaID}
 	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: x.Categories, Platform: p, Photo: photo, OwnPhoto: own, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, OwnPhoto: own, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {
@@ -434,9 +436,10 @@ var googleTypeCategories = map[string]string{
 // filtered on one.
 //
 // Two sources, because neither is enough alone. Google's types are reliable but coarse, and
-// Turkish shops very often carry the category in the name ("... HALI", "... PERDE"), which
-// the deterministic parser already knows how to read. Reusing that parser keeps one
-// vocabulary rather than a second list that drifts from the first.
+// Turkish shops very often carry the category in the name ("... HALI", "... PERDE"). Only
+// explicit product words count here. A shopper asking for a dowry set can legitimately
+// fan out to several categories, but a store merely named "... ÇEYİZ" must not thereby be
+// labelled as selling beds, cookware and tableware.
 func StoreCategories(name string, types []string) []string {
 	seen := map[string]bool{}
 	out := []string{}
@@ -449,8 +452,18 @@ func StoreCategories(name string, types []string) []string {
 	for _, t := range types {
 		add(googleTypeCategories[strings.ToLower(strings.TrimSpace(t))])
 	}
-	for _, slug := range Deterministic(name).Categories {
-		add(slug)
+	normalized := normalizeText(name)
+	folded := foldLatin(normalized)
+	for _, concept := range homeConcepts {
+		for _, term := range concept.terms {
+			if containsNormalized(normalized, folded, term) {
+				add(concept.category)
+				for _, slug := range concept.extra {
+					add(slug)
+				}
+				break
+			}
+		}
 	}
 	return out
 }

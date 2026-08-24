@@ -1,8 +1,11 @@
 package search
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
@@ -312,5 +315,40 @@ func TestStoreCategoriesComeFromTheStoreItself(t *testing.T) {
 	// Neither source saying anything must not invent a category.
 	if got := StoreCategories("Ada", []string{"restaurant"}); len(got) != 0 {
 		t.Fatalf("expected no categories, got %v", got)
+	}
+	got = StoreCategories("FAZİLET MEFRUŞAT (PERDE&ÇEYİZ)", nil)
+	if !slices.Contains(got, "curtain") || !slices.Contains(got, "home_textile") {
+		t.Fatalf("explicit curtain category missing: %v", got)
+	}
+	for _, broad := range []string{"bedding", "kitchenware", "tableware"} {
+		if slices.Contains(got, broad) {
+			t.Fatalf("store name inferred %q from generic çeyiz wording: %v", broad, got)
+		}
+	}
+}
+
+func TestDeterministicMirrorAndKnownHomeBrands(t *testing.T) {
+	for _, query := range []string{"Salon için büyük bir ayna", "mirror", "Spiegel", "зеркало"} {
+		got := Deterministic(query)
+		if got.Scope != ScopeHomeLiving || !slices.Contains(got.Categories, "decoration") {
+			t.Fatalf("mirror query %q parsed as %+v", query, got)
+		}
+	}
+	for _, brand := range []string{"İşbir", "Yataş", "Lova"} {
+		got := Deterministic(brand)
+		if got.Scope != ScopeHomeLiving || got.StoreName == "" {
+			t.Fatalf("home brand %q parsed as %+v", brand, got)
+		}
+	}
+}
+
+func TestSearchResultAlwaysSerializesCategoryArray(t *testing.T) {
+	result := fromStore(storepkg.Item{ID: uuid.New()}, 0)
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"categories":[]`)) {
+		t.Fatalf("empty categories must be an array: %s", encoded)
 	}
 }
