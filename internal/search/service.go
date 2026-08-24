@@ -455,13 +455,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// Every Google result must resolve to a store id: without one the client cannot
 	// open a detail page, verify a visit, or write a review, and search_results.store_id
 	// stays NULL so history cannot be replayed without calling Google again.
-	unmapped := make([]Place, 0, len(external))
-	for _, p := range external {
-		if _, ok := mapped[p.PlaceID]; !ok {
-			unmapped = append(unmapped, p)
-		}
-	}
-	imported, e := s.materializePlaces(ctx, unmapped)
+	//
+	// Materialize mapped places too. The result row below uses the live provider payload,
+	// while the detail page reads the persisted source. Updating only new places made an
+	// existing store show a current phone/photo in search and stale blanks in its detail.
+	// materializePlaces is idempotent and preserves a store-managed phone number.
+	imported, e := s.materializePlaces(ctx, external)
 	if e != nil {
 		return Response{}, e
 	}

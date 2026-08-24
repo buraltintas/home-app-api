@@ -595,6 +595,60 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 	}
 }
 
+func TestSearchRefreshesMappedStorePhoneAndPhotoForDetail(t *testing.T) {
+	db := database(t)
+	searcher := user(t, db, "search-refresh-"+uuid.NewString()+"@example.test")
+	placeID := "refresh-place-" + uuid.NewString()
+	place := search.Place{
+		PlaceID:           placeID,
+		Name:              "Mapped Curtain Store",
+		Address:           "Muratpasa, Antalya, TR",
+		Latitude:          36.8841,
+		Longitude:         30.7056,
+		Rating:            4.7,
+		RatingCount:       59,
+		PhotoName:         "places/refresh-store/photos/current-photo",
+		PhotoAttributions: []string{"Store photographer"},
+		Phone:             "0551 257 52 64",
+	}
+	_, stores, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
+
+	storeID, err := searchSvc.MaterializeGoogleStore(t.Context(), placeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `UPDATE stores SET phone=NULL WHERE id=$1`, storeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution='{"provider":"Google","rating":4.7,"rating_count":59}'::jsonb,refreshed_at=now()-interval '7 days' WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
+		t.Fatal(err)
+	}
+
+	latitude, longitude := 36.8841, 30.7056
+	response, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "perde", Latitude: &latitude, Longitude: &longitude})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result *search.Result
+	for i := range response.Results {
+		if response.Results[i].ID != nil && *response.Results[i].ID == storeID {
+			result = &response.Results[i]
+			break
+		}
+	}
+	if result == nil || result.Phone != place.Phone || result.Google == nil || result.Google.PhotoName != place.PhotoName {
+		t.Fatalf("search result=%+v", result)
+	}
+
+	detail, err := stores.Get(t.Context(), storeID, &searcher, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Phone != place.Phone || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != place.PhotoName {
+		t.Fatalf("detail phone=%q external_sources=%+v", detail.Phone, detail.ExternalSources)
+	}
+}
+
 func TestOutOfScopeSearchReturnsGuidanceWithoutCallingProviders(t *testing.T) {
 	db := database(t)
 	searcher := user(t, db, "search-scope-"+uuid.NewString()+"@example.test")
