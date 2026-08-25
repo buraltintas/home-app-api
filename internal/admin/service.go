@@ -66,20 +66,21 @@ func (s *Service) Users(ctx context.Context, query string, limit, offset int) ([
 }
 
 type StoreRow struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Slug        string    `json:"slug"`
-	City        string    `json:"city"`
-	IsPremium   bool      `json:"is_premium"`
-	Categories  []string  `json:"categories"`
-	ReviewCount int       `json:"review_count"`
-	Rating      float64   `json:"average_rating"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	Slug         string    `json:"slug"`
+	City         string    `json:"city"`
+	IsPremium    bool      `json:"is_premium"`
+	CoverMediaID string    `json:"cover_media_id,omitempty"`
+	Categories   []string  `json:"categories"`
+	ReviewCount  int       `json:"review_count"`
+	Rating       float64   `json:"average_rating"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, limit, offset int) ([]StoreRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,coalesce(s.cover_media_id::text,''),
  coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),
  ss.review_count,ss.average_rating,s.created_at
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id
@@ -93,7 +94,7 @@ func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, li
 	out := []StoreRow{}
 	for rows.Next() {
 		var x StoreRow
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -326,6 +327,43 @@ func (s *Service) SetStorePremium(ctx context.Context, actor uuid.UUID, email st
 		return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
 	if e = record(ctx, tx, actor, email, "store.premium", "store", store, map[string]any{"is_premium": premium}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+// SetStoreCover publishes one administrator-selected image for a store. The media row must
+// be ready and owned by the acting administrator; clearing the value immediately restores
+// the Google photo fallback without deleting the uploaded object or changing provider data.
+func (s *Service) SetStoreCover(ctx context.Context, actor uuid.UUID, email string, store uuid.UUID, mediaID *uuid.UUID) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+
+	if mediaID != nil {
+		var valid bool
+		if e = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM media WHERE id=$1 AND owner_user_id=$2 AND status='ready')`, *mediaID, actor).Scan(&valid); e != nil {
+			return e
+		}
+		if !valid {
+			return httpapi.E(400, "INVALID_MEDIA", "Media does not exist, is not ready, or is not owned by this administrator")
+		}
+	}
+
+	tag, e := tx.Exec(ctx, `UPDATE stores SET cover_media_id=$2,updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, store, mediaID)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	}
+	metadata := map[string]any{"removed": mediaID == nil}
+	if mediaID != nil {
+		metadata["media_id"] = mediaID.String()
+	}
+	if e = record(ctx, tx, actor, email, "store.cover", "store", store, metadata); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

@@ -508,6 +508,15 @@ components:
         mime_type: {type: string, enum: [image/jpeg, image/png, image/webp]}
         width: {type: integer, minimum: 1}
         height: {type: integer, minimum: 1}
+    StorePhoto:
+      type: object
+      required: [source]
+      description: The single effective store image. An administrator upload wins; Google is the fallback.
+      properties:
+        source: {type: string, enum: [admin, google]}
+        media_id: {type: string, format: uuid, description: Present when source is admin.}
+        name: {type: string, description: Google Places photo resource name; present when source is google.}
+        attributions: {type: array, items: {type: string}}
     Post:
       type: object
       required: [id, user_id, store_id, text, rating, visit_verified, distance_meters, created_at, username, display_name, avatar_url, store_name, store_city, store_district, media, like_count, comment_count, viewer_has_liked, viewer_follows_author, viewer_has_favorited_store]
@@ -527,6 +536,7 @@ components:
         store_name: {type: string}
         store_city: {type: string}
         store_district: {type: string}
+        store_photo: {$ref: '#/components/schemas/StorePhoto'}
         media: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/MediaAsset'}}
         like_count: {type: integer, minimum: 0}
         comment_count: {type: integer, minimum: 0}
@@ -582,6 +592,7 @@ components:
         platform: {$ref: '#/components/schemas/StoreStats'}
         viewer_has_favorited: {type: boolean}
         viewer_has_reviewed: {type: boolean}
+        photo: {$ref: '#/components/schemas/StorePhoto'}
         external_sources: {type: array, items: {$ref: '#/components/schemas/ExternalSource'}}
     SearchIntent:
       type: object
@@ -614,6 +625,7 @@ components:
         longitude: {type: number}
         distance_meters: {type: number, minimum: 0}
         categories: {type: array, items: {type: string}}
+        photo: {$ref: '#/components/schemas/StorePhoto'}
         platform:
           type: object
           required: [store_id, average_rating, review_count, favorite_count, post_count]

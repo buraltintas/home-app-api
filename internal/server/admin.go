@@ -211,6 +211,49 @@ func (s *Server) adminSetPremium(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"id": id, "is_premium": body.IsPremium})
 }
 
+func (s *Server) adminSetStoreCover(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var body struct {
+		MediaID uuid.UUID `json:"media_id"`
+	}
+	if e = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); e != nil || body.MediaID == uuid.Nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if e = s.admin.SetStoreCover(r.Context(), actor, email, id, &body.MediaID); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"id": id, "cover_media_id": body.MediaID})
+}
+
+func (s *Server) adminClearStoreCover(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	if e = s.admin.SetStoreCover(r.Context(), actor, email, id, nil); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) adminSetUserStatus(w http.ResponseWriter, r *http.Request) {
 	actor, email, ok := s.adminActor(r)
 	if !ok {

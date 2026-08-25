@@ -211,7 +211,7 @@ func TestValidPhotoNameRejectsUnsafeInput(t *testing.T) {
 // every promoted store, which never goes through Google -- rendered as blank tiles.
 func TestFromStoreCarriesTheStoredPhoto(t *testing.T) {
 	name := "places/ChIJmwFY8_OPwxQRb39DXDLxwcY/photos/AelY_Cs9xY"
-	r := fromStore(storepkg.Item{ID: uuid.New(), Name: "Salihler Halı Perde", Photo: &storepkg.Photo{Name: name, Attributions: []string{"Bir Kullanıcı"}}}, 0)
+	r := fromStore(storepkg.Item{ID: uuid.New(), Name: "Salihler Halı Perde", Photo: &storepkg.Photo{Source: "google", Name: name, Attributions: []string{"Bir Kullanıcı"}}}, 0)
 	if r.Photo == nil || r.Photo.Name != name {
 		t.Fatalf("expected the stored photo to reach the result, got %+v", r.Photo)
 	}
@@ -220,7 +220,7 @@ func TestFromStoreCarriesTheStoredPhoto(t *testing.T) {
 	}
 	// A malformed reference would render as a broken image, so it is dropped here rather
 	// than handed to the client.
-	bad := fromStore(storepkg.Item{ID: uuid.New(), Name: "Taç", Photo: &storepkg.Photo{Name: "https://evil.example/x"}}, 0)
+	bad := fromStore(storepkg.Item{ID: uuid.New(), Name: "Taç", Photo: &storepkg.Photo{Source: "google", Name: "https://evil.example/x"}}, 0)
 	if bad.Photo != nil {
 		t.Fatal("expected an invalid photo reference to be dropped")
 	}

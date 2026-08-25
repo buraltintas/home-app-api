@@ -34,12 +34,15 @@ func (s *Service) UploadHandler() http.Handler {
 	return nil
 }
 
-// PublicURL returns a short-lived provider URL only for ready media attached to
-// a visible post. Storage objects remain private and unattached uploads cannot
-// be enumerated through the public media endpoint.
+// PublicURL returns a short-lived provider URL only for ready media published by a visible
+// review or selected as a live store cover. Storage objects remain private and unattached
+// uploads cannot be enumerated through the public media endpoint.
 func (s *Service) PublicURL(ctx context.Context, id uuid.UUID) (string, error) {
 	var key string
-	err := s.db.QueryRow(ctx, `SELECT m.storage_key FROM media m JOIN post_media pm ON pm.media_id=m.id JOIN posts p ON p.id=pm.post_id WHERE m.id=$1 AND m.status='ready' AND p.deleted_at IS NULL LIMIT 1`, id).Scan(&key)
+	err := s.db.QueryRow(ctx, `SELECT m.storage_key FROM media m WHERE m.id=$1 AND m.status='ready' AND (
+ EXISTS(SELECT 1 FROM post_media pm JOIN posts p ON p.id=pm.post_id WHERE pm.media_id=m.id AND p.deleted_at IS NULL)
+ OR EXISTS(SELECT 1 FROM stores s WHERE s.cover_media_id=m.id AND s.deleted_at IS NULL)
+)`, id).Scan(&key)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", httpapi.E(http.StatusNotFound, "MEDIA_NOT_FOUND", "Media not found")
 	}

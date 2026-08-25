@@ -108,14 +108,10 @@ type External struct {
 // Photo mirrors the stored provider photograph. Attribution travels with it because the
 // provider terms require the credit to be displayed wherever the photograph is.
 type Photo struct {
-	Name         string   `json:"name"`
+	Source       string   `json:"source"`
+	MediaID      string   `json:"media_id,omitempty"`
+	Name         string   `json:"name,omitempty"`
 	Attributions []string `json:"attributions,omitempty"`
-}
-
-// OwnPhoto is media uploaded with a review of this store, carried as an id the client
-// streams through the API.
-type OwnPhoto struct {
-	MediaID string `json:"media_id"`
 }
 type Result struct {
 	ID             *uuid.UUID `json:"id,omitempty"`
@@ -140,9 +136,6 @@ type Result struct {
 	// without leaving for Google, and it is the one detail a person wants before making a
 	// trip that a photograph cannot answer.
 	Phone string `json:"phone,omitempty"`
-	// A photograph from a community review of this store. It outranks the provider's frame:
-	// somebody who went there took it.
-	OwnPhoto *OwnPhoto `json:"own_photo,omitempty"`
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
@@ -396,14 +389,15 @@ func containsAny(s string, terms ...string) bool {
 func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
 	var photo *Photo
-	if x.Photo != nil && ValidPhotoName(x.Photo.Name) {
-		photo = &Photo{Name: x.Photo.Name, Attributions: x.Photo.Attributions}
+	if x.Photo != nil {
+		switch {
+		case x.Photo.Source == "admin" && x.Photo.MediaID != "":
+			photo = &Photo{Source: "admin", MediaID: x.Photo.MediaID}
+		case x.Photo.Source == "google" && ValidPhotoName(x.Photo.Name):
+			photo = &Photo{Source: "google", Name: x.Photo.Name, Attributions: x.Photo.Attributions}
+		}
 	}
-	var own *OwnPhoto
-	if x.OwnPhoto != nil && x.OwnPhoto.MediaID != "" {
-		own = &OwnPhoto{MediaID: x.OwnPhoto.MediaID}
-	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, OwnPhoto: own, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

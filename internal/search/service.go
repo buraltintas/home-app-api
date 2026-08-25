@@ -515,7 +515,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, intent.Categories...), Platform: &m.Platform, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, intent.Categories...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
@@ -601,6 +601,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 type mappedStore struct {
 	Platform Platform
 	Premium  bool
+	Photo    *Photo
 }
 
 func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]mappedStore, error) {
@@ -612,16 +613,20 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
+	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,coalesce(s.cover_media_id::text,'') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
 	if e != nil {
 		return nil, e
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id string
+		var coverMediaID string
 		var m mappedStore
-		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium); e != nil {
+		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &coverMediaID); e != nil {
 			return nil, e
+		}
+		if coverMediaID != "" {
+			m.Photo = &Photo{Source: "admin", MediaID: coverMediaID}
 		}
 		out[id] = m
 	}

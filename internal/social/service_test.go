@@ -76,3 +76,19 @@ func TestCreatePostAcceptsStoredVisitContractWithoutCurrentCoordinates(t *testin
 		t.Fatalf("stored visit did not pass location contract: %v", err)
 	}
 }
+
+func TestDecodeStorePhotoPreservesEffectiveSource(t *testing.T) {
+	mediaID := uuid.NewString()
+	photo, err := decodeStorePhoto([]byte(`{"source":"admin","media_id":"` + mediaID + `"}`))
+	if err != nil || photo == nil || photo.Source != "admin" || photo.MediaID != mediaID {
+		t.Fatalf("admin cover did not survive feed decoding: photo=%+v err=%v", photo, err)
+	}
+	photo, err = decodeStorePhoto([]byte(`{"source":"google","name":"places/a/photos/b","attributions":["A"]}`))
+	if err != nil || photo == nil || photo.Source != "google" || photo.Name != "places/a/photos/b" || len(photo.Attributions) != 1 {
+		t.Fatalf("Google fallback did not survive feed decoding: photo=%+v err=%v", photo, err)
+	}
+	photo, err = decodeStorePhoto(nil)
+	if err != nil || photo != nil {
+		t.Fatalf("missing cover should remain absent: photo=%+v err=%v", photo, err)
+	}
+}

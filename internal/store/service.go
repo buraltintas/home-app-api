@@ -56,23 +56,25 @@ type Item struct {
 	ViewerHasReviewed    bool             `json:"viewer_has_reviewed"`
 	ExternalSources      []ExternalSource `json:"external_sources,omitempty"`
 	Photo                *Photo           `json:"photo,omitempty"`
-	// A photograph from a community review of this store, which outranks the provider's own.
-	// Somebody who went there and took it describes the place better than a stock frame does.
-	OwnPhoto *OwnPhoto `json:"own_photo,omitempty"`
 }
 
-// Photo is the provider photograph already held for a store, carried alongside list
-// results so a store we have on file is not shown as a blank tile whenever the live
-// provider response happens not to include it.
+// Photo is the single effective store image. An administrator's upload wins everywhere;
+// without one, the first current Google Places image is the common fallback.
 type Photo struct {
-	Name         string   `json:"name"`
+	Source       string   `json:"source"`
+	MediaID      string   `json:"media_id,omitempty"`
+	Name         string   `json:"name,omitempty"`
 	Attributions []string `json:"attributions,omitempty"`
 }
 
-// OwnPhoto is media uploaded with a review of this store. It carries the media id rather
-// than a URL: the client streams it through the API like any other upload.
-type OwnPhoto struct {
-	MediaID string `json:"media_id"`
+func assignPhoto(x *Item, mediaID, name string, attributions []string) {
+	if mediaID != "" {
+		x.Photo = &Photo{Source: "admin", MediaID: mediaID}
+		return
+	}
+	if name != "" {
+		x.Photo = &Photo{Source: "google", Name: name, Attributions: attributions}
+	}
 }
 
 type ExternalSource struct {
@@ -85,18 +87,24 @@ type ExternalSource struct {
 func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat, lon *float64) (Item, error) {
 	var x Item
 	var distance *float64
+	var coverMedia, photoName string
+	var photoAttributions []string
 	e := s.db.QueryRow(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $3::float8 IS NULL OR $4::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography) END,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
  EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2),
  EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
- coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb)
+ coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
+ coalesce(s.cover_media_id::text,''),
+ coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources)
+ WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources, &coverMedia, &photoName, &photoAttributions)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return x, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
 	x.DistanceMeters = distance
+	assignPhoto(&x, coverMedia, photoName, photoAttributions)
 	return x, e
 }
 
@@ -183,10 +191,9 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
  ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
  EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$4),
+ coalesce(s.cover_media_id::text,''),
  coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
- coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),
- coalesce((SELECT m.id::text FROM post_media pm JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
-  WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready' ORDER BY p2.created_at DESC, pm.position LIMIT 1),'')
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id
  LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE s.deleted_at IS NULL AND s.is_premium
@@ -201,17 +208,12 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
 	var out []Item
 	for rows.Next() {
 		var x Item
-		var photoName, ownMedia string
+		var coverMedia, photoName string
 		var photoAttributions []string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &photoName, &photoAttributions, &ownMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &coverMedia, &photoName, &photoAttributions); e != nil {
 			return nil, e
 		}
-		if photoName != "" {
-			x.Photo = &Photo{Name: photoName, Attributions: photoAttributions}
-		}
-		if ownMedia != "" {
-			x.OwnPhoto = &OwnPhoto{MediaID: ownMedia}
-		}
+		assignPhoto(&x, coverMedia, photoName, photoAttributions)
 		out = append(out, x)
 	}
 	return out, rows.Err()
@@ -302,10 +304,9 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
  CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
  EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6),
+ coalesce(s.cover_media_id::text,''),
  coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
- coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),
- coalesce((SELECT m.id::text FROM post_media pm JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
-  WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready' ORDER BY p2.created_at DESC, pm.position LIMIT 1),'')
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE s.deleted_at IS NULL AND to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')) @@ `+fn+`('simple',$1)
  GROUP BY s.id,ss.store_id
@@ -318,17 +319,12 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
 	var out []Item
 	for rows.Next() {
 		var x Item
-		var photoName, ownMedia string
+		var coverMedia, photoName string
 		var photoAttributions []string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &photoName, &photoAttributions, &ownMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &coverMedia, &photoName, &photoAttributions); e != nil {
 			return nil, e
 		}
-		if photoName != "" {
-			x.Photo = &Photo{Name: photoName, Attributions: photoAttributions}
-		}
-		if ownMedia != "" {
-			x.OwnPhoto = &OwnPhoto{MediaID: ownMedia}
-		}
+		assignPhoto(&x, coverMedia, photoName, photoAttributions)
 		out = append(out, x)
 	}
 	return out, rows.Err()
@@ -345,11 +341,10 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$9),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$9 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$9),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
- EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6),
- coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
- coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),
- coalesce((SELECT m.id::text FROM post_media pm JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
-  WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready' ORDER BY p2.created_at DESC, pm.position LIMIT 1),'')
+	 EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6),
+	 coalesce(s.cover_media_id::text,''),
+	 coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
+	 coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE s.deleted_at IS NULL AND ($1='' OR to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')||' '||coalesce(s.description,'')||' '||coalesce(s.city,'')||' '||coalesce(s.district,'')) @@ websearch_to_tsquery('simple',$1) OR ($7::text[] IS NOT NULL AND EXISTS(SELECT 1 FROM store_category_links cl JOIN store_categories sc ON sc.id=cl.category_id WHERE cl.store_id=s.id AND sc.slug=ANY($7))))
  AND ($8='' OR lower(s.city) LIKE '%'||$8||'%' OR lower(coalesce(s.district,'')) LIKE '%'||$8||'%')
@@ -372,17 +367,12 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
 	var out []Item
 	for rows.Next() {
 		var x Item
-		var photoName, ownMedia string
+		var coverMedia, photoName string
 		var photoAttributions []string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &photoName, &photoAttributions, &ownMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ViewerFavorited, &coverMedia, &photoName, &photoAttributions); e != nil {
 			return nil, e
 		}
-		if photoName != "" {
-			x.Photo = &Photo{Name: photoName, Attributions: photoAttributions}
-		}
-		if ownMedia != "" {
-			x.OwnPhoto = &OwnPhoto{MediaID: ownMedia}
-		}
+		assignPhoto(&x, coverMedia, photoName, photoAttributions)
 		out = append(out, x)
 	}
 	return out, rows.Err()
@@ -395,7 +385,10 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$3),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$3 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$3),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,
- coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),f.created_at
+ coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
+ coalesce(s.cover_media_id::text,''),
+ coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),f.created_at
  FROM favorites f JOIN stores s ON s.id=f.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE f.user_id=$1 GROUP BY s.id,ss.store_id,f.created_at ORDER BY f.created_at DESC LIMIT $2`, viewer, limit, i18n.FromContext(ctx))
 	if e != nil {
@@ -405,11 +398,14 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 	out := []Item{}
 	for rows.Next() {
 		var x Item
+		var coverMedia, photoName string
+		var photoAttributions []string
 		var savedAt time.Time
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ExternalSources, &savedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.ExternalSources, &coverMedia, &photoName, &photoAttributions, &savedAt); e != nil {
 			return nil, e
 		}
 		x.ViewerFavorited = true
+		assignPhoto(&x, coverMedia, photoName, photoAttributions)
 		out = append(out, x)
 	}
 	return out, rows.Err()
