@@ -102,6 +102,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/categories", s.storeCategories)
 		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
+		r.Get("/search/highlights", s.searchHighlights)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
@@ -916,6 +917,18 @@ func (s *Server) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"items": items})
+}
+
+// searchHighlights exposes only community signals that have crossed the agreed
+// review threshold. Nil values are intentional: clients hide a weak or empty
+// section instead of manufacturing a recommendation.
+func (s *Server) searchHighlights(w http.ResponseWriter, r *http.Request) {
+	items, e := s.search.MonthlyHighlights(r.Context())
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, items)
 }
 
 // storeCategories lists browsable categories with how often each has been searched, so the
