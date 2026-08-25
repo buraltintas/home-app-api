@@ -8,9 +8,20 @@ import (
 )
 
 type locationPlacesStub struct {
-	places []Place
-	detail Place
-	locale i18n.Locale
+	places  []Place
+	detail  Place
+	locale  i18n.Locale
+	queries []string
+	byQuery map[string][]Place
+}
+
+func (s *locationPlacesStub) Autocomplete(_ context.Context, query string, locale i18n.Locale, _, _ *float64) ([]Place, error) {
+	s.queries = append(s.queries, query)
+	s.locale = locale
+	if s.byQuery != nil {
+		return s.byQuery[query], nil
+	}
+	return s.places, nil
 }
 
 func (s *locationPlacesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error) {
@@ -59,5 +70,35 @@ func TestResolveLocationsValidatesInputBeforeProviderCall(t *testing.T) {
 	}
 	if _, err := service.ResolveLocations(context.Background(), "Kadıköy", 11, nil, nil); err == nil {
 		t.Fatal("oversized limit accepted")
+	}
+}
+
+func TestResolveLocationsRetriesTurkishNeighborhoodSuffixAfterBusinessOnlyPrediction(t *testing.T) {
+	provider := &locationPlacesStub{byQuery: map[string][]Place{
+		"Uluç Mahallesi": {{PlaceID: "office", Name: "Uluç Mahallesi Muhtarlığı", Types: []string{"establishment", "point_of_interest"}}},
+		"Uluç":           {{PlaceID: "uluc", Name: "Uluç", Address: "Konyaaltı/Antalya, Türkiye", Types: []string{"administrative_area_level_4", "political"}}},
+	}}
+	service := &Service{places: provider}
+	items, err := service.ResolveLocations(context.Background(), "Uluç Mahallesi", 5, nil, nil)
+	if err != nil || len(items) != 1 || items[0].PlaceID != "uluc" {
+		t.Fatalf("items=%+v queries=%v err=%v", items, provider.queries, err)
+	}
+	if len(provider.queries) != 2 || provider.queries[0] != "Uluç Mahallesi" || provider.queries[1] != "Uluç" {
+		t.Fatalf("queries=%v", provider.queries)
+	}
+}
+
+func TestLocationAutocompleteFallbackIsConservative(t *testing.T) {
+	tests := map[string]string{
+		"Uluç Mahallesi": "Uluç",
+		"Uluç mahalle":   "Uluç",
+		"Uluç mah.":      "Uluç",
+		"Mahallesi":      "Mahallesi",
+		"Kadıköy":        "Kadıköy",
+	}
+	for input, want := range tests {
+		if got := locationAutocompleteFallback(input); got != want {
+			t.Errorf("locationAutocompleteFallback(%q)=%q want %q", input, got, want)
+		}
 	}
 }

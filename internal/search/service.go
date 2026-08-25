@@ -249,6 +249,16 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int,
 	var err error
 	if auto, ok := s.places.(AutocompleteProvider); ok {
 		places, err = auto.Autocomplete(ctx, query, i18n.FromContext(ctx), lat, lon)
+		// Google can interpret “Uluç Mahallesi” as the establishment named “Uluç
+		// Mahallesi Muhtarlığı” while the shorter “Uluç” returns the actual
+		// administrative area. Keep the establishment filter, then retry a conservative
+		// Turkish neighbourhood suffix only when the first response has no geographic
+		// prediction at all.
+		if err == nil && !containsGeographicPlace(places) {
+			if fallback := locationAutocompleteFallback(query); fallback != query {
+				places, err = auto.Autocomplete(ctx, fallback, i18n.FromContext(ctx), lat, lon)
+			}
+		}
 	} else if localized, ok := s.places.(LocalizedPlacesProvider); ok {
 		places, err = localized.TextSearchLocalized(ctx, query, nil, nil, 50000, i18n.FromContext(ctx))
 	} else {
@@ -306,6 +316,29 @@ func isGeographicPlace(types []string) bool {
 		}
 	}
 	return false
+}
+
+func containsGeographicPlace(places []Place) bool {
+	for _, place := range places {
+		if isGeographicPlace(place.Types) {
+			return true
+		}
+	}
+	return false
+}
+
+func locationAutocompleteFallback(query string) string {
+	trimmed := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(query), "."))
+	lower := strings.ToLower(trimmed)
+	for _, suffix := range []string{" mahallesi", " mahalle", " mah"} {
+		if strings.HasSuffix(lower, suffix) {
+			fallback := strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)])
+			if utf8.RuneCountInString(fallback) >= 2 {
+				return fallback
+			}
+		}
+	}
+	return query
 }
 
 func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
