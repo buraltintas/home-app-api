@@ -190,7 +190,7 @@ Create with:
 {"store_id":"...","text":"Işık çok sıcak ve güzel.","rating":5,"latitude":40.9901,"longitude":29.0292,"accuracy_meters":18.4,"media_ids":["..."],"origin_search_id":"...","origin_search_result_id":"...","content_language":"tr"}
 ```
 
-`text` is 3–5000 Unicode characters; rating is 1–5; at most 10 unique ready media IDs owned by the caller. Do not send `visit_verified`: the server calculates distance with PostGIS and rejects when `device-to-store distance + horizontal accuracy` exceeds 500 m (`STORE_REVIEW_RADIUS_METERS=500`) with HTTP 422 `STORE_VISIT_NOT_VERIFIED`. Physical-presence checks must always use a fresh mobile OS location or an unconsumed visit proof previously created from one; never use the profile's manual/discovery coordinates. Deleting is owner-only and soft-deletes.
+`text` is 3–5000 Unicode characters; rating is 1–5; at most 10 unique ready media IDs owned by the caller. Do not send `visit_verified`: the server calculates distance with PostGIS and rejects when `device-to-store distance + horizontal accuracy` exceeds 2000 m (`STORE_REVIEW_RADIUS_METERS=2000`) with HTTP 422 `STORE_VISIT_NOT_VERIFIED`. Physical-presence checks must always use a fresh OS location or an unconsumed visit proof previously created from one; never use the profile's manual/discovery coordinates. Deleting is owner-only and soft-deletes.
 
 To let a user write later about a real visit, verify while they are physically present:
 

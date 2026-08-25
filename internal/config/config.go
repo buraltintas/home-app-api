@@ -129,10 +129,10 @@ func Load() (Config, error) {
 	if c.SearchLocationDecimals, err = integer("SEARCH_LOCATION_DECIMALS", 3); err != nil {
 		return c, err
 	}
-	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 500); err != nil {
+	if c.StoreReviewRadiusMeters, err = number("STORE_REVIEW_RADIUS_METERS", 2000); err != nil {
 		return c, err
 	}
-	if c.StoreLocationMaxAccuracyMeters, err = number("STORE_LOCATION_MAX_ACCURACY_METERS", 200); err != nil {
+	if c.StoreLocationMaxAccuracyMeters, err = number("STORE_LOCATION_MAX_ACCURACY_METERS", 1000); err != nil {
 		return c, err
 	}
 	if c.StoreVisitProofTTL, err = duration("STORE_VISIT_PROOF_TTL", 30*24*time.Hour); err != nil {
