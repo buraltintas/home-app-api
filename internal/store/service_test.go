@@ -14,3 +14,12 @@ func TestValidCoordinates(t *testing.T) {
 		}
 	}
 }
+
+func TestAnyWordStoreFallbackIgnoresLocationAndGenericStoreWords(t *testing.T) {
+	if got := anyWordQuery("yeğenler elektrik antalya"); got != "yeğenler | elektrik" {
+		t.Fatalf("fallback query=%q", got)
+	}
+	if got := anyWordQuery("Antalya mağaza"); got != "" {
+		t.Fatalf("weak-only fallback query=%q", got)
+	}
+}

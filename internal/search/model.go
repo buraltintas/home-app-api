@@ -179,7 +179,7 @@ type homeConcept struct {
 }
 
 var homeConcepts = []homeConcept{
-	{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "lighting", "chandelier", "lamp", "beleuchtung", "leuchter", "lampe", "освещение", "люстра", "лампа"}, nil},
+	{"lighting", "chandelier", []string{"avize", "aydınlatma", "lamba", "elektrik aydınlatma", "elektrik ve aydınlatma", "elektrik malzemeleri", "elektrik mağazası", "lighting", "chandelier", "lamp", "electrical lighting", "lighting supplies", "beleuchtung", "leuchter", "lampe", "электротовары", "освещение", "люстра", "лампа"}, nil},
 	{"curtain", "curtain", []string{"perde", "curtain", "gardine", "vorhang", "штор", "занавес"}, []string{"home_textile"}},
 	{"furniture", "furniture", []string{"mobilya", "koltuk", "masa", "sandalye", "furniture", "sofa", "table", "chair", "möbel", "sofa", "tisch", "stuhl", "мебел", "диван", "стол", "стул"}, nil},
 	{"home_textile", "home_textile", []string{"tekstil", "nevresim", "çarşaf", "yorgan", "battaniye", "havlu", "pike", "home textile", "duvet cover", "bed linen", "blanket", "towel", "bedding textile", "heimtextil", "bettwäsche", "handtuch", "домашний текстиль", "постельное белье", "одеяло", "полотенце"}, nil},
@@ -231,7 +231,7 @@ func Deterministic(raw string) Intent {
 	}
 	if i.StoreName != "" || len(i.Categories) > 0 || len(i.ProductTerms) > 0 {
 		i.Scope = ScopeHomeLiving
-	} else if containsAnyFolded(n, folded, "lastikçi", "lastikci", "lastik", "tire shop", "tyre shop", "reifen", "шиномонтаж", "restoran", "restaurant", "kuaför", "kuafor", "berber", "hairdresser", "eczane", "pharmacy", "oto servis", "car repair") {
+	} else if containsAnyFolded(n, folded, "lastikçi", "lastikci", "lastik", "tire shop", "tyre shop", "reifen", "шиномонтаж", "restoran", "restaurant", "kuaför", "kuafor", "berber", "hairdresser", "eczane", "pharmacy", "oto servis", "car repair", "elektrikçi", "elektrikci", "electrician", "elektrik tesisat", "elektrik arıza", "elektrik ariza", "elektrik faturası", "elektrik faturasi") {
 		i.Scope = ScopeOutOfScope
 	}
 	if containsAnyFolded(n, folded, "uygun fiyat", "ucuz", "ekonomik", "çok pahalı olmayan", "affordable", "cheap", "budget", "günstig", "preiswert", "nicht teuer", "недорог", "дешев", "бюджет") {
@@ -259,6 +259,18 @@ func Deterministic(raw string) Intent {
 		}
 		if i.LocationText != "" {
 			break
+		}
+	}
+	// Electrical and lighting retailers belong in home and living; an electrician or
+	// repair request does not. A short query shaped like "Yeğenler Elektrik Antalya"
+	// is also a business name plus a location, not a request for every business whose
+	// name happens to contain Antalya.
+	if i.StoreName == "" {
+		if candidate := inferredElectricalStoreName(raw, i.LocationText); candidate != "" {
+			i.StoreName = candidate
+			i.Categories = appendUnique(i.Categories, "lighting")
+			i.ProductTerms = appendUnique(i.ProductTerms, "lighting")
+			i.Scope = ScopeHomeLiving
 		}
 	}
 	if i.Scope != ScopeHomeLiving {
@@ -326,6 +338,56 @@ func containsAnyFolded(normalized, folded string, terms ...string) bool {
 		}
 	}
 	return false
+}
+
+func nameWords(raw string) []string {
+	return strings.FieldsFunc(strings.TrimSpace(raw), func(r rune) bool {
+		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+	})
+}
+
+func sameFoldedWords(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for index := range a {
+		if foldLatin(normalizeText(a[index])) != foldLatin(normalizeText(b[index])) {
+			return false
+		}
+	}
+	return true
+}
+
+// stripEdgeLocation removes a location the parser repeated at the beginning or end of a
+// store name. Middle words stay untouched because Antalya can legitimately be part of a
+// registered name such as "Güney Antalya Halı".
+func stripEdgeLocation(storeName, location string) string {
+	storeWords := nameWords(storeName)
+	locationWords := nameWords(location)
+	if len(storeWords) == 0 || len(locationWords) == 0 || len(storeWords) <= len(locationWords) {
+		return strings.TrimSpace(storeName)
+	}
+	if sameFoldedWords(storeWords[:len(locationWords)], locationWords) {
+		storeWords = storeWords[len(locationWords):]
+	} else if sameFoldedWords(storeWords[len(storeWords)-len(locationWords):], locationWords) {
+		storeWords = storeWords[:len(storeWords)-len(locationWords)]
+	}
+	return strings.TrimSpace(strings.Join(storeWords, " "))
+}
+
+func inferredElectricalStoreName(raw, location string) string {
+	normalized := normalizeText(raw)
+	folded := foldLatin(normalized)
+	if !containsAnyFolded(normalized, folded, "elektrik", "electric", "elektro") ||
+		containsAnyFolded(normalized, folded, "elektrikçi", "elektrikci", "electrician", "tesisat", "tamir", "arıza", "ariza", "fatura", "repair", "installation") {
+		return ""
+	}
+	candidate := stripEdgeLocation(raw, location)
+	words := nameWords(candidate)
+	if len(words) < 2 || containsAnyFolded(normalized, folded, "mağaza", "magaza", "store", "malzeme", "aydınlatma", "lighting", "ürün", "urun", "arıyorum", "ariyorum", "lazım", "lazim", "yakınımda", "yakinimda") {
+		return ""
+	}
+	return candidate
 }
 func Validate(i Intent) error {
 	if i.Scope != ScopeHomeLiving && i.Scope != ScopeOutOfScope && i.Scope != ScopeUnclear {

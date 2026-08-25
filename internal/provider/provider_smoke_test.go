@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,16 +25,17 @@ func TestOpenAIIntentSmoke(t *testing.T) {
 	}
 	parser := search.NewOpenAIParser(key, env("OPENAI_MODEL", "gpt-5-mini"), 15*time.Second)
 	queries := []struct {
-		query  string
-		locale string
+		query, locale, storeName, category string
 	}{
-		{"Antalya'da uygun fiyatlı perde mağazası arıyorum", "tr"},
-		{"Affordable curtain stores in Antalya", "en"},
-		{"Günstige Gardinengeschäfte in Antalya", "de"},
-		{"Недорогие магазины штор в Анталии", "ru"},
+		{"Antalya'da uygun fiyatlı perde mağazası arıyorum", "tr", "", "curtain"},
+		{"Affordable curtain stores in Antalya", "en", "", "curtain"},
+		{"Günstige Gardinengeschäfte in Antalya", "de", "", "curtain"},
+		{"Недорогие магазины штор в Анталии", "ru", "", "curtain"},
+		{"Yeğenler Elektrik Antalya", "tr", "Yeğenler Elektrik", ""},
+		{"Antalya elektrik malzemeleri mağazası", "tr", "", "lighting"},
 	}
 	for _, test := range queries {
-		t.Run(test.locale, func(t *testing.T) {
+		t.Run(test.locale+"/"+test.query, func(t *testing.T) {
 			intent, err := parser.ParseSearchIntent(context.Background(), test.query, search.Context{Locale: i18n.Locale(test.locale)})
 			if err != nil {
 				t.Fatal(err)
@@ -41,8 +43,23 @@ func TestOpenAIIntentSmoke(t *testing.T) {
 			if err = search.Validate(intent); err != nil {
 				t.Fatal(err)
 			}
+			if test.storeName != "" && intent.StoreName != test.storeName {
+				t.Fatalf("store_name=%q want %q", intent.StoreName, test.storeName)
+			}
+			if test.category != "" && !contains(intent.Categories, test.category) {
+				t.Fatalf("categories=%v missing %q", intent.Categories, test.category)
+			}
 		})
 	}
+}
+
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestGooglePlacesSmoke(t *testing.T) {
@@ -60,6 +77,25 @@ func TestGooglePlacesSmoke(t *testing.T) {
 	if err != nil || detail.PlaceID == "" || detail.Name == "" {
 		t.Fatalf("detail=%+v err=%v", detail, err)
 	}
+}
+
+func TestGooglePlacesElectricalStoreSmoke(t *testing.T) {
+	key := os.Getenv("GOOGLE_PLACES_API_KEY")
+	if key == "" {
+		t.Skip("GOOGLE_PLACES_API_KEY is not available")
+	}
+	provider := search.NewGooglePlaces(key)
+	lat, lon := 36.8841, 30.7056
+	places, err := provider.TextSearchLocalized(context.Background(), "Yeğenler Elektrik Antalya", &lat, &lon, 50000, i18n.LocaleTR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, place := range places {
+		if strings.Contains(strings.ToLower(place.Name), "yeğenler") {
+			return
+		}
+	}
+	t.Fatalf("Yeğenler Elektrik was not returned among %d places", len(places))
 }
 
 func TestResendSmoke(t *testing.T) {

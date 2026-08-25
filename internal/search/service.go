@@ -381,6 +381,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		}
 		if e == nil {
 			intent = merge(intent, enriched)
+			intent.StoreName = stripEdgeLocation(intent.StoreName, intent.LocationText)
 			aiUsed = true
 		} else {
 			// Every silent degradation here reaches the user as "we did not understand
@@ -798,6 +799,17 @@ func internalQuery(i Intent) string {
 }
 
 func placesQuery(i Intent, raw string) string {
+	// A named store is a precision lookup. Repeating the raw sentence, parsed store name,
+	// products and categories made the provider query less exact and returned no result
+	// for "Yeğenler Elektrik Antalya" even though that exact place exists. Coordinates
+	// still provide the geographic bias; explicit location text is kept when supplied.
+	if strings.TrimSpace(i.StoreName) != "" {
+		query := strings.TrimSpace(strings.Join([]string{i.StoreName, i.LocationText}, " "))
+		if runes := []rune(query); len(runes) > 500 {
+			query = strings.TrimSpace(string(runes[:500]))
+		}
+		return query
+	}
 	terms := make([]string, 0, 2+len(i.ProductTerms)+len(i.SemanticTerms)+len(i.Categories))
 	terms = append(terms, strings.TrimSpace(raw))
 	parsed := append(append(append([]string{i.StoreName}, i.ProductTerms...), i.SemanticTerms...), i.Categories...)

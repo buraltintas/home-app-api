@@ -134,6 +134,33 @@ func TestDeterministicRecognizesHomeStoreName(t *testing.T) {
 	}
 }
 
+func TestElectricalLightingRetailAndStoreNameAreDistinguishedFromServices(t *testing.T) {
+	store := Deterministic("Yeğenler Elektrik Antalya")
+	if store.Scope != ScopeHomeLiving || store.StoreName != "Yeğenler Elektrik" || store.LocationText != "Antalya" || !has(store.Categories, "lighting") {
+		t.Fatalf("electrical retailer parsed as %+v", store)
+	}
+	retail := Deterministic("Antalya elektrik malzemeleri mağazası")
+	if retail.Scope != ScopeHomeLiving || retail.StoreName != "" || !has(retail.Categories, "lighting") {
+		t.Fatalf("electrical supplies parsed as %+v", retail)
+	}
+	if service := Deterministic("Yakınımda elektrikçi lazım"); service.Scope != ScopeOutOfScope {
+		t.Fatalf("electrician service scope=%q", service.Scope)
+	}
+}
+
+func TestStoreNameDropsOnlyAnEdgeLocation(t *testing.T) {
+	for _, test := range []struct{ name, location, want string }{
+		{"Yeğenler Elektrik Antalya", "Antalya", "Yeğenler Elektrik"},
+		{"Antalya Yeğenler Elektrik", "Antalya", "Yeğenler Elektrik"},
+		{"Madame Coco Kadıköy", "Kadikoy", "Madame Coco"},
+		{"Güney Antalya Halı", "Antalya", "Güney Antalya Halı"},
+	} {
+		if got := stripEdgeLocation(test.name, test.location); got != test.want {
+			t.Fatalf("stripEdgeLocation(%q,%q)=%q want %q", test.name, test.location, got, test.want)
+		}
+	}
+}
+
 func TestGuidanceIsLocalizedAndRotatesExamples(t *testing.T) {
 	first := guidanceFor("tr", ScopeUnclear)
 	second := guidanceFor("tr", ScopeUnclear)
@@ -162,6 +189,9 @@ func TestPlacesQueryUsesRawAndParsedTerms(t *testing.T) {
 	}
 	if long := placesQuery(Intent{ProductTerms: []string{"furniture"}}, strings.Repeat("ö", 500)); len([]rune(long)) > 500 {
 		t.Fatalf("places query too long: %d", len([]rune(long)))
+	}
+	if got := placesQuery(Intent{StoreName: "Yeğenler Elektrik", LocationText: "Antalya", Categories: []string{"lighting"}}, "Yeğenler Elektrik Antalya"); got != "Yeğenler Elektrik Antalya" {
+		t.Fatalf("named places query=%q", got)
 	}
 }
 

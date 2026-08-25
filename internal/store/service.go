@@ -292,7 +292,18 @@ func queryWords(raw string) []string {
 // through. Anything that is not a letter or digit is dropped, which makes injection of
 // tsquery syntax impossible by construction.
 func anyWordQuery(raw string) string {
-	kept := queryWords(raw)
+	weak := map[string]bool{
+		"antalya": true, "istanbul": true, "ankara": true, "izmir": true, "bursa": true,
+		"kadıköy": true, "kadikoy": true, "çankaya": true, "cankaya": true, "lara": true,
+		"mağaza": true, "magaza": true, "store": true,
+	}
+	words := queryWords(raw)
+	kept := make([]string, 0, len(words))
+	for _, word := range words {
+		if !weak[strings.ToLower(word)] {
+			kept = append(kept, word)
+		}
+	}
 	if len(kept) == 0 {
 		return ""
 	}
