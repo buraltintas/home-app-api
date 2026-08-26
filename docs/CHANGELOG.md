@@ -8,6 +8,26 @@ repeating the value involved.
 
 ---
 
+## Classify from what Google says, not from what we guessed
+
+- **The provider's types are now kept.** A store's categories are worked out once, at
+  import, from its Google types and its name — and nothing kept those types, so when the
+  classifier later learned to read something new there was no way to apply it to the stores
+  already here without asking Google about all of them again. They are stored on the
+  external-source record from now on, which makes reclassification a local operation.
+- `primaryType` is requested and placed at the front of the list. Google returns a dozen
+  types for a shop and most are noise — `store`, `establishment`, `point_of_interest` —
+  while `primaryType` is its single best answer for what the place is.
+- Thirteen more Google types are mapped. Koçtaş arrived with no category at all because it
+  is a `building_materials_store` and nothing said what that meant.
+- `cmd/reclassify` reads stored types first and falls back to the name. This is what makes
+  the classification generic: types exist for every store in the country and describe the
+  business, while a name only helps when somebody happened to put the product in it.
+- **Ordering: distance now orders both halves of a name-led search.** Only the matches were
+  sorted by distance, so among the other results a farther store could still lead a nearer
+  one. Reported from the live site; there was no reason for it beyond an oversight.
+
+
 ## Backfilling categories for stores that had none
 
 - `cmd/reclassify` assigns categories to stores that have none, and only to those. It reads

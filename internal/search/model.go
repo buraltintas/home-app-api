@@ -568,6 +568,24 @@ var googleTypeCategories = map[string]string{
 	"curtain_store":          "curtain",
 	"home_improvement_store": "household",
 	"department_store":       "home_accessories",
+	// Google names more kinds of shop than we were reading, and every one of these is
+	// unambiguous. Koçtaş arrived with no category at all because it is a
+	// building_materials_store and nothing here said so.
+	"building_materials_store": "household",
+	"hardware_store":           "household",
+	"appliance_store":          "major_appliances",
+	"electronics_store":        "small_appliances",
+	"furniture_repair_shop":    "furniture",
+	"interior_designer":        "decoration",
+	"paint_store":              "household",
+	"garden_center":            "garden",
+	"plant_nursery":            "garden",
+	"linens_store":             "home_textile",
+	"cutlery_store":            "tableware",
+	"tile_store":               "household",
+	"wallpaper_store":          "decoration",
+	"bathroom_supply_store":    "bathroom",
+	"storage_facility":         "",
 }
 
 // StoreCategories works out what a store actually sells, for a store being imported from
@@ -758,7 +776,11 @@ func rankResults(results []Result, located, nameLed bool) {
 			if first, second := len(a.Categories) > 0, len(b.Categories) > 0; first != second {
 				return first
 			}
-			if a.nameHit && a.DistanceMeters != nil && b.DistanceMeters != nil && *a.DistanceMeters != *b.DistanceMeters {
+			// Distance orders both halves, not just the named one. Ordering only the
+			// matches left everything under them sorted by score, so among the other bed
+			// shops a farther one could still lead a nearer one -- reported from the live
+			// site, and there was no reason for it beyond an oversight.
+			if a.DistanceMeters != nil && b.DistanceMeters != nil && *a.DistanceMeters != *b.DistanceMeters {
 				return *a.DistanceMeters < *b.DistanceMeters
 			}
 			return a.score > b.score

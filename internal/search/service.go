@@ -109,6 +109,15 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if p.Phone != "" {
 			attribution["phone"] = p.Phone
 		}
+		// Kept because we could not get them back. A store's categories are worked out
+		// once, at import, from these types and its name -- and when the classifier later
+		// learned to read something it could not read before, there was no way to apply
+		// that to the stores already here without asking Google about every one of them
+		// again. Storing what the provider already told us costs nothing and makes
+		// reclassification a local operation.
+		if len(p.Types) > 0 {
+			attribution["types"] = p.Types
+		}
 		attr, _ := json.Marshal(attribution)
 		var existing uuid.UUID
 		err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, p.PlaceID).Scan(&existing)

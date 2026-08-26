@@ -57,13 +57,22 @@ func main() {
 
 	type candidate struct {
 		id, name string
+		types    []string
 		cats     []string
 	}
 	var found []candidate
 	var stillNone int
 
+	// Google's own types first, the name only as a fallback. The types are what make this
+	// generic: they exist for every store in the country and say what the place is, while
+	// a name only helps when somebody happened to put the product in it. Older stores were
+	// imported before the types were kept, so they come back empty and fall back.
 	rows, err = db.Query(ctx, `
-SELECT s.id::text, s.name
+SELECT s.id::text, s.name,
+  coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'types'))
+            FROM store_external_sources x
+            WHERE x.store_id = s.id AND x.provider = 'google' AND x.attribution ? 'types'
+            LIMIT 1), '{}')
 FROM stores s LEFT JOIN store_category_links l ON l.store_id = s.id
 WHERE s.deleted_at IS NULL
 GROUP BY s.id, s.name
@@ -72,8 +81,8 @@ ORDER BY s.name`)
 	must(err)
 	for rows.Next() {
 		var c candidate
-		must(rows.Scan(&c.id, &c.name))
-		for _, slug := range search.StoreCategories(c.name, nil) {
+		must(rows.Scan(&c.id, &c.name, &c.types))
+		for _, slug := range search.StoreCategories(c.name, c.types) {
 			// A slug the taxonomy does not have is a bug in the classifier, not a reason
 			// to invent a category. Skip it loudly rather than writing something the rest
 			// of the product cannot interpret.
@@ -94,7 +103,11 @@ ORDER BY s.name`)
 	sort.Slice(found, func(i, j int) bool { return found[i].name < found[j].name })
 	writes := 0
 	for _, c := range found {
-		fmt.Printf("%-52s %v\n", trim(c.name, 52), c.cats)
+		source := "name"
+		if len(c.types) > 0 {
+			source = "google"
+		}
+		fmt.Printf("%-46s %-7s %v\n", trim(c.name, 46), source, c.cats)
 		writes += len(c.cats)
 	}
 	fmt.Printf("\nstores to classify: %d (%d category rows)\nstores still without one: %d\n", len(found), writes, stillNone)
