@@ -215,8 +215,6 @@ var homeConcepts = []homeConcept{
 var homeWordConcepts = []homeConcept{
 	{"home_accessories", "home_goods", []string{"home", "homeware", "home goods", "ev aksesuar", "ev aksesuarları", "ev aksesuarlari", "züccaciye", "zuccaciye", "ev gereçleri", "ev gerecleri", "haushaltswaren", "wohnaccessoires", "товары для дома"}, nil},
 	{"home_textile", "home_textile", []string{"ev tekstil", "ev tekstili", "home textile"}, nil},
-	// "Cam" has to be a whole word or every "camii" in the country becomes a glass shop.
-	{"decoration", "glass", []string{"cam", "ayna"}, nil},
 }
 
 // Chains whose name alone settles what they sell. Matched as whole words, which is what

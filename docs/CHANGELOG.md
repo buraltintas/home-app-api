@@ -8,6 +8,25 @@ repeating the value involved.
 
 ---
 
+## Backfilling categories for stores that had none
+
+- `cmd/reclassify` assigns categories to stores that have none, and only to those. It reads
+  that set once, writes nothing but `INSERT ... ON CONFLICT DO NOTHING` into
+  `store_category_links`, never touches `stores`, and prints what it would do unless given
+  `-apply`. The worst case of a bug is therefore a category that should not be there —
+  visible, and removed by deleting one row.
+- Run against production: 89 uncategorised stores became 53, adding 37 category rows.
+  Verified before and after — no orphaned or duplicated links, no other table touched.
+- **A bug worth recording, because it looked like the safe choice.** The insert was guarded
+  with `WHERE NOT EXISTS (SELECT 1 FROM store_category_links WHERE store_id = $1)` — per
+  store rather than per row. After the first category landed the store had a link, so every
+  further category for the same store was silently dropped. One store lost its second
+  category. The guard is now per row, which is what `ON CONFLICT` was already doing anyway.
+- The `cam` rule was dropped before the run. It caught a mirror shop and a window-glazing
+  company equally, and the rule this classifier is written to is that a wrong category is
+  worse than none: it answers searches the store has no business answering.
+
+
 ## Ranking bounds and a wider classifier
 
 - **A community review used to lead the searcher's whole city.** In Antalya that meant a
