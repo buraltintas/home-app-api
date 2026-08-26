@@ -8,6 +8,22 @@ repeating the value involved.
 
 ---
 
+## The brand list is gone
+
+- Sixteen chain names were hard-coded so that Koçtaş and Madame Coco would classify. That is
+  a patch wearing a rule's clothes: nobody can keep a list of Turkey's shops current, and
+  the ones nobody thought to add stay broken silently.
+- Measured before removing rather than assumed. With the provider's types stored, the list
+  changed nothing for six of eight chains tested and added one extra category for two
+  (Paşabahçe gained `tableware`, Cotton Box `home_textile`). That precision is not worth a
+  rule that does not scale and has already misfired — "Taç" is a textile chain and also a
+  language school, a clinic, a nursery and a housing development.
+- `AGENTS.md` now states the principle: a rule naming a shop is not a rule. Prefer the
+  provider's data because it is complete, then words the whole trade uses because every
+  business of that kind uses them, then nothing. And when a report names one shop, fix the
+  class — two renovation firms in a bug report turned out to be seventeen.
+
+
 ## A decorating firm is not a decoration shop
 
 - Searching for decoration returned renovation contractors. Two causes, and the catalogue

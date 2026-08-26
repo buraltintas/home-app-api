@@ -217,33 +217,6 @@ var homeWordConcepts = []homeConcept{
 	{"home_textile", "home_textile", []string{"ev tekstil", "ev tekstili", "home textile"}, nil},
 }
 
-// Chains whose name alone settles what they sell. Matched as whole words, which is what
-// keeps "işbir" out of "Isbirli Ekmek Taş Firin" -- a real store in the catalogue and a
-// real bakery.
-//
-// Deliberately short. A brand only belongs here when nothing else in Turkey shares the
-// word: "Taç" is a home textile chain and also a language school in Döşemealtı, and
-// "Karaca" is a homeware brand and also a surname. A wrong category is worse than none,
-// because it puts a store into searches it has no business answering.
-var knownStoreBrands = map[string]string{
-	"ikea":        "furniture",
-	"koçtaş":      "household",
-	"koctas":      "household",
-	"madame coco": "home_accessories",
-	"paşabahçe":   "tableware",
-	"pasabahce":   "tableware",
-	"vivense":     "furniture",
-	"bellona":     "furniture",
-	"istikbal":    "furniture",
-	"yataş":       "bedding",
-	"yatas":       "bedding",
-	"işbir":       "bedding",
-	"isbir":       "bedding",
-	"cotton box":  "home_textile",
-	"linens":      "home_textile",
-	"chakra":      "home_textile",
-}
-
 // containsWord reports whether the term appears as a whole word. A letter on either side
 // disqualifies the match; punctuation, spaces and string edges do not.
 func containsWord(normalized, folded, term string) bool {
@@ -712,11 +685,6 @@ func StoreCategories(name string, types []string) []string {
 	}
 	for _, t := range types {
 		add(googleTypeCategories[strings.ToLower(strings.TrimSpace(t))])
-	}
-	for brand, slug := range knownStoreBrands {
-		if containsWord(normalized, folded, brand) {
-			add(slug)
-		}
 	}
 	for _, concept := range homeWordConcepts {
 		for _, term := range concept.terms {
