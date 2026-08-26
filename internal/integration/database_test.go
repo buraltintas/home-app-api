@@ -554,7 +554,7 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 	db := database(t)
 	searcher := user(t, db, "search-enrichment-"+uuid.NewString()+"@example.test")
 	placeID := "enrichment-place-" + uuid.NewString()
-	place := search.Place{PlaceID: placeID, Name: "External Locale Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03, Rating: 4.8, RatingCount: 321}
+	place := search.Place{PlaceID: placeID, Name: "External Locale Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03, Rating: 4.8, RatingCount: 321, Types: []string{"furniture_store"}}
 	_, _, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
 
 	first, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleEN), &searcher, nil, search.Request{Query: "furniture store External Locale Store"})
@@ -590,8 +590,26 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 			break
 		}
 	}
-	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 4.8 || enriched.Google.RatingCount != 321 {
+	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 4.8 || enriched.Google.RatingCount != 321 || !slices.Contains(enriched.Categories, "furniture") {
 		t.Fatalf("enriched result=%+v", enriched)
+	}
+
+	// The detail page reads persisted Google data. An internal-only result must read that
+	// same source too, even when no live provider result is available for this request.
+	_, _, _, internalOnly, _ := services(t, db, googleStub{}, nil)
+	third, err := internalOnly.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "furniture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored *search.Result
+	for i := range third.Results {
+		if third.Results[i].ID != nil && *third.Results[i].ID == storeID {
+			stored = &third.Results[i]
+			break
+		}
+	}
+	if stored == nil || stored.Google == nil || stored.Google.Rating != 4.8 || stored.Google.RatingCount != 321 || !slices.Contains(stored.Categories, "furniture") {
+		t.Fatalf("stored Google result=%+v", stored)
 	}
 }
 

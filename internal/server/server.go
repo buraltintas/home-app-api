@@ -46,6 +46,13 @@ type Server struct {
 	hashKey  []byte
 }
 
+// RuntimeConfig contains the small, non-secret subset of deployment settings
+// that clients need in order to explain backend policy accurately. Provider
+// keys, credentials and security settings must never be added here.
+type RuntimeConfig struct {
+	StoreReviewRadiusMeters float64
+}
+
 func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
 	return &Server{db, a, st, so, se, u, m, ad, rp, fb, hashKey}
 }
@@ -54,6 +61,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 	metricsToken := ""
 	defaultLocale := i18n.DefaultLocale
 	var adminEmails []string
+	runtimeConfig := RuntimeConfig{StoreReviewRadiusMeters: 2000}
 	for _, option := range options {
 		switch value := option.(type) {
 		case string:
@@ -62,6 +70,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			defaultLocale = value
 		case []string:
 			adminEmails = value
+		case RuntimeConfig:
+			runtimeConfig = value
 		}
 	}
 	r := chi.NewRouter()
@@ -87,6 +97,9 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Use(appmw.OptionalAuth(tokens))
 		r.Use(appmw.ActiveAccount(s.db))
 		r.Use(appmw.UserLocale(s.db))
+		r.Get("/runtime-config", func(w http.ResponseWriter, r *http.Request) {
+			JSON(w, http.StatusOK, map[string]float64{"store_review_radius_meters": runtimeConfig.StoreReviewRadiusMeters})
+		})
 		searchLimit := appmw.NewLimiter(30, 8)
 		// Photos need their own budget. One results page loads twenty at once, so sharing
 		// the search limiter meant eight arrived and twelve were rejected -- which is what

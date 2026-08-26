@@ -230,6 +230,17 @@ func TestPremiumStoresLeadTheSearchersOwnCity(t *testing.T) {
 	}
 }
 
+func TestNearbyPremiumDoesNotDependOnFormattedCityLabel(t *testing.T) {
+	results := []Result{
+		{Name: "Organic", City: "Antalya", Address: "Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(400), score: 500},
+		{Name: "Premium", City: "Muratpaşa", Address: "Antalya, Türkiye", DistanceMeters: meters(12000), Premium: true, score: 80},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Premium" {
+		t.Fatalf("nearby premium store lost placement because city labels differed: %v", names(results))
+	}
+}
+
 // Premium is not a way to buy your way into another province's results.
 func TestPremiumDoesNotTravelToAnotherCity(t *testing.T) {
 	results := []Result{

@@ -516,18 +516,21 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, intent.Categories...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
 			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, intent.Categories...), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
 			if id, ok := imported[p.PlaceID]; ok {
 				storeID := id
 				r.ID = &storeID
 			}
 			results = append(results, r)
 		}
+	}
+	if e = s.attachStoredGoogle(ctx, results); e != nil {
+		return Response{}, e
 	}
 	for i := range results {
 		if in.Latitude != nil {
@@ -600,9 +603,10 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 // mapped is what we already know about a place that exists in our own catalogue: its
 // community stats, and whether its placement is paid for.
 type mappedStore struct {
-	Platform Platform
-	Premium  bool
-	Photo    *Photo
+	Platform   Platform
+	Premium    bool
+	Photo      *Photo
+	Categories []string
 }
 
 func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]mappedStore, error) {
@@ -614,7 +618,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,coalesce(s.cover_media_id::text,'') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
+	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,coalesce(s.cover_media_id::text,''),coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids)
 	if e != nil {
 		return nil, e
 	}
@@ -623,7 +627,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 		var id string
 		var coverMediaID string
 		var m mappedStore
-		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &coverMediaID); e != nil {
+		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &coverMediaID, &m.Categories); e != nil {
 			return nil, e
 		}
 		if coverMediaID != "" {
@@ -633,6 +637,55 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	}
 	return out, rows.Err()
 }
+
+// Internal results must carry the same stored Google score as their detail page even
+// when Google's live text search did not return that store in this particular request.
+// Live data already attached by the merge above wins; this fills only missing values.
+func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) error {
+	ids := make([]uuid.UUID, 0, len(results))
+	for i := range results {
+		if results[i].ID != nil && results[i].Google == nil {
+			ids = append(ids, *results[i].ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,
+ CASE WHEN jsonb_typeof(attribution->'rating')='number' THEN (attribution->>'rating')::float8 ELSE 0 END,
+ CASE WHEN jsonb_typeof(attribution->'rating_count')='number' THEN (attribution->>'rating_count')::int ELSE 0 END,
+ coalesce(attribution->>'photo_name',''),
+ CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END
+ FROM store_external_sources WHERE provider='google' AND store_id=ANY($1) AND attribution ? 'rating_count'`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	stored := map[uuid.UUID]*External{}
+	for rows.Next() {
+		var id uuid.UUID
+		var item External
+		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions); err != nil {
+			return err
+		}
+		item.Provider = "google"
+		stored[id] = &item
+	}
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for i := range results {
+		if results[i].ID == nil || results[i].Google != nil {
+			continue
+		}
+		results[i].Google = stored[*results[i].ID]
+		if results[i].Google != nil && results[i].Source == "internal" {
+			results[i].Source = "google+platform"
+		}
+	}
+	return nil
+}
+
 func (s *Service) Interaction(ctx context.Context, searchID uuid.UUID, user, visitor *uuid.UUID, resultID *uuid.UUID, event, key string) error {
 	allowed := map[string]bool{"result_impression": true, "result_click": true, "store_open": true, "favorite": true, "unfavorite": true, "review_started": true, "review_created": true, "share": true, "call_click": true}
 	if !allowed[event] {

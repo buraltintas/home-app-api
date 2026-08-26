@@ -190,6 +190,7 @@ var homeConcepts = []homeConcept{
 	{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
 }
 
 func Deterministic(raw string) Intent {
@@ -643,9 +644,12 @@ func rankResults(results []Result, located, nameLed bool) {
 	}
 	home := homeCity(results)
 	inHomeCity := func(r Result) bool { return home != "" && cityKey(r.City, r.Address) == home }
-	// Paid placement reaches the top of the searcher's own city, and no further: a premium
-	// store in another province is still a store in another province.
-	promotedHere := func(r Result) bool { return r.Premium && inHomeCity(r) }
+	// PremiumNearby limits injected placement to a local 50 km candidate set. A mapped
+	// Google result may carry the same premium flag too, so keep the distance guard here;
+	// unlike an exact city-label match it tolerates “Muratpaşa/Antalya” versus “Antalya”.
+	promotedHere := func(r Result) bool {
+		return r.Premium && r.DistanceMeters != nil && *r.DistanceMeters <= localHorizonMeters
+	}
 	reviewedHere := func(r Result) bool {
 		return r.Platform != nil && r.Platform.ReviewCount > 0 && inHomeCity(r)
 	}

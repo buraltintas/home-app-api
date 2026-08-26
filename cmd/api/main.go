@@ -114,7 +114,7 @@ func main() {
 	adminSvc := adminpkg.NewService(db)
 	feedbackSvc := feedback.NewService(db, cfg.FeedbackNotifyEmail)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, users, mediaSvc, adminSvc, reportSvc, feedbackSvc, []byte(cfg.OTPHashSecret))
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails, server.RuntimeConfig{StoreReviewRadiusMeters: cfg.StoreReviewRadiusMeters}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
 		log.Info("api listening", "addr", cfg.HTTPAddr, "environment", cfg.Environment)
 		if e := server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
