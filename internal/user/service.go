@@ -5,7 +5,6 @@ import (
 	"errors"
 	"math"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,7 +14,6 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,8 +21,6 @@ type Service struct {
 	db     *pgxpool.Pool
 	report *reporting.Service
 }
-
-var usernamePattern = regexp.MustCompile(`^[A-Za-z0-9_]+$`)
 
 func NewService(db *pgxpool.Pool, report *reporting.Service) *Service { return &Service{db, report} }
 
@@ -46,17 +42,19 @@ func Level(reviewCount int) int {
 }
 
 type PublicProfile struct {
-	ID             uuid.UUID `json:"id"`
-	Username       string    `json:"username"`
-	DisplayName    string    `json:"display_name"`
-	AvatarURL      string    `json:"avatar_url"`
-	Bio            string    `json:"bio"`
-	BioLanguage    string    `json:"bio_language,omitempty"`
-	City           string    `json:"city"`
-	FollowerCount  int       `json:"follower_count"`
-	FollowingCount int       `json:"following_count"`
-	PostCount      int       `json:"post_count"`
-	Level          int       `json:"level"`
+	ID uuid.UUID `json:"id"`
+	// Username is an internal, immutable collision-safe identifier. Public identity is
+	// display_name; generated user_ handles must never leak into a client surface.
+	Username       string `json:"-"`
+	DisplayName    string `json:"display_name"`
+	AvatarURL      string `json:"avatar_url"`
+	Bio            string `json:"bio"`
+	BioLanguage    string `json:"bio_language,omitempty"`
+	City           string `json:"city"`
+	FollowerCount  int    `json:"follower_count"`
+	FollowingCount int    `json:"following_count"`
+	PostCount      int    `json:"post_count"`
+	Level          int    `json:"level"`
 }
 type Me struct {
 	PublicProfile
@@ -192,12 +190,8 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 			return e
 		}
 	}
-	_, e = tx.Exec(ctx, `UPDATE user_profiles SET username=coalesce($2,username),display_name=coalesce($3,display_name),avatar_url=coalesce($4,avatar_url),bio=coalesce($5,bio),city=coalesce($6,city),bio_language=coalesce($7,bio_language),updated_at=now() WHERE user_id=$1`, id, in.Username, in.DisplayName, in.AvatarURL, in.Bio, in.City, in.BioLanguage)
+	_, e = tx.Exec(ctx, `UPDATE user_profiles SET display_name=coalesce($2,display_name),avatar_url=coalesce($3,avatar_url),bio=coalesce($4,bio),city=coalesce($5,city),bio_language=coalesce($6,bio_language),updated_at=now() WHERE user_id=$1`, id, in.DisplayName, in.AvatarURL, in.Bio, in.City, in.BioLanguage)
 	if e != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(e, &pgErr) && pgErr.Code == "23505" {
-			return httpapi.E(409, "USERNAME_TAKEN", "Username is already in use")
-		}
 		return e
 	}
 	_, e = tx.Exec(ctx, `INSERT INTO user_private_profiles(user_id,relationship_status,has_children,children_age_ranges,housing_status,occupation,age_range,home_style_interests) VALUES($1,$2,$3,coalesce($4::text[],'{}'::text[]),$5,$6,$7,coalesce($8::text[],'{}'::text[])) ON CONFLICT(user_id) DO UPDATE SET relationship_status=coalesce($2,user_private_profiles.relationship_status),has_children=coalesce($3,user_private_profiles.has_children),children_age_ranges=coalesce($4::text[],user_private_profiles.children_age_ranges),housing_status=coalesce($5,user_private_profiles.housing_status),occupation=coalesce($6,user_private_profiles.occupation),age_range=coalesce($7,user_private_profiles.age_range),home_style_interests=coalesce($8::text[],user_private_profiles.home_style_interests),updated_at=now()`, id, in.RelationshipStatus, in.HasChildren, in.ChildrenAgeRanges, in.HousingStatus, in.Occupation, in.AgeRange, in.HomeStyleInterests)
@@ -209,11 +203,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, in Update) error {
 
 func validateUpdate(in *Update) error {
 	if in.Username != nil {
-		v := strings.TrimSpace(*in.Username)
-		if utf8.RuneCountInString(v) < 3 || utf8.RuneCountInString(v) > 30 || !usernamePattern.MatchString(v) {
-			return httpapi.ErrInvalidInput
-		}
-		in.Username = &v
+		return httpapi.E(422, "USERNAME_IMMUTABLE", "Username cannot be changed")
 	}
 	for _, field := range []struct {
 		value *string

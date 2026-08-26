@@ -13,7 +13,7 @@ func TestValidateUpdateRejectsUnsafeOrOversizedProfileData(t *testing.T) {
 		{Bio: ptr(strings.Repeat("x", 501))},
 		{HousingStatus: ptr("spaceship")},
 		{HomeStyleInterests: ptr([]string{""})},
-		{Username: ptr("not-valid!")},
+		{Username: ptr("any_username")},
 	}
 	for i := range bad {
 		if validateUpdate(&bad[i]) == nil {
@@ -23,11 +23,11 @@ func TestValidateUpdateRejectsUnsafeOrOversizedProfileData(t *testing.T) {
 }
 
 func TestValidateUpdateNormalizesProfileData(t *testing.T) {
-	in := Update{Username: ptr("  valid_user "), DisplayName: ptr("  Ayşe  "), AvatarURL: ptr("https://cdn.example/avatar.jpg"), HomeStyleInterests: ptr([]string{" modern "})}
+	in := Update{DisplayName: ptr("  Ayşe  "), AvatarURL: ptr("https://cdn.example/avatar.jpg"), HomeStyleInterests: ptr([]string{" modern "})}
 	if e := validateUpdate(&in); e != nil {
 		t.Fatal(e)
 	}
-	if *in.Username != "valid_user" || *in.DisplayName != "Ayşe" || (*in.HomeStyleInterests)[0] != "modern" {
+	if *in.DisplayName != "Ayşe" || (*in.HomeStyleInterests)[0] != "modern" {
 		t.Fatalf("not normalized: %+v", in)
 	}
 }

@@ -303,7 +303,6 @@ paths:
               properties:
                 preferred_locale: {$ref: '#/components/schemas/Locale'}
                 bio_language: {$ref: '#/components/schemas/Locale'}
-                username: {type: string, minLength: 3, maxLength: 30, pattern: '^[A-Za-z0-9_]+$'}
                 display_name: {type: string, maxLength: 100}
                 avatar_url: {type: string, format: uri, maxLength: 2048}
                 bio: {type: string, maxLength: 500, description: Original user content; never automatically translated.}
@@ -519,7 +518,7 @@ components:
         attributions: {type: array, items: {type: string}}
     Post:
       type: object
-      required: [id, user_id, store_id, text, rating, visit_verified, distance_meters, created_at, username, display_name, avatar_url, store_name, store_city, store_district, media, like_count, comment_count, viewer_has_liked, viewer_follows_author, viewer_has_favorited_store]
+      required: [id, user_id, store_id, text, rating, visit_verified, distance_meters, created_at, display_name, avatar_url, store_name, store_city, store_district, media, like_count, comment_count, viewer_has_liked, viewer_follows_author, viewer_has_favorited_store]
       properties:
         id: {type: string, format: uuid}
         user_id: {type: string, format: uuid}
@@ -530,7 +529,6 @@ components:
         visit_verified: {type: boolean, const: true}
         distance_meters: {type: number, minimum: 0}
         created_at: {type: string, format: date-time}
-        username: {type: string}
         display_name: {type: string}
         avatar_url: {type: string}
         store_name: {type: string}
@@ -545,13 +543,12 @@ components:
         viewer_has_favorited_store: {type: boolean}
     Comment:
       type: object
-      required: [id, user_id, body, username, display_name, avatar_url, created_at]
+      required: [id, user_id, body, display_name, avatar_url, created_at]
       properties:
         id: {type: string, format: uuid}
         user_id: {type: string, format: uuid}
         body: {type: string}
         content_language: {$ref: '#/components/schemas/Locale'}
-        username: {type: string}
         display_name: {type: string}
         avatar_url: {type: string}
         created_at: {type: string, format: date-time}
@@ -679,10 +676,9 @@ components:
         result_count: {type: integer, minimum: 0}
     PublicProfile:
       type: object
-      required: [id, username, display_name, avatar_url, bio, city, follower_count, following_count, post_count]
+      required: [id, display_name, avatar_url, bio, city, follower_count, following_count, post_count]
       properties:
         id: {type: string, format: uuid}
-        username: {type: string}
         display_name: {type: string}
         avatar_url: {type: string}
         bio: {type: string}

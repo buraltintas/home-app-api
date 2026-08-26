@@ -68,7 +68,7 @@ type Post struct {
 	DistanceMeters      float64   `json:"distance_meters"`
 	StoreDistanceMeters *float64  `json:"store_distance_meters,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
-	Username            string    `json:"username"`
+	Username            string    `json:"-"`
 	// The author's published review count is fetched only to derive their level; it is not
 	// part of the response, because a per-post review tally is not something the client
 	// should start rendering on its own.
@@ -104,7 +104,7 @@ type Comment struct {
 	UserID          uuid.UUID `json:"user_id"`
 	Body            string    `json:"body"`
 	ContentLanguage string    `json:"content_language,omitempty"`
-	Username        string    `json:"username"`
+	Username        string    `json:"-"`
 	DisplayName     string    `json:"display_name"`
 	AvatarURL       string    `json:"avatar_url"`
 	CreatedAt       time.Time `json:"created_at"`

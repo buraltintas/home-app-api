@@ -106,7 +106,7 @@ Messages can be localized; branch UI logic only on `code`. Unknown JSON fields, 
 | `STORE_NOT_FOUND`, `POST_NOT_FOUND`, `COMMENT_NOT_FOUND`, `USER_NOT_FOUND`, `SEARCH_NOT_FOUND`, `MEDIA_NOT_FOUND` | Show not-found state. |
 | `STORE_VISIT_NOT_VERIFIED` | Explain the user must be physically near the store. |
 | `VISIT_VERIFICATION_INVALID` | Discard the expired/used proof and request a new on-site verification or fresh current location. |
-| `USERNAME_TAKEN` | Request another username. |
+| `USERNAME_IMMUTABLE` | Client defect: technical usernames are internal and cannot be changed. |
 | `CANNOT_FOLLOW_SELF` | Suppress self-follow UI. |
 | `DUPLICATE_MEDIA`, `INVALID_MEDIA` | Correct media selection/readiness before retry. |
 | `MEDIA_STATE_CONFLICT` | Do not finalize twice; refresh upload state/start over. |
@@ -152,7 +152,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `GET /v1/users/{id}/posts` | optional | limit → `{items}`; default 20/max 50 | — |
 | `POST`, `DELETE /v1/users/{id}/follow` | required | empty → 204, idempotent | `CANNOT_FOLLOW_SELF` |
 | `POST /v1/searches/{id}/interactions` | owning user/visitor | event payload → 204, idempotent when key supplied | attribution/not found |
-| `GET`, `PATCH /v1/me` | required | private profile / partial update → private profile | input/username conflict |
+| `GET`, `PATCH /v1/me` | required | private profile / partial update → private profile | invalid input |
 | `PUT`, `DELETE /v1/me/discovery-location` | required | persist current/manual private discovery location → private profile; clear → 204 | input/rate/provider errors |
 | `DELETE /v1/me` | required | anonymize/delete → 204 | auth |
 | `GET /v1/me/searches` | required | limit → `{items}` default 30/max 100 | auth |
@@ -229,9 +229,9 @@ Favoriting a store and liking a post are separate idempotent relationships. Thei
 
 Comments are one-level only, oldest-first, and have no cursor. They contain `body` (not `text`), optional language metadata, author display fields, and timestamp. Only the owner can delete; non-owners receive the same not-found behavior.
 
-Follows are unique/idempotent. Self-follow returns HTTP 422 `CANNOT_FOLLOW_SELF`. Public profiles expose only `id`, username/display name/avatar, bio and optional `bio_language`, city, follower/following counts, and post count. `viewer_follows_author` is present on post objects, not public profile.
+Follows are unique/idempotent. Self-follow returns HTTP 422 `CANNOT_FOLLOW_SELF`. Public profiles expose only `id`, display name/avatar, bio and optional `bio_language`, city, follower/following counts, and post count. `viewer_follows_author` is present on post objects, not public profile.
 
-`GET /v1/me` adds email, preferred locale, private discovery location, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. The discovery location belongs in the profile settings area with readable current/manual state and Change/Clear actions; never show its numeric coordinates. These fields and search history must never appear on another user's profile. PATCH is partial. Username is 3–30 ASCII letters/digits/underscore and unique.
+`GET /v1/me` adds email, preferred locale, private discovery location, and private personalization: relationship status, children flag/age ranges, housing status, occupation, age range, home style interests. The discovery location belongs in the profile settings area with readable current/manual state and Change/Clear actions; never show its numeric coordinates. These fields and search history must never appear on another user's profile. PATCH is partial. The generated technical username is internal, omitted from API responses, and immutable; clients display only `display_name`.
 
 Profile settings must include a danger-zone action named “Hesabımı sil” (localized). Confirm before `DELETE /v1/me`. A successful 204 means the backend permanently removed profile/private data, search history, relationships and authored content, revoked every session, and deactivated the account. Immediately clear tokens, cached private data and personalized state, then return to the anonymous entry screen. A later verified login with the same email reactivates the same account ID as a blank profile; deleted data does not return. Do not describe this as temporary deactivation.
 

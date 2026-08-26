@@ -35,7 +35,6 @@ func clamp(limit int) int {
 type UserRow struct {
 	ID          uuid.UUID  `json:"id"`
 	Email       string     `json:"email"`
-	Username    string     `json:"username"`
 	DisplayName string     `json:"display_name"`
 	Status      string     `json:"status"`
 	ReviewCount int        `json:"review_count"`
@@ -45,10 +44,10 @@ type UserRow struct {
 
 func (s *Service) Users(ctx context.Context, query string, limit, offset int) ([]UserRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.username::text,''),coalesce(p.display_name,''),u.status,
+	rows, e := s.db.Query(ctx, `SELECT u.id,u.primary_email::text,coalesce(p.display_name,''),u.status,
  (SELECT count(*) FROM posts po WHERE po.user_id=u.id AND po.deleted_at IS NULL),u.created_at,u.deleted_at
  FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id
- WHERE ($1='' OR lower(u.primary_email::text) LIKE '%'||$1||'%' OR lower(coalesce(p.username::text,'')) LIKE '%'||$1||'%')
+	 WHERE ($1='' OR lower(u.primary_email::text) LIKE '%'||$1||'%' OR lower(coalesce(p.display_name,'')) LIKE '%'||$1||'%')
  ORDER BY u.created_at DESC LIMIT $2 OFFSET $3`, query, clamp(limit), offset)
 	if e != nil {
 		return nil, e
@@ -57,7 +56,7 @@ func (s *Service) Users(ctx context.Context, query string, limit, offset int) ([
 	out := []UserRow{}
 	for rows.Next() {
 		var x UserRow
-		if e = rows.Scan(&x.ID, &x.Email, &x.Username, &x.DisplayName, &x.Status, &x.ReviewCount, &x.CreatedAt, &x.DeletedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Email, &x.DisplayName, &x.Status, &x.ReviewCount, &x.CreatedAt, &x.DeletedAt); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
