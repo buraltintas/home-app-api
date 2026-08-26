@@ -603,17 +603,47 @@ var nonHomeTypes = map[string]bool{
 // showrooms -- "VitrA - Artema - Güvercinler İnşaat" sells bathroom fittings over a
 // counter. So are "montaj" and "tesisat": a shop that sells the parts often fits them too,
 // and the shop is the part we want.
-var serviceBusinessTerms = []string{
-	"tadilat", "mimarlık", "mimarlik", "mimari",
-	"müteahhit", "muteahhit", "taahhüt", "taahhut",
-	"restorasyon", "hizmetleri", "hizmetler",
+// Stems, not whole words. Turkish glues suffixes onto everything, so a whole-word rule
+// catches "Tadilat" and misses "Tadilatı" -- which is how a renovation firm stayed
+// classified as a decoration store after the rule was written to remove it. Listing the
+// inflections instead would be the same mistake as listing shop names: there is always one
+// more nobody thought of.
+var serviceBusinessStems = []string{
+	"tadilat", "mimar", "müteahhit", "muteahhit",
+	"taahhüt", "taahhut", "restorasyon", "hizmet",
 }
 
 // namesAService reports whether a store's own name says it sells labour rather than goods.
 func namesAService(normalized, folded string) bool {
-	for _, term := range serviceBusinessTerms {
-		if containsWord(normalized, folded, term) {
+	for _, stem := range serviceBusinessStems {
+		if startsAWord(normalized, folded, stem) {
 			return true
+		}
+	}
+	return false
+}
+
+// startsAWord reports whether the stem begins a word in the text. A letter before it
+// disqualifies the match; letters after it do not, because those are the suffixes.
+func startsAWord(normalized, folded, stem string) bool {
+	for _, haystack := range [2]string{normalized, foldLatin(folded)} {
+		needle := normalizeText(stem)
+		if haystack != normalized {
+			needle = foldLatin(needle)
+		}
+		if needle == "" {
+			continue
+		}
+		for offset := 0; ; {
+			index := strings.Index(haystack[offset:], needle)
+			if index < 0 {
+				break
+			}
+			start := offset + index
+			if start == 0 || !isWordRune(rune(haystack[start-1])) {
+				return true
+			}
+			offset = start + 1
 		}
 	}
 	return false

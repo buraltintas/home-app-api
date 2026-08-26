@@ -8,6 +8,23 @@ repeating the value involved.
 
 ---
 
+## Renovation firms lose the categories they should never have had
+
+- Eleven stores in the catalogue were service businesses classified as shops — a decoration
+  search returned contractors, reported twice. `cmd/prune-services` removes their category
+  links and nothing else: the store keeps its photo, rating and reviews, and simply stops
+  claiming to sell what it does not sell. An unclassified store already sorts below
+  classified ones, so it sinks rather than disappears. 1016 links became 995.
+- The set is chosen by the classifier's own rule, not by a list anybody typed. That matters:
+  a hand-written query found seventeen candidates, and the rule correctly keeps six of them
+  — a VitrA dealer, a plumbing-supplies shop, a furniture shop that also fits what it sells.
+- **The rule now matches stems, not whole words.** Turkish glues suffixes onto everything,
+  so whole-word matching caught "Tadilat" and missed "Tadilatı" — leaving a renovation firm
+  in the decoration category after the rule written to remove it had already shipped. Adding
+  the inflections to a list would have been the same mistake as listing shop names: there is
+  always one more nobody thought of.
+
+
 ## The brand list is gone
 
 - Sixteen chain names were hard-coded so that Koçtaş and Madame Coco would classify. That is

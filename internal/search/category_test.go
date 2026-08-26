@@ -168,3 +168,20 @@ func TestRealShopsSurviveTheServiceRule(t *testing.T) {
 		}
 	}
 }
+
+// Turkish glues suffixes onto everything. A whole-word rule caught "Tadilat" and missed
+// "Tadilatı", which left a renovation firm sitting in the decoration category after the
+// rule meant to remove it had shipped.
+func TestServiceRuleSurvivesTurkishSuffixes(t *testing.T) {
+	for _, name := range []string{
+		"ANTALYA DECOR HOME | Antalya Ev Dekorasyon ve Tadilatı",
+		"Antalya Tadilatçı Dekorasyon",
+		"Antalya İç Mimarlığı",
+		"Kent Mimarlık Bürosu",
+		"Boya Badana Hizmetlerimiz",
+	} {
+		if IsHomeLivingStore(name, nil) {
+			t.Errorf("%q bir hizmet firması, elenmeliydi", name)
+		}
+	}
+}
