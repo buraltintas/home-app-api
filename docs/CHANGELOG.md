@@ -8,6 +8,28 @@ repeating the value involved.
 
 ---
 
+## Store classification and named-store ordering
+
+- **Nearly a fifth of imported stores carried no category at all** — 89 of 496. The list
+  included English Home, Nilda Home, Evim Home Goods and Deco Home Ev Aksesuar: shops whose
+  entire business is in their name. A store with no category cannot be found by anything
+  that filters on one, and shows a blank where its categories belong. The classifier now
+  also reads the generic words that name a home store without naming a product ("home",
+  "züccaciye", "ev aksesuar"), matched as **whole words** rather than substrings — which the
+  product terms do not need to be, because "halı" inside a longer word is still about
+  carpets while "home" inside "Homeros" and "ev" inside "Evren" are about nothing. A test
+  pins both halves: the real shop names that were being missed, and the near-misses that
+  must stay uncategorised.
+- Existing uncategorised stores are unaffected until they are reclassified; the change only
+  applies as stores are imported or refreshed.
+- **A named store search ignored distance.** Typing a chain's name returned its branches in
+  an order that meant nothing: every branch carries the same name and much the same score,
+  and the distance penalty is capped for name matches precisely so a named store is not
+  buried. Branches now run nearest first. Stores that are not the one named still appear —
+  the nearest bed shop is worth knowing about when the branch you asked for is shut — but
+  never above the ones that are.
+
+
 ## Admin surface, paid placement, contributor levels
 
 - **`/v1/admin/*`** exposes the operator surface. Most of it is wiring rather than new SQL:

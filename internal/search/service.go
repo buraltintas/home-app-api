@@ -540,6 +540,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			// An explicit name match should not be buried by distance alone.
 			if intent.StoreName != "" && nameMatches(results[i].Name, intent.StoreName) {
 				penalty = math.Min(penalty, 3)
+				results[i].nameHit = true
 			}
 			results[i].score -= penalty
 		}

@@ -139,8 +139,12 @@ type Result struct {
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
-	Premium         bool `json:"premium,omitempty"`
-	score           float64
+	Premium bool `json:"premium,omitempty"`
+	score   float64
+	// Set when the visitor named a store and this result is one of them. Ranking needs to
+	// tell "the shop you asked for" from "a shop like it"; without the distinction a chain
+	// with several branches came back in no useful order at all.
+	nameHit         bool
 	externalPlaceID string
 }
 type Request struct {
@@ -191,6 +195,53 @@ var homeConcepts = []homeConcept{
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
 	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
+}
+
+// Generic words that name a home store without naming a product. These are matched as
+// whole words, not substrings, which the product terms above do not need to be: "halı"
+// inside a longer word is still about carpets, but "home" inside "Homeros" and "ev" inside
+// "Evren" are about nothing at all.
+//
+// The gap these close was large. Nearly a fifth of imported stores carried no category,
+// and the list included English Home, Nilda Home, Evim Home Goods and Deco Home Ev
+// Aksesuar -- shops whose whole business is in their name. A store with no category cannot
+// be found by anything that filters on one, and shows a blank where its categories belong.
+var homeWordConcepts = []homeConcept{
+	{"home_accessories", "home_goods", []string{"home", "homeware", "home goods", "ev aksesuar", "ev aksesuarları", "ev aksesuarlari", "züccaciye", "zuccaciye", "ev gereçleri", "ev gerecleri", "haushaltswaren", "wohnaccessoires", "товары для дома"}, nil},
+	{"home_textile", "home_textile", []string{"ev tekstil", "ev tekstili", "home textile"}, nil},
+}
+
+// containsWord reports whether the term appears as a whole word. A letter on either side
+// disqualifies the match; punctuation, spaces and string edges do not.
+func containsWord(normalized, folded, term string) bool {
+	for _, haystack := range [2]string{normalized, foldLatin(folded)} {
+		needle := normalizeText(term)
+		if haystack != normalized {
+			needle = foldLatin(needle)
+		}
+		if needle == "" {
+			continue
+		}
+		for offset := 0; ; {
+			index := strings.Index(haystack[offset:], needle)
+			if index < 0 {
+				break
+			}
+			start := offset + index
+			end := start + len(needle)
+			beforeOK := start == 0 || !isWordRune(rune(haystack[start-1]))
+			afterOK := end == len(haystack) || !isWordRune(rune(haystack[end]))
+			if beforeOK && afterOK {
+				return true
+			}
+			offset = start + 1
+		}
+	}
+	return false
+}
+
+func isWordRune(r rune) bool {
+	return r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r > 127
 }
 
 func Deterministic(raw string) Intent {
@@ -511,6 +562,14 @@ func StoreCategories(name string, types []string) []string {
 	}
 	normalized := normalizeText(name)
 	folded := foldLatin(normalized)
+	for _, concept := range homeWordConcepts {
+		for _, term := range concept.terms {
+			if containsWord(normalized, folded, term) {
+				add(concept.category)
+				break
+			}
+		}
+	}
 	for _, concept := range homeConcepts {
 		for _, term := range concept.terms {
 			if containsNormalized(normalized, folded, term) {
@@ -638,6 +697,24 @@ func rankResults(results []Result, located, nameLed bool) {
 	// closest. The radius filter already steps aside for name-led intents; the ordering
 	// has to as well, or the store they named finishes last because it happens to be
 	// across town.
+	if nameLed && located {
+		// Somebody who typed a chain's name wants the branch they can reach. Every branch
+		// carries the same name and much the same score, so without distance they came back
+		// in an order that meant nothing. Stores that are not the one named still appear --
+		// the nearest bed shop is worth knowing about when the İşbir you asked for is shut
+		// -- but never above the ones that are.
+		sort.SliceStable(results, func(i, j int) bool {
+			a, b := results[i], results[j]
+			if a.nameHit != b.nameHit {
+				return a.nameHit
+			}
+			if a.nameHit && a.DistanceMeters != nil && b.DistanceMeters != nil && *a.DistanceMeters != *b.DistanceMeters {
+				return *a.DistanceMeters < *b.DistanceMeters
+			}
+			return a.score > b.score
+		})
+		return
+	}
 	if nameLed || !located {
 		sort.SliceStable(results, func(i, j int) bool { return results[i].score > results[j].score })
 		return
