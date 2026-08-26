@@ -74,9 +74,9 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 				Provider    string `json:"provider"`
 				ProviderURI string `json:"providerUri"`
 			}
-			Photos []googlePhoto `json:"photos"`
-			Phone       string `json:"nationalPhoneNumber"`
-			PrimaryType string `json:"primaryType"`
+			Photos      []googlePhoto `json:"photos"`
+			Phone       string        `json:"nationalPhoneNumber"`
+			PrimaryType string        `json:"primaryType"`
 		}
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
