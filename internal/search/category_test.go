@@ -51,3 +51,44 @@ func TestNamedStoreResultsRunNearestFirst(t *testing.T) {
 		}
 	}
 }
+
+// A review is worth leading with against stores you would actually weigh against each
+// other. Ten kilometres away is not one of those.
+func TestReviewLeadStopsAtAKilometre(t *testing.T) {
+	near, far := 500.0, 10000.0
+	reviewed := Platform{ReviewCount: 3, AverageRating: 5}
+	results := []Result{
+		{Name: "Uncalı, üç değerlendirme", DistanceMeters: &far, City: "Antalya", Platform: &reviewed, score: 400},
+		{Name: "Beş yüz metre, değerlendirmesiz", DistanceMeters: &near, City: "Antalya", Platform: &Platform{}, score: 80},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Beş yüz metre, değerlendirmesiz" {
+		t.Fatalf("yakındaki önce gelmeliydi, %q geldi", results[0].Name)
+	}
+}
+
+// Inside the kilometre the review still leads, which is the whole point of collecting them.
+func TestReviewStillLeadsInsideTheKilometre(t *testing.T) {
+	a, b := 900.0, 300.0
+	results := []Result{
+		{Name: "Değerlendirmesiz, daha yakın", DistanceMeters: &b, City: "Antalya", Platform: &Platform{}, score: 80},
+		{Name: "Değerlendirilmiş", DistanceMeters: &a, City: "Antalya", Platform: &Platform{ReviewCount: 2, AverageRating: 4}, score: 400},
+	}
+	rankResults(results, true, false)
+	if results[0].Name != "Değerlendirilmiş" {
+		t.Fatalf("aynı kilometrede değerlendirilmiş önce gelmeliydi, %q geldi", results[0].Name)
+	}
+}
+
+// The bakery that matches "İşbir" by name and nothing else about it.
+func TestUnclassifiedNameMatchGoesLast(t *testing.T) {
+	near, far := 200.0, 6000.0
+	results := []Result{
+		{Name: "Isbirli Ekmek Taş Firin", DistanceMeters: &near, nameHit: true, Categories: []string{}, score: 90},
+		{Name: "İşbir Yatak Kepez", DistanceMeters: &far, nameHit: true, Categories: []string{"bedding"}, score: 80},
+	}
+	rankResults(results, true, true)
+	if results[0].Name != "İşbir Yatak Kepez" {
+		t.Fatalf("sınıflandırılmış olan önce gelmeliydi, %q geldi", results[0].Name)
+	}
+}

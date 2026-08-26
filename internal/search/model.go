@@ -195,6 +195,12 @@ var homeConcepts = []homeConcept{
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
 	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
+	// Trade words that name the business plainly and were simply missing. "Mefruşat" is
+	// how a great many Turkish home textile shops describe themselves, and an "uyku
+	// merkezi" sells beds and nothing else.
+	{"home_textile", "furnishing", []string{"mefruşat", "mefrusat", "döşemelik", "dosemelik", "kumaş", "kumas"}, nil},
+	{"bedding", "sleep_centre", []string{"uyku merkezi", "yatak merkezi"}, nil},
+	{"household", "diy", []string{"yapı market", "yapi market", "hırdavat", "hirdavat"}, nil},
 }
 
 // Generic words that name a home store without naming a product. These are matched as
@@ -209,6 +215,35 @@ var homeConcepts = []homeConcept{
 var homeWordConcepts = []homeConcept{
 	{"home_accessories", "home_goods", []string{"home", "homeware", "home goods", "ev aksesuar", "ev aksesuarları", "ev aksesuarlari", "züccaciye", "zuccaciye", "ev gereçleri", "ev gerecleri", "haushaltswaren", "wohnaccessoires", "товары для дома"}, nil},
 	{"home_textile", "home_textile", []string{"ev tekstil", "ev tekstili", "home textile"}, nil},
+	// "Cam" has to be a whole word or every "camii" in the country becomes a glass shop.
+	{"decoration", "glass", []string{"cam", "ayna"}, nil},
+}
+
+// Chains whose name alone settles what they sell. Matched as whole words, which is what
+// keeps "işbir" out of "Isbirli Ekmek Taş Firin" -- a real store in the catalogue and a
+// real bakery.
+//
+// Deliberately short. A brand only belongs here when nothing else in Turkey shares the
+// word: "Taç" is a home textile chain and also a language school in Döşemealtı, and
+// "Karaca" is a homeware brand and also a surname. A wrong category is worse than none,
+// because it puts a store into searches it has no business answering.
+var knownStoreBrands = map[string]string{
+	"ikea":        "furniture",
+	"koçtaş":      "household",
+	"koctas":      "household",
+	"madame coco": "home_accessories",
+	"paşabahçe":   "tableware",
+	"pasabahce":   "tableware",
+	"vivense":     "furniture",
+	"bellona":     "furniture",
+	"istikbal":    "furniture",
+	"yataş":       "bedding",
+	"yatas":       "bedding",
+	"işbir":       "bedding",
+	"isbir":       "bedding",
+	"cotton box":  "home_textile",
+	"linens":      "home_textile",
+	"chakra":      "home_textile",
 }
 
 // containsWord reports whether the term appears as a whole word. A letter on either side
@@ -562,6 +597,11 @@ func StoreCategories(name string, types []string) []string {
 	}
 	normalized := normalizeText(name)
 	folded := foldLatin(normalized)
+	for brand, slug := range knownStoreBrands {
+		if containsWord(normalized, folded, brand) {
+			add(slug)
+		}
+	}
 	for _, concept := range homeWordConcepts {
 		for _, term := range concept.terms {
 			if containsWord(normalized, folded, term) {
@@ -647,6 +687,10 @@ func homeCity(results []Result) string {
 // left relevance sorting the whole city: the list opened at 11.4 km, went to 13.9, then
 // back to 7.4. Below 25 km the granularity is now 500 m, which reads as nearest first
 // while still letting two stores on the same street be ordered by how well they match.
+// How far a community review carries. Chosen with the product owner: near enough that
+// two stores are genuinely alternatives to each other.
+const reviewLeadMeters = 1000
+
 const nearBandMeters = 500
 const nearBandLimit = 25000
 
@@ -708,6 +752,14 @@ func rankResults(results []Result, located, nameLed bool) {
 			if a.nameHit != b.nameHit {
 				return a.nameHit
 			}
+			// A name is a weak signal on its own: searching for İşbir also turns up a
+			// bakery called Isbirli. A store we could not classify at all is the one most
+			// likely to be something else entirely, so it goes last rather than being
+			// thrown away -- we would rather show a wrong shop at the bottom than hide a
+			// right one we failed to label.
+			if first, second := len(a.Categories) > 0, len(b.Categories) > 0; first != second {
+				return first
+			}
 			if a.nameHit && a.DistanceMeters != nil && b.DistanceMeters != nil && *a.DistanceMeters != *b.DistanceMeters {
 				return *a.DistanceMeters < *b.DistanceMeters
 			}
@@ -727,6 +779,17 @@ func rankResults(results []Result, located, nameLed bool) {
 	promotedHere := func(r Result) bool {
 		return r.Premium && r.DistanceMeters != nil && *r.DistanceMeters <= localHorizonMeters
 	}
+	// Reviewed stores used to lead the whole of the searcher's own city, which in Antalya
+	// meant a shop ten kilometres away with one review beat a shop five hundred metres
+	// away with none. Community reviews are the point of this product and still lead --
+	// but only against stores you would weigh against each other, which is what a
+	// kilometre is. Reported from the live site, and the ranking really did work that way.
+	reviewLead := func(r Result) int {
+		if r.DistanceMeters == nil {
+			return math.MaxInt32
+		}
+		return int(*r.DistanceMeters / reviewLeadMeters)
+	}
 	reviewedHere := func(r Result) bool {
 		return r.Platform != nil && r.Platform.ReviewCount > 0 && inHomeCity(r)
 	}
@@ -736,6 +799,9 @@ func rankResults(results []Result, located, nameLed bool) {
 			return first
 		} else if first {
 			return a.score > b.score
+		}
+		if first, second := reviewLead(a), reviewLead(b); first != second {
+			return first < second
 		}
 		if first, second := reviewedHere(a), reviewedHere(b); first != second {
 			return first

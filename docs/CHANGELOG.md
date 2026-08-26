@@ -8,6 +8,27 @@ repeating the value involved.
 
 ---
 
+## Ranking bounds and a wider classifier
+
+- **A community review used to lead the searcher's whole city.** In Antalya that meant a
+  shop ten kilometres away with three reviews beat a shop five hundred metres away with
+  none — reported from the live site, and the ranking really did work that way. Reviews
+  still lead, because they are the point of the product, but now only against stores a
+  person would genuinely weigh against each other. The product owner set that at one
+  kilometre. Two existing tests encoded the old rule and were rewritten rather than
+  deleted, since the behaviour they described was deliberate until it was changed.
+- **An unclassified store now goes last in a name search.** Searching for İşbir also finds
+  a bakery called Isbirli, and a store we could not classify at all is the one most likely
+  to be something else entirely. It sinks rather than disappearing: better a wrong shop at
+  the bottom than a right one hidden because we failed to label it.
+- The classifier also reads well-known chain names and several Turkish trade words that
+  name a business plainly — *mefruşat*, *uyku merkezi*, *yapı market*, *hırdavat*, *cam*.
+  The brand list is deliberately short: a name earns a place only when nothing else in the
+  country shares the word. "Taç" is a home textile chain and a language school in
+  Döşemealtı; "Karaca" is a homeware brand and a surname. A wrong category is worse than
+  none, because it answers searches it has no business answering.
+
+
 ## Store classification and named-store ordering
 
 - **Nearly a fifth of imported stores carried no category at all** — 89 of 496. The list

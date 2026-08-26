@@ -44,12 +44,15 @@ func TestNearbyStoresOutrankFarBetterRatedOnes(t *testing.T) {
 	}
 }
 
-// A store our own community has reviewed, in the searcher's own city, is the whole point
-// of the product and has to lead the list even when Google likes something else more.
-func TestReviewedStoresInTheSearchersCityComeFirst(t *testing.T) {
+// A store our own community has reviewed is the whole point of the product and leads even
+// when Google likes something else more -- but only against stores a person would weigh
+// against each other, which the product owner set at a kilometre. It used to lead the whole
+// of the searcher's city, and in Antalya that meant a review eleven kilometres away beat a
+// shop four hundred metres away. Both stores here are now inside the same kilometre.
+func TestReviewedStoresNearbyComeFirst(t *testing.T) {
 	results := []Result{
-		{Name: "Closest Unknown", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(400), score: googleScore(Place{Rating: 5, RatingCount: 900}, 0)},
-		{Name: "Reviewed Antalya", Address: "Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(11000), Platform: &Platform{ReviewCount: 6, AverageRating: 4.2}, score: platformScore(Platform{ReviewCount: 6, AverageRating: 4.2}, 4)},
+		{Name: "Closest Unknown", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(900), score: googleScore(Place{Rating: 5, RatingCount: 900}, 0)},
+		{Name: "Reviewed Antalya", Address: "Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(400), Platform: &Platform{ReviewCount: 6, AverageRating: 4.2}, score: platformScore(Platform{ReviewCount: 6, AverageRating: 4.2}, 4)},
 		{Name: "Reviewed Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(160000), Platform: &Platform{ReviewCount: 40, AverageRating: 5}, score: platformScore(Platform{ReviewCount: 40, AverageRating: 5}, 1)},
 	}
 	rankResults(results, true, false)
@@ -217,7 +220,7 @@ func TestPhrasePrefixesPreferLongerConsecutiveRuns(t *testing.T) {
 func TestPremiumStoresLeadTheSearchersOwnCity(t *testing.T) {
 	antalya := "Muratpaşa/Antalya, Türkiye"
 	results := []Result{
-		{Name: "Reviewed", Address: antalya, DistanceMeters: meters(3000), Platform: &Platform{ReviewCount: 9, AverageRating: 4.8}, score: platformScore(Platform{ReviewCount: 9, AverageRating: 4.8}, 0)},
+		{Name: "Reviewed", Address: antalya, DistanceMeters: meters(200), Platform: &Platform{ReviewCount: 9, AverageRating: 4.8}, score: platformScore(Platform{ReviewCount: 9, AverageRating: 4.8}, 0)},
 		{Name: "Closest", Address: antalya, DistanceMeters: meters(300), score: googleScore(Place{Rating: 5, RatingCount: 400}, 0)},
 		{Name: "Premium", Address: antalya, DistanceMeters: meters(12000), Premium: true, score: googleScore(Place{Rating: 3.9, RatingCount: 12}, 6)},
 	}
