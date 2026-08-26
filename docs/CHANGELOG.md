@@ -8,6 +8,25 @@ repeating the value involved.
 
 ---
 
+## A decorating firm is not a decoration shop
+
+- Searching for decoration returned renovation contractors. Two causes, and the catalogue
+  held seventeen of them. A firm calls itself "tadilat" and puts "dekorasyon" in the name
+  too, so the name classifier read it as a decoration store — and Google types one of them
+  as a `home_improvement_store`, so the provider agreed.
+- What a business calls itself now beats the provider on this one point. A name carrying
+  *tadilat*, *mimarlık*, *müteahhit*, *taahhüt*, *restorasyon* or *hizmetleri* yields no
+  categories and is refused at import. This is the distinction the product rests on:
+  somewhere you go to buy a thing, not somebody you hire.
+- Deliberately narrow, because the rule takes real shops with it otherwise. *İnşaat* is
+  left out — construction companies run showrooms, and "VitrA - Artema - Güvercinler
+  İnşaat" sells bathroom fittings over a counter. So are *montaj* and *tesisat*: a shop
+  selling the parts usually fits them too, and the shop is the part we want. A test pins
+  both halves.
+- Existing stores keep their categories. Seventeen are wrong and the fix does not reach
+  them; stripping categories from live stores is a separate decision, and it is not mine.
+
+
 ## Settling classification and ordering
 
 - **The remaining uncategorised stores were classified from Google's types**, fetched once

@@ -129,3 +129,42 @@ func TestPlacesGoogleSaysNothingAboutAreKept(t *testing.T) {
 		}
 	}
 }
+
+// A renovation firm calls itself "tadilat" and puts "dekorasyon" in the name too. It is
+// not a shop; nobody visits it to buy a lamp. Reported from the live site, twice.
+func TestServiceBusinessesAreNotStores(t *testing.T) {
+	services := []string{
+		"Met Yapı / Antalya Tadilat - Dekorasyon Hizmetleri",
+		"Antalia Dekorasyon & Tadilat",
+		"Antalya İç Mimarlık | Decorative Studio",
+		"Uyum Tadilat, Boya ve Dekorasyon",
+	}
+	for _, name := range services {
+		if got := StoreCategories(name, nil); len(got) > 0 {
+			t.Errorf("%q bir hizmet firması, kategorisiz kalmalıydı, %v aldı", name, got)
+		}
+		if IsHomeLivingStore(name, nil) {
+			t.Errorf("%q katalogda yeri yok", name)
+		}
+	}
+	// The name beats the provider. Google types this one as a home improvement store,
+	// which is exactly how a contractor came back under a search for decoration.
+	if got := StoreCategories("New Yapı Tadilat", []string{"home_improvement_store", "home_goods_store"}); len(got) > 0 {
+		t.Errorf("sağlayıcı ne derse desin tadilat firması mağaza değil, %v aldı", got)
+	}
+}
+
+// The rule has to be narrow or it takes real shops with it. These sell over a counter.
+func TestRealShopsSurviveTheServiceRule(t *testing.T) {
+	shops := map[string][]string{
+		"VitrA - Artema - Güvercinler İnşaat Muratpaşa":   {"home_goods_store"},
+		"Can Sıhhi Su Tesisat Malzeme Montaj Ve Tamiratı": {"hardware_store"},
+		"YIKILMAZ MOBİLYA montaj mutfak Yüklük Vestiyer":  {"furniture_store"},
+		"Horzum Spot Yapı Market":                         nil,
+	}
+	for name, types := range shops {
+		if !IsHomeLivingStore(name, types) {
+			t.Errorf("%q gerçek bir mağaza, elenmemeliydi", name)
+		}
+	}
+}

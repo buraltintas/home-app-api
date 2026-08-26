@@ -617,10 +617,55 @@ var nonHomeTypes = map[string]bool{
 	"place_of_worship": true, "mosque": true, "church": true, "police": true, "post_office": true,
 }
 
+// Words that name a service rather than a shop. A renovation firm calls itself "tadilat",
+// an architecture practice "mimarlık", and both put "dekorasyon" in the name too -- which
+// is how "Antalya Tadilat - Dekorasyon Hizmetleri" ended up classified as a decoration
+// store. It is not a store. Nobody visits it to buy a lamp.
+//
+// This is the distinction the product rests on: somewhere you go to buy a thing, not
+// somebody you hire. Every renovation firm in the country uses these words, so the rule
+// travels; it is not a list of businesses anyone has to maintain.
+//
+// Deliberately narrow. "İnşaat" is left out because construction companies run real
+// showrooms -- "VitrA - Artema - Güvercinler İnşaat" sells bathroom fittings over a
+// counter. So are "montaj" and "tesisat": a shop that sells the parts often fits them too,
+// and the shop is the part we want.
+var serviceBusinessTerms = []string{
+	"tadilat", "mimarlık", "mimarlik", "mimari",
+	"müteahhit", "muteahhit", "taahhüt", "taahhut",
+	"restorasyon", "hizmetleri", "hizmetler",
+}
+
+// namesAService reports whether a store's own name says it sells labour rather than goods.
+func namesAService(normalized, folded string) bool {
+	for _, term := range serviceBusinessTerms {
+		if containsWord(normalized, folded, term) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsHomeLivingPlace reports whether a place belongs in a catalogue of home and living
 // stores. It answers no only when Google is explicit about the business being something
 // else; silence is not evidence, and a place Google has nothing to say about is kept.
 func IsHomeLivingPlace(types []string) bool {
+	return isHomeLivingPlace("", types)
+}
+
+// IsHomeLivingStore is the same question with the name to hand, which is the only way to
+// tell a decoration shop from a decorating firm: Google types both as home_improvement.
+func IsHomeLivingStore(name string, types []string) bool {
+	return isHomeLivingPlace(name, types)
+}
+
+func isHomeLivingPlace(name string, types []string) bool {
+	if name != "" {
+		normalized := normalizeText(name)
+		if namesAService(normalized, foldLatin(normalized)) {
+			return false
+		}
+	}
 	// A shop can be typed both ways -- a department store that also has a cafe. What the
 	// place mainly is wins, so an explicit home type anywhere in the list keeps it.
 	for _, t := range types {
@@ -656,11 +701,18 @@ func StoreCategories(name string, types []string) []string {
 			out = append(out, slug)
 		}
 	}
+	normalized := normalizeText(name)
+	folded := foldLatin(normalized)
+	// A renovation firm with "dekorasyon" in its name is still a renovation firm, and this
+	// beats the provider too: Google types "New Yapı Tadilat" as a home_improvement_store,
+	// which is how a contractor came back under a search for decoration. What a business
+	// calls itself is better evidence than a category Google fitted it into.
+	if namesAService(normalized, folded) {
+		return out
+	}
 	for _, t := range types {
 		add(googleTypeCategories[strings.ToLower(strings.TrimSpace(t))])
 	}
-	normalized := normalizeText(name)
-	folded := foldLatin(normalized)
 	for brand, slug := range knownStoreBrands {
 		if containsWord(normalized, folded, brand) {
 			add(slug)

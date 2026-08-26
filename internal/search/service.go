@@ -951,7 +951,7 @@ func homeLivingOnly(places []Place) []Place {
 	}
 	kept := places[:0]
 	for _, p := range places {
-		if IsHomeLivingPlace(p.Types) {
+		if IsHomeLivingStore(p.Name, p.Types) {
 			kept = append(kept, p)
 		}
 	}
