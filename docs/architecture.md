@@ -188,3 +188,67 @@ Infrastructure-only `GET /health` and `GET /ready` do not require BFF or user au
 | Spam/social abuse | auth, body limits, write limits, ownership checks, soft deletion; moderation is a later layer |
 | Search/OpenAI abuse | BFF gate, IP/user/session quotas, timeout, bounded inputs/outputs, deterministic fallback and cost metrics |
 | Sensitive data exposure | public/private profile split, derived visit data, rounded search locations, deletion and retention hooks, redacted logs |
+
+## How search results are ordered
+
+Written down because it kept being rediscovered from the code, one report at a time. Change
+these deliberately, and change the tests in `internal/search` with them — every tier below
+is pinned by one.
+
+A search runs down this list. The first rule that separates two results decides.
+
+**When the query named a store** (`intent.store_name` is set) — somebody typed "İşbir":
+
+1. Results whose name matches what was asked for.
+2. Among those, ones we could classify. A name is a weak signal on its own: "İşbir" also
+   finds a bakery called Isbirli. An unclassified result sinks rather than disappearing.
+3. Distance, nearest first — applied to **both** halves, the matches and the rest. A chain's
+   branches all carry the same name and much the same score, so distance is the only thing
+   that orders them usefully.
+4. Score.
+
+**Every other query**:
+
+1. Promoted stores in the searcher's own city. Paid placement reaches no further; a promoted
+   store in another province is still in another province. The "Öne çıkarılmış" label is not
+   decoration — `/about` and `/terms` state that paid placement is marked wherever it
+   applies, so shipping the ranking without the badge would make a published document false.
+2. Kilometre bands. Reviews used to lead the searcher's whole city, which in Antalya put a
+   shop ten kilometres away above one five hundred metres away. A review is worth leading
+   with against stores a person would genuinely weigh against each other, and that is a
+   kilometre.
+3. Inside a kilometre: stores the community has reviewed. This is what the product is for.
+4. Five-hundred-metre bands, then score. Beyond twenty-five kilometres the bands widen to
+   five, because past the city the exact figure stops being something anyone acts on.
+
+Two invariants hold across both: results always run nearest to farthest within a tier,
+because `/about` says they do; and a store is never dropped for being unclassified, only
+sorted below ones that are.
+
+## How a store gets its categories
+
+Also settled, also written down, for the same reason.
+
+1. **Google's types, first and always.** They exist for every store in the country and
+   describe the business. The provider's `primaryType` leads the list — it is Google's
+   single best answer, where the rest is mostly `store` and `establishment` noise.
+2. **The store's name, as a fallback.** Turkish shops very often carry the product in the
+   name ("... HALI", "... PERDE", "... MEFRUŞAT"), so this earns its place — but it is the
+   fallback, not the method. Generic words like "home" match as whole words; product words
+   match as substrings, because "halı" inside a longer word still means carpets while "ev"
+   inside "Evren" means nothing.
+3. **A short list of chain names**, only where nothing else in the country shares the word.
+   Taç is a home textile chain and a language school; Karaca is a homeware brand and a
+   surname. Neither is in the list. A wrong category is worse than none — it answers
+   searches the store has no business answering.
+
+The types are stored on the external-source record when a store is imported. This is the
+part that was missing and the reason this had to be revisited: without them, improving the
+classifier could not be applied to stores already here without asking Google about every
+one of them again. With them, `cmd/reclassify` fixes the whole catalogue locally, and can be
+re-run whenever the classifier learns something.
+
+Businesses Google is explicit about being something else — bakeries, schools, salons,
+clinics, warehouses — are refused at import by `IsHomeLivingPlace`. Silence keeps a place:
+most shops carry nothing but `store`, and demanding proof of belonging would empty the
+catalogue.

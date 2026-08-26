@@ -92,3 +92,40 @@ func TestUnclassifiedNameMatchGoesLast(t *testing.T) {
 		t.Fatalf("sınıflandırılmış olan önce gelmeliydi, %q geldi", results[0].Name)
 	}
 }
+
+// The catalogue filled up with businesses nobody would visit for a curtain, because
+// anything a search turned up was kept.
+func TestNonHomeBusinessesAreTurnedAwayAtTheDoor(t *testing.T) {
+	away := map[string][]string{
+		"bakery":          {"bakery", "food_store", "store"},
+		"language school": {"school", "educational_institution", "point_of_interest"},
+		"beauty salon":    {"beauty_salon", "point_of_interest", "service"},
+		"clinic":          {"medical_clinic", "beauty_salon", "hair_care"},
+		"warehouse":       {"storage", "service", "point_of_interest"},
+		"contractor":      {"general_contractor", "point_of_interest", "service"},
+		"apartments":      {"apartment_complex", "point_of_interest", "service"},
+		"nursery":         {"child_care_agency", "point_of_interest", "service"},
+	}
+	for what, types := range away {
+		if IsHomeLivingPlace(types) {
+			t.Errorf("%s katalogda yeri yok, ama kabul edildi: %v", what, types)
+		}
+	}
+}
+
+// Silence is not evidence. Most shops carry nothing but "store", and a rule that needed
+// proof of belonging would empty the catalogue.
+func TestPlacesGoogleSaysNothingAboutAreKept(t *testing.T) {
+	for _, types := range [][]string{
+		{"store", "point_of_interest", "establishment"},
+		{"point_of_interest", "establishment"},
+		nil,
+		{"furniture_store", "home_improvement_store", "home_goods_store"},
+		// A department store with a cafe inside is still a department store.
+		{"department_store", "cafe", "store"},
+	} {
+		if !IsHomeLivingPlace(types) {
+			t.Errorf("kalması gerekirdi: %v", types)
+		}
+	}
+}

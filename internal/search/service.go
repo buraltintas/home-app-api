@@ -438,6 +438,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 					fallback = joinFallback(fallback, "places_unavailable")
 					external = nil
 				}
+				// A search finding a bakery does not make the bakery a home store, and
+				// until now anything a search turned up was kept and imported. Dropped
+				// here, at the door, rather than filtered out of the results later --
+				// otherwise it still lands in the catalogue and in the sitemap.
+				external = homeLivingOnly(external)
 				return nil
 			})
 		}
@@ -936,3 +941,19 @@ func haversine(a, b, c, d float64) float64 {
 }
 
 var _ = pgx.ErrNoRows
+
+// homeLivingOnly drops places Google is explicit about being something else. Silence keeps
+// a place: most shops carry nothing but "store" and "establishment", and refusing those
+// would empty the catalogue.
+func homeLivingOnly(places []Place) []Place {
+	if len(places) == 0 {
+		return places
+	}
+	kept := places[:0]
+	for _, p := range places {
+		if IsHomeLivingPlace(p.Types) {
+			kept = append(kept, p)
+		}
+	}
+	return kept
+}

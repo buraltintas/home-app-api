@@ -19,10 +19,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"sort"
+	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -30,6 +32,8 @@ import (
 
 func main() {
 	apply := flag.Bool("apply", false, "write the changes; without it nothing is written")
+	fetch := flag.Bool("fetch", false, "ask Google for the types of candidates that have none stored")
+	cachePath := flag.String("cache", "/tmp/store-types.json", "where fetched types are kept, so a dry run and an apply share one fetch")
 	flag.Parse()
 
 	url := os.Getenv("DATABASE_URL")
@@ -45,6 +49,14 @@ func main() {
 	}
 	defer db.Close()
 
+	// Fetched types are cached on disk on purpose. A dry run and the apply that follows it
+	// must not each cost a round of provider calls, and re-running after a mistake must not
+	// either. Delete the file to force a refetch.
+	cache := map[string][]string{}
+	if raw, err := os.ReadFile(*cachePath); err == nil {
+		_ = json.Unmarshal(raw, &cache)
+	}
+
 	slugs := map[string]string{}
 	rows, err := db.Query(ctx, `SELECT id::text, slug FROM store_categories`)
 	must(err)
@@ -56,12 +68,13 @@ func main() {
 	rows.Close()
 
 	type candidate struct {
-		id, name string
-		types    []string
-		cats     []string
+		id, name, placeID string
+		types             []string
+		cats              []string
 	}
 	var found []candidate
 	var stillNone int
+	var pending []candidate
 
 	// Google's own types first, the name only as a fallback. The types are what make this
 	// generic: they exist for every store in the country and say what the place is, while
@@ -69,6 +82,8 @@ func main() {
 	// imported before the types were kept, so they come back empty and fall back.
 	rows, err = db.Query(ctx, `
 SELECT s.id::text, s.name,
+  coalesce((SELECT x.external_id FROM store_external_sources x
+            WHERE x.store_id = s.id AND x.provider = 'google' LIMIT 1), ''),
   coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'types'))
             FROM store_external_sources x
             WHERE x.store_id = s.id AND x.provider = 'google' AND x.attribution ? 'types'
@@ -81,7 +96,44 @@ ORDER BY s.name`)
 	must(err)
 	for rows.Next() {
 		var c candidate
-		must(rows.Scan(&c.id, &c.name, &c.types))
+		must(rows.Scan(&c.id, &c.name, &c.placeID, &c.types))
+		if len(c.types) == 0 {
+			c.types = cache[c.placeID]
+		}
+		pending = append(pending, c)
+	}
+	rows.Close()
+
+	// Ask the provider only for the ones we have nothing for, and only when asked to.
+	// Every call costs money and the answers do not change from one minute to the next,
+	// so they are written to the cache as they arrive -- an interrupted run resumes rather
+	// than starting the bill again.
+	if *fetch {
+		places := search.NewGooglePlaces(os.Getenv("GOOGLE_PLACES_API_KEY"))
+		asked := 0
+		for i := range pending {
+			if len(pending[i].types) > 0 || pending[i].placeID == "" {
+				continue
+			}
+			place, err := places.PlaceDetails(ctx, pending[i].placeID)
+			asked++
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "could not fetch %q: %v\n", pending[i].name, err)
+				continue
+			}
+			pending[i].types = place.Types
+			cache[pending[i].placeID] = place.Types
+			if raw, err := json.MarshalIndent(cache, "", " "); err == nil {
+				_ = os.WriteFile(*cachePath, raw, 0o600)
+			}
+			// Unhurried on purpose. This is a one-off backfill, not a hot path, and there
+			// is nothing to gain from arriving at a rate limit.
+			time.Sleep(120 * time.Millisecond)
+		}
+		fmt.Fprintf(os.Stderr, "asked the provider about %d stores\n\n", asked)
+	}
+
+	for _, c := range pending {
 		for _, slug := range search.StoreCategories(c.name, c.types) {
 			// A slug the taxonomy does not have is a bug in the classifier, not a reason
 			// to invent a category. Skip it loudly rather than writing something the rest
@@ -98,7 +150,6 @@ ORDER BY s.name`)
 		}
 		found = append(found, c)
 	}
-	rows.Close()
 
 	sort.Slice(found, func(i, j int) bool { return found[i].name < found[j].name })
 	writes := 0
@@ -120,6 +171,26 @@ ORDER BY s.name`)
 	tx, err := db.Begin(ctx)
 	must(err)
 	defer tx.Rollback(ctx)
+
+	// Keep what the provider told us, so this never has to be asked again. Merged into the
+	// existing attribution rather than replacing it: that record also holds the rating,
+	// the photo reference and its required credits, and overwriting it would quietly throw
+	// all of that away.
+	stored := 0
+	for _, c := range pending {
+		if len(c.types) == 0 || c.placeID == "" {
+			continue
+		}
+		types, err := json.Marshal(map[string]any{"types": c.types})
+		must(err)
+		tag, err := tx.Exec(ctx, `
+UPDATE store_external_sources
+SET attribution = attribution || $2::jsonb
+WHERE store_id = $1::uuid AND provider = 'google' AND NOT attribution ? 'types'`, c.id, types)
+		must(err)
+		stored += int(tag.RowsAffected())
+	}
+
 	inserted := 0
 	for _, c := range found {
 		for _, slug := range c.cats {
@@ -136,7 +207,7 @@ ON CONFLICT DO NOTHING`, c.id, slugs[slug])
 		}
 	}
 	must(tx.Commit(ctx))
-	fmt.Printf("\ninserted %d category rows.\n", inserted)
+	fmt.Printf("\ninserted %d category rows, stored types for %d stores.\n", inserted, stored)
 }
 
 func trim(s string, n int) string {

@@ -585,7 +585,55 @@ var googleTypeCategories = map[string]string{
 	"tile_store":               "household",
 	"wallpaper_store":          "decoration",
 	"bathroom_supply_store":    "bathroom",
-	"storage_facility":         "",
+}
+
+// Kinds of business that are plainly not home and living. Taken from Google's own types,
+// which is what makes this generic: it is one rule for the whole country rather than a list
+// of shops somebody has to keep adding to.
+//
+// The catalogue collected these because anything a search turned up was kept. It ended up
+// holding a bakery, a language school, two beauty salons, a ventilation contractor, an
+// agricultural R&D company and the state opera's warehouse -- none of which anybody will
+// ever visit to buy a curtain, and all of which we were asking Google to index as home and
+// living stores.
+//
+// Only unambiguous types are listed. A "supermarket" sells home goods in Turkey often
+// enough that excluding it would cost real shops, and that trade is not worth making.
+var nonHomeTypes = map[string]bool{
+	"bakery": true, "restaurant": true, "cafe": true, "bar": true, "meal_takeaway": true,
+	"food_store": true, "grocery_store": true, "pharmacy": true, "drugstore": true,
+	"hospital": true, "medical_clinic": true, "dentist": true, "doctor": true,
+	"beauty_salon": true, "hair_salon": true, "hair_care": true, "nail_salon": true, "spa": true,
+	"school": true, "primary_school": true, "secondary_school": true, "university": true,
+	"educational_institution": true, "child_care_agency": true, "preschool": true,
+	"bank": true, "atm": true, "insurance_agency": true, "real_estate_agency": true,
+	"apartment_complex": true, "lodging": true, "hotel": true, "travel_agency": true,
+	"car_repair": true, "car_dealer": true, "car_wash": true, "gas_station": true,
+	"gym": true, "sporting_goods_store": true, "night_club": true, "casino": true,
+	"storage": true, "moving_company": true, "shipping_service": true, "courier_service": true,
+	"general_contractor": true, "lawyer": true, "accounting": true, "veterinary_care": true,
+	"pet_store": true, "book_store": true, "clothing_store": true, "shoe_store": true,
+	"jewelry_store": true, "cosmetics_store": true, "florist": true, "funeral_home": true,
+	"place_of_worship": true, "mosque": true, "church": true, "police": true, "post_office": true,
+}
+
+// IsHomeLivingPlace reports whether a place belongs in a catalogue of home and living
+// stores. It answers no only when Google is explicit about the business being something
+// else; silence is not evidence, and a place Google has nothing to say about is kept.
+func IsHomeLivingPlace(types []string) bool {
+	// A shop can be typed both ways -- a department store that also has a cafe. What the
+	// place mainly is wins, so an explicit home type anywhere in the list keeps it.
+	for _, t := range types {
+		if googleTypeCategories[strings.ToLower(strings.TrimSpace(t))] != "" {
+			return true
+		}
+	}
+	for _, t := range types {
+		if nonHomeTypes[strings.ToLower(strings.TrimSpace(t))] {
+			return false
+		}
+	}
+	return true
 }
 
 // StoreCategories works out what a store actually sells, for a store being imported from

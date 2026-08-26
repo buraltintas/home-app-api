@@ -8,6 +8,27 @@ repeating the value involved.
 
 ---
 
+## Settling classification and ordering
+
+- **The remaining uncategorised stores were classified from Google's types**, fetched once
+  for the fifty that had none stored and cached so a dry run and the apply shared one round
+  of calls. 53 without a category became 40. The types are now kept for all of them, so
+  this never needs asking again.
+- The fetched types are **merged** into the external-source record, not written over it.
+  That record also holds the rating, the photo reference and its required credits, and
+  replacing it would have thrown all of that away silently.
+- **Businesses Google is explicit about being something else are refused at import.** The
+  catalogue had collected a bakery, a language school, two beauty salons, a ventilation
+  contractor and the state opera's warehouse, because anything a search turned up was kept
+  — and every one of them was being offered to Google for indexing as a home store. Only
+  unambiguous types are refused, and silence keeps a place: most shops carry nothing but
+  `store`, so demanding proof of belonging would empty the catalogue. Existing stores are
+  left alone.
+- `docs/architecture.md` now states the ordering rules and the classification rules in full.
+  Both had been rediscovered from the code one report at a time, which is how the same
+  question comes back.
+
+
 ## Classify from what Google says, not from what we guessed
 
 - **The provider's types are now kept.** A store's categories are worked out once, at
