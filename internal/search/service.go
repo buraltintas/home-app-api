@@ -135,6 +135,11 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 					return nil, err
 				}
 			}
+			if p.Website != "" {
+				if _, err = tx.Exec(ctx, `UPDATE stores SET website=$2 WHERE id=$1 AND coalesce(website,'')=''`, existing, p.Website); err != nil {
+					return nil, err
+				}
+			}
 			out[p.PlaceID] = existing
 			continue
 		}
@@ -143,7 +148,7 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		}
 		id := uuid.New()
 		slug := storeSlug(p.Name, id)
-		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone,website) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''),nullif($9,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone, p.Website); err != nil {
 			return nil, err
 		}
 		// A store now carries the categories it actually sells, worked out from its own

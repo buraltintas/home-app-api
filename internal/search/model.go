@@ -51,6 +51,9 @@ type Place struct {
 	Attributions           []string
 	PhotoName              string
 	PhotoAttributions      []string
+	// The store's own website, where it has one. Google publishes it; nothing read it.
+	Website string
+
 	// The number Google publishes in national format. It is asked for in the same field
 	// mask that already carries the rating, so it is billed at the tier we were already
 	// paying for -- no separate lookup and no extra request per store.
