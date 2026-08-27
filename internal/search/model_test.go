@@ -187,12 +187,26 @@ func TestPhysicallyReviewedPlatformStoreRanksBeforeGoogleOnly(t *testing.T) {
 	}
 }
 
-func TestPlacesQueryUsesRawAndParsedTerms(t *testing.T) {
+// The provider gets the person's words and their location, and nothing from our own
+// taxonomy. This test used to assert the opposite -- that parsed terms and category slugs
+// were appended -- on the theory that more terms match better. They do not: the slugs are
+// English words that Turkish businesses put on their signs, so a search for "yatak" near
+// Bostanlı came back as six branches of one chain out of six results, because we had added
+// "bedding" and half that chain's name is Bedding. The rule it was written for was real
+// until it was measured.
+func TestPlacesQuerySendsOnlyWhatThePersonSaid(t *testing.T) {
 	got := placesQuery(Intent{ProductTerms: []string{"bedding_set"}, SemanticTerms: []string{"home dowry shopping"}, Categories: []string{"bedding"}}, "Çeyiz almak istiyorum")
-	for _, want := range []string{"Çeyiz almak istiyorum", "bedding set", "home dowry shopping", "bedding"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("query %q missing %q", got, want)
+	if got != "Çeyiz almak istiyorum" {
+		t.Fatalf("query should be the person's own words, got %q", got)
+	}
+	for _, leaked := range []string{"bedding", "home dowry shopping"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("internal key %q reached the provider: %q", leaked, got)
 		}
+	}
+	// Where a place was named, it still travels -- that is the person's own word too.
+	if got := placesQuery(Intent{LocationText: "Bostanlı", Categories: []string{"bedding"}}, "yatak"); got != "yatak Bostanlı" {
+		t.Fatalf("location should travel with the query, got %q", got)
 	}
 	if long := placesQuery(Intent{ProductTerms: []string{"furniture"}}, strings.Repeat("ö", 500)); len([]rune(long)) > 500 {
 		t.Fatalf("places query too long: %d", len([]rune(long)))

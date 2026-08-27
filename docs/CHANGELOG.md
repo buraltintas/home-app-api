@@ -8,6 +8,30 @@ repeating the value involved.
 
 ---
 
+## We were poisoning our own search query
+
+- A search for "yatak" near Bostanlı returned twenty results and every one was a branch of
+  the same chain. The provider was not the problem — asked the same word directly it returns
+  six different shops in six.
+- The problem was ours. The provider query was built from the person's words **plus our
+  parsed intent**: product terms, semantic terms and category slugs, on the theory that more
+  terms match better. Measured, the opposite:
+
+  | sent to the provider | branches of one chain, out of six |
+  |---|---|
+  | `yatak` | 2 |
+  | `yatak bed` | 2 |
+  | `yatak bed bedding` | 4 |
+  | `yatak bedding` | **6** |
+
+  `bedding` is our internal key. It is also half the name of a chain with a branch on every
+  corner, and a provider that matches text literally does what it is told.
+- The provider now gets the person's words and their location. Nothing else. This is not
+  about that chain: every category key we have is an ordinary English word that some Turkish
+  business has put on its sign, so any of them could have done this. The categories still do
+  their work where they are keys rather than search terms — filtering our own catalogue.
+
+
 ## Standout stores get a face
 
 - The heading loses "bu ay": the window is a month and stays a month, and saying so in the

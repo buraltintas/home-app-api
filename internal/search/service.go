@@ -883,15 +883,23 @@ func placesQuery(i Intent, raw string) string {
 		}
 		return query
 	}
-	terms := make([]string, 0, 2+len(i.ProductTerms)+len(i.SemanticTerms)+len(i.Categories))
+	// The person's own words, and where they are. Nothing else.
+	//
+	// This used to append the parsed intent -- product terms, semantic terms and category
+	// slugs -- on the theory that more terms meant a better match. They are internal keys
+	// in English, and handing them to a provider that does literal text matching wrecks
+	// the query: searching "yatak" near Bostanlı returned two chain branches in six, and
+	// "yatak bedding" returned six in six, because "Bedding" is half the name of a chain
+	// with a branch on every corner. The slug was competing with the question.
+	//
+	// This is not about that chain. Every category key we have is an ordinary English word
+	// that some Turkish business has put on its sign, so any of them can do the same thing.
+	// The categories still do their work where they belong -- filtering our own catalogue,
+	// where they are keys rather than search terms.
+	terms := make([]string, 0, 2)
 	terms = append(terms, strings.TrimSpace(raw))
-	parsed := append(append(append([]string{i.StoreName}, i.ProductTerms...), i.SemanticTerms...), i.Categories...)
-	for _, term := range parsed {
-		term = strings.TrimSpace(term)
-		if term == "" {
-			continue
-		}
-		terms = appendUnique(terms, strings.ReplaceAll(term, "_", " "))
+	if location := strings.TrimSpace(i.LocationText); location != "" {
+		terms = appendUnique(terms, location)
 	}
 	query := strings.TrimSpace(strings.Join(terms, " "))
 	runes := []rune(query)
