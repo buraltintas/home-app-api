@@ -8,6 +8,17 @@ repeating the value involved.
 
 ---
 
+## Standout stores get a face
+
+- The heading loses "bu ay": the window is a month and stays a month, and saying so in the
+  title spends words on something nobody is deciding anything with.
+- Each highlight now leads with the store's photograph, the same one and picked the same way
+  as in the result list — a community picture ahead of the provider's. A recommendation made
+  of a name and a number reads as a statistic; with a picture it reads as a place.
+- Where no photograph exists the initial stands in, on the same footprint, so the row does
+  not change shape between stores.
+
+
 ## Renovation firms lose the categories they should never have had
 
 - Eleven stores in the catalogue were service businesses classified as shops — a decoration
