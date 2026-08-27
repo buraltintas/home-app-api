@@ -8,6 +8,61 @@ repeating the value involved.
 
 ---
 
+## Two thirds of the catalogue had been sorted blind
+
+- Google's types were not kept when older stores were imported, so 343 of 517 stores were
+  being classified on their name alone. They are the generic evidence -- they exist for
+  every business in the country and say what the place is -- so they were fetched once and
+  stored. Every store in the catalogue now has them.
+- Three defects surfaced while aligning, each caught by a dry run before anything was
+  written, and each fixed in the classifier rather than in the data:
+  - **A trade could not outvote a sector label.** The first positive type won outright, and
+    Google gives `home_improvement_store` and `home_goods_store` to painters, roofers and
+    contractors alike. A renovation firm with `general_contractor` written in its own type
+    list was walking into a catalogue of shops on the strength of the label beside it.
+    `painter`, `roofing_contractor`, `electrician`, `plumber` and `interior_designer` are
+    now read as what they are, and a type that names what is sold still wins outright, so a
+    real showroom typed into the building trade is not thrown out with them.
+  - **The shop's own sign was not evidence.** A curtain maker typed `general_contractor`
+    and a carpet shop typed `clothing_store` were both about to be struck off. A name that
+    plainly says "perde" or "halı" now outranks a type list already seen to be wrong.
+    "Dekorasyon" and "depolama" are excluded from that rescue: the first is on the sign of
+    every renovation firm in the country and the second is warehousing, not a wardrobe.
+  - **Sector labels were handing out categories.** Every carpet and curtain shop was being
+    added to Ev Aksesuarları as well as its own category, 280 rows of it. They are now a
+    fallback, answering only for a shop nothing else describes.
+- Nothing was removed. Removing whatever the classifier could not re-derive was tried and
+  the dry run caught it taking `bedding` from "Yataş" and from a shop called "Nevresim
+  Takımı", so the rule was buying three rows and risking real data.
+- Applied: 50 businesses retired -- storage yards, renovation firms, movers, a hairdresser,
+  a language school, a clinic, a bakery, an apartment complex -- and 87 categories added to
+  84 stores. Active stores 517 to 467, category links 1007 to 1094, stores with no category
+  51 to 16. Retirement is `deleted_at`, so all of it reverses with one statement.
+- **No store carrying a review, a favourite or a verified visit is ever retired**, whatever
+  the classifier says. Community work outranks a directory. None qualified this time; the
+  guard is there for the next run.
+
+## A website Google Maps showed and we did not
+
+- Reported: a store's website is visible on Google Maps and missing here. The import reads
+  both the website and the phone number, and a store that turns up in a search again has
+  them filled in from the search response at no extra cost. That covers everything anyone
+  has looked for since; it covers nothing at all for a store nobody has searched for since
+  those fields started being read. 492 stores were sitting in that gap.
+- `cmd/backfill-contact` closes it once. It is built like `cmd/reclassify` and for the same
+  reason -- it runs against the production database, so only a store with an empty value is
+  read at all, the write is guarded a second time in the statement itself, nothing is
+  inserted or deleted, and applying takes `-apply` and one transaction. Fetched details are
+  cached on disk so a dry run and the apply that follows it do not each cost a round of
+  provider calls.
+- Both fields are asked for in one request on purpose. They sit in the same billing tier,
+  so asking together costs what asking for either alone would: 492 calls instead of 641.
+- Applied: 264 websites and 102 numbers filled in. Stores with a website went 26 to 290,
+  stores with a number 367 to 469, the catalogue unchanged at 517. The provider had nothing
+  for the remaining 176.
+- This should not become a scheduled job. A store people actually search for is refreshed
+  by the search itself, for free; a recurring run would pay for that same data again.
+
 ## We were poisoning our own search query
 
 - A search for "yatak" near Bostanlı returned twenty results and every one was a branch of

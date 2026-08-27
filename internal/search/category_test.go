@@ -185,3 +185,52 @@ func TestServiceRuleSurvivesTurkishSuffixes(t *testing.T) {
 		}
 	}
 }
+
+// A trade type outranks the sector labels Google hands the whole building trade. Every
+// painter and roofer in the catalogue carried home_improvement_store, and reading that as
+// evidence of a shop is what kept letting renovation firms in.
+func TestTradeTypeBeatsSectorLabel(t *testing.T) {
+	cases := map[string][]string{
+		"painter":            {"painter", "service", "point_of_interest", "establishment"},
+		"painter and roofer": {"painter", "roofing_contractor", "building_materials_store", "general_contractor", "home_goods_store"},
+		"contractor":         {"general_contractor", "home_improvement_store", "home_goods_store", "store"},
+		"electrician":        {"electrician", "home_improvement_store"},
+		"interior designer":  {"interior_designer", "home_goods_store"},
+	}
+	for name, types := range cases {
+		if IsHomeLivingPlace(types) {
+			t.Errorf("%s: kept a business that sells labour: %v", name, types)
+		}
+	}
+}
+
+// What is sold still wins outright, so a real showroom typed into the building trade is
+// not thrown out with the contractors.
+func TestProductTypeBeatsTradeType(t *testing.T) {
+	cases := map[string][]string{
+		"bathroom showroom": {"bathroom_supply_store", "general_contractor", "home_goods_store"},
+		"tile shop":         {"tile_store", "painter"},
+		"department store":  {"department_store", "cafe"},
+	}
+	for name, types := range cases {
+		if !IsHomeLivingPlace(types) {
+			t.Errorf("%s: threw out a shop: %v", name, types)
+		}
+	}
+}
+
+// A sector label on its own is still worth something: a shop with nothing but
+// home_goods_store is a shop, and silence remains no evidence at all.
+func TestSectorLabelAloneIsKept(t *testing.T) {
+	for _, types := range [][]string{
+		{"home_goods_store", "store", "point_of_interest"},
+		{"home_improvement_store"},
+		{"building_materials_store"},
+		nil,
+		{"store", "point_of_interest", "establishment"},
+	} {
+		if !IsHomeLivingPlace(types) {
+			t.Errorf("threw out a place with no evidence against it: %v", types)
+		}
+	}
+}

@@ -193,7 +193,7 @@ var homeConcepts = []homeConcept{
 	{"carpet", "carpet", []string{"halı", "kilim", "carpet", "rug", "teppich", "ковер", "ковёр"}, nil},
 	{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор", "ayna", "mirror", "spiegel", "зеркало"}, nil},
 	{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
-	{"bathroom", "bathroom", []string{"banyo", "bathroom", "badezimmer", "ванная"}, nil},
+	{"bathroom", "bathroom", []string{"banyo", "duşakabin", "dusakabin", "vitrifiye", "armatür", "armatur", "bathroom", "shower cabin", "badezimmer", "ванная"}, nil},
 	{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
@@ -552,7 +552,6 @@ var googleTypeCategories = map[string]string{
 	"appliance_store":          "major_appliances",
 	"electronics_store":        "small_appliances",
 	"furniture_repair_shop":    "furniture",
-	"interior_designer":        "decoration",
 	"paint_store":              "household",
 	"garden_center":            "garden",
 	"plant_nursery":            "garden",
@@ -588,6 +587,12 @@ var nonHomeTypes = map[string]bool{
 	"gym": true, "sporting_goods_store": true, "night_club": true, "casino": true,
 	"storage": true, "moving_company": true, "shipping_service": true, "courier_service": true,
 	"general_contractor": true, "lawyer": true, "accounting": true, "veterinary_care": true,
+	// Google names the building trades one by one and we were reading only the first of
+	// them. Every one of these is somebody you hire, which is the distinction the whole
+	// catalogue rests on. "interior_designer" is here for the same reason: an interior
+	// designer sells labour, and the shop that sells the wallpaper is a different business.
+	"painter": true, "roofing_contractor": true, "electrician": true, "plumber": true,
+	"interior_designer": true, "carpenter": true, "locksmith": true,
 	"pet_store": true, "book_store": true, "clothing_store": true, "shoe_store": true,
 	"jewelry_store": true, "cosmetics_store": true, "florist": true, "funeral_home": true,
 	"place_of_worship": true, "mosque": true, "church": true, "police": true, "post_office": true,
@@ -665,23 +670,91 @@ func IsHomeLivingStore(name string, types []string) bool {
 	return isHomeLivingPlace(name, types)
 }
 
+// sectorStoreTypes name the trade a place works in, not what it sells over a counter.
+// Google hands them out to the whole building trade: every painter, roofer and contractor
+// in the catalogue carried "home_improvement_store", and several carried
+// "building_materials_store" as well. Read as evidence of a shop they outvoted the
+// explicit "general_contractor" sitting in the same list, which is how renovation firms
+// kept arriving in a catalogue of shops. They still count -- a shop with nothing but one
+// of these is kept -- they simply cannot overrule a trade.
+var sectorStoreTypes = map[string]bool{
+	"home_improvement_store":   true,
+	"home_goods_store":         true,
+	"building_materials_store": true,
+}
+
+// tradeNameTerms are the concept words that name a trade rather than a thing on a shelf.
+// They are fine for working out what a shop sells once it is known to be a shop, and
+// useless for deciding whether it is one: "dekorasyon" is on the sign of every renovation
+// firm in the country, and "depolama" is warehousing, not a wardrobe.
+var tradeNameTerms = map[string]bool{
+	"dekorasyon": true, "dekor": true, "decoration": true, "decor": true,
+	"dekoration": true, "декор": true,
+	"depolama": true, "storage": true, "aufbewahrung": true, "хранение": true,
+}
+
+// namesAProduct reports whether a store's own name says plainly what it sells. This is the
+// second source in the order the product rests on: the provider's data first, because it
+// is complete, then the words the whole trade uses, because every business of that kind
+// uses them.
+//
+// It is here because Google's type list is thin or wrong often enough to lose real shops
+// on its own. A curtain maker typed "general_contractor" and a carpet shop typed
+// "clothing_store" were both about to be struck off a catalogue their own signs qualify
+// them for.
+func namesAProduct(normalized, folded string) bool {
+	for _, concept := range homeWordConcepts {
+		for _, term := range concept.terms {
+			if !tradeNameTerms[term] && containsWord(normalized, folded, term) {
+				return true
+			}
+		}
+	}
+	for _, concept := range homeConcepts {
+		for _, term := range concept.terms {
+			if !tradeNameTerms[term] && containsNormalized(normalized, folded, term) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func isHomeLivingPlace(name string, types []string) bool {
+	var normalized, folded string
 	if name != "" {
-		normalized := normalizeText(name)
-		if namesAService(normalized, foldLatin(normalized)) {
+		normalized = normalizeText(name)
+		folded = foldLatin(normalized)
+		if namesAService(normalized, folded) {
 			return false
 		}
 	}
-	// A shop can be typed both ways -- a department store that also has a cafe. What the
-	// place mainly is wins, so an explicit home type anywhere in the list keeps it.
+	// Three passes, and the order is the whole point. A type that names what is sold --
+	// "carpet_store", "bathroom_supply_store" -- is strong evidence and wins outright: a
+	// department store that also has a cafe is still a department store. A type that names
+	// a trade is next, because Google is being explicit about the business being labour.
+	// Only then the sector labels, which are worth something but never worth more than an
+	// explicit trade.
 	for _, t := range types {
-		if googleTypeCategories[strings.ToLower(strings.TrimSpace(t))] != "" {
+		t = strings.ToLower(strings.TrimSpace(t))
+		if googleTypeCategories[t] != "" && !sectorStoreTypes[t] {
 			return true
 		}
+	}
+	// The shop's own sign, before the provider's verdict against it. A name that plainly
+	// says "perde" or "halı" is what the trade itself calls the business, and it outranks
+	// a type list that has already been seen to be wrong.
+	if name != "" && namesAProduct(normalized, folded) {
+		return true
 	}
 	for _, t := range types {
 		if nonHomeTypes[strings.ToLower(strings.TrimSpace(t))] {
 			return false
+		}
+	}
+	for _, t := range types {
+		if sectorStoreTypes[strings.ToLower(strings.TrimSpace(t))] {
+			return true
 		}
 	}
 	return true
@@ -716,8 +789,20 @@ func StoreCategories(name string, types []string) []string {
 	if namesAService(normalized, folded) {
 		return out
 	}
+	// Sector types are held back to the end for the same reason they cannot decide whether
+	// a place is a shop: they name the trade, not the goods. Google gives
+	// "home_goods_store" to carpet shops, curtain shops and lighting shops alike, and
+	// reading it as a category put every one of them into Ev Aksesuarları as well as its
+	// own. They still answer for a shop nothing else describes -- a plain züccaciye with
+	// an uninformative name -- so they are a fallback rather than a verdict.
+	var sector []string
 	for _, t := range types {
-		add(googleTypeCategories[strings.ToLower(strings.TrimSpace(t))])
+		t = strings.ToLower(strings.TrimSpace(t))
+		if sectorStoreTypes[t] {
+			sector = append(sector, googleTypeCategories[t])
+			continue
+		}
+		add(googleTypeCategories[t])
 	}
 	for _, concept := range homeWordConcepts {
 		for _, term := range concept.terms {
@@ -736,6 +821,11 @@ func StoreCategories(name string, types []string) []string {
 				}
 				break
 			}
+		}
+	}
+	if len(out) == 0 {
+		for _, slug := range sector {
+			add(slug)
 		}
 	}
 	return out
