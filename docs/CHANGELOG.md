@@ -8,6 +8,24 @@ repeating the value involved.
 
 ---
 
+## Twelve stores had a photograph we never went back for
+
+- Reported: one store shows no photograph. Google has none for it either -- nothing to
+  fetch, and the empty state is the honest answer. Looking at the class it belongs to found
+  the real defect: 34 stores were showing nothing, and Google has photographs for 12 of
+  them today.
+- A store's photo reference is captured at import and refreshed whenever a search turns the
+  store up again. Google's photographs arrive over time, somebody visits and uploads one,
+  so a store that had none on the day it was imported may well have ten now -- and nothing
+  ever went back to look.
+- `cmd/backfill-photos` closes that once, built like the other maintenance commands: only a
+  record holding no photo reference is read, the write merges into the existing attribution
+  and is guarded a second time in the statement, nothing else in that record is touched,
+  and applying takes `-apply` and one transaction. The credits Google requires to be shown
+  with a photograph are stored with it and never separately.
+- Applied: 12 stores gained their photograph, 437 to 449. The remaining 22 genuinely have
+  none anywhere, and for those the invitation to contribute one is the right screen.
+
 ## Two thirds of the catalogue had been sorted blind
 
 - Google's types were not kept when older stores were imported, so 343 of 517 stores were
