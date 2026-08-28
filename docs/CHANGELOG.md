@@ -8,6 +8,17 @@ repeating the value involved.
 
 ---
 
+## A closed-store signal was fetched by nobody
+
+- Google Places publishes an explicit business status, but neither text search nor place
+  details requested it. A closed branch therefore looked identical to an operational one
+  even when Google had already made the distinction.
+- Search and detail now request, persist and return that provider status. Clients can warn
+  for temporary and permanent closure consistently on result and detail surfaces. Review
+  age and consumer polls are deliberately not treated as closure evidence: the Places API
+  does not expose the poll, and an old review says nothing reliable about whether a quiet
+  but legitimate shop still trades.
+
 ## Store-name searches no longer depend on which search happened first
 
 - A finite list of familiar brands made a full store name call Google while an unfamiliar

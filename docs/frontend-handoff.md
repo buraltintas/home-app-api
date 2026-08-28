@@ -220,6 +220,7 @@ Platform statistics are distinct from Google statistics:
 |---|---|
 | `platform.average_rating`, `rating_count`, `review_count`, `favorite_count`, `post_count` | Boşa Gezme! community only. Rating/review/post counts currently advance together for created reviews. |
 | `google.rating`, `rating_count` | Google provider only; never merged into platform rating. |
+| `google.business_status` | Google provider status. When `CLOSED_TEMPORARILY` or `CLOSED_PERMANENTLY`, show a prominent warning and let the person verify in Google Maps before travelling. Do not infer closure from review age. |
 
 Hybrid search `source` is `internal`, `google`, or `google+platform`. An internal/platform result has `id` and `platform`; a Google-only result omits `id` and has `google`; an enriched result has both. Results with at least one proximity-verified Boşa Gezme! review rank ahead of provider-only results; `platform` and `google` ratings must still be labelled and rendered separately. Before opening a platform detail/favoriting/reviewing a Google-only result, authenticated clients call `/stores/resolve-external`, then use the returned internal ID. [`store-google-only.json`](./frontend-fixtures/store-google-only.json) is intentionally a search response fragment because no Google-only store-detail endpoint exists.
 

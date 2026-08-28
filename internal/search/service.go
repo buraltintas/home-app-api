@@ -109,6 +109,9 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if p.Phone != "" {
 			attribution["phone"] = p.Phone
 		}
+		if p.BusinessStatus != "" && p.BusinessStatus != "BUSINESS_STATUS_UNSPECIFIED" {
+			attribution["business_status"] = p.BusinessStatus
+		}
 		// Kept because we could not get them back. A store's categories are worked out
 		// once, at import, from these types and its name -- and when the classifier later
 		// learned to read something it could not read before, there was no way to apply
@@ -548,7 +551,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			if localIDs[m.Platform.StoreID] {
 				for i := range results {
 					if results[i].ID != nil && *results[i].ID == m.Platform.StoreID {
-						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}
+						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}
 						// Our own record wins: it is the number the store gave us, or one an
 						// admin corrected. The provider only fills a gap.
 						if results[i].Phone == "" {
@@ -561,12 +564,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
 			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
 			if id, ok := imported[p.PlaceID]; ok {
 				storeID := id
 				r.ID = &storeID
@@ -701,7 +704,8 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
  CASE WHEN jsonb_typeof(attribution->'rating')='number' THEN (attribution->>'rating')::float8 ELSE 0 END,
  CASE WHEN jsonb_typeof(attribution->'rating_count')='number' THEN (attribution->>'rating_count')::int ELSE 0 END,
  coalesce(attribution->>'photo_name',''),
- CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END
+	CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END,
+	coalesce(attribution->>'business_status','')
 	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
 	if err != nil {
 		return err
@@ -711,7 +715,7 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	for rows.Next() {
 		var id uuid.UUID
 		var item External
-		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions); err != nil {
+		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus); err != nil {
 			return err
 		}
 		item.Provider = "google"

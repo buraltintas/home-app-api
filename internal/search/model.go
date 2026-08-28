@@ -51,6 +51,7 @@ type Place struct {
 	Attributions           []string
 	PhotoName              string
 	PhotoAttributions      []string
+	BusinessStatus         string
 	// The store's own website, where it has one. Google publishes it; nothing read it.
 	Website string
 
@@ -106,6 +107,7 @@ type External struct {
 	RatingCount       int      `json:"rating_count"`
 	PhotoName         string   `json:"photo_name,omitempty"`
 	PhotoAttributions []string `json:"photo_attributions,omitempty"`
+	BusinessStatus    string   `json:"business_status,omitempty"`
 }
 
 // Photo mirrors the stored provider photograph. Attribution travels with it because the
