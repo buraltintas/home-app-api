@@ -8,6 +8,23 @@ repeating the value involved.
 
 ---
 
+## The closure warning had nothing to warn with
+
+- Reading the status was one half of it. The value is written when a store is imported or
+  when a search turns it up again, so on the day the warning shipped not one store in the
+  catalogue held it: the feature was complete and entirely silent, and would have filled in
+  slowly, store by store, as people happened to search.
+- `cmd/backfill-status` asks once for the stores already here, in the same shape as the
+  other maintenance commands: only a record holding no status is read, the write merges
+  into the existing attribution and is guarded again in the statement, nothing else in that
+  record is touched.
+- Applied to all 583 active stores. Google calls 581 of them open and two permanently
+  closed, and those two now carry the warning wherever they appear.
+- Worth recording for whoever picks up the report that prompted this: the store it named is
+  one Google still calls open, so this warning will never fire for it. Google's own "is this
+  place closed?" poll is not published through the API, and no amount of reading the
+  provider harder will surface it.
+
 ## A closed-store signal was fetched by nobody
 
 - Google Places publishes an explicit business status, but neither text search nor place
