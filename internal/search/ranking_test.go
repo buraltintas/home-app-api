@@ -341,17 +341,11 @@ func TestStoreCategoriesComeFromTheStoreItself(t *testing.T) {
 	}
 }
 
-func TestDeterministicMirrorAndKnownHomeBrands(t *testing.T) {
+func TestDeterministicMirror(t *testing.T) {
 	for _, query := range []string{"Salon için büyük bir ayna", "mirror", "Spiegel", "зеркало"} {
 		got := Deterministic(query)
 		if got.Scope != ScopeHomeLiving || !slices.Contains(got.Categories, "decoration") {
 			t.Fatalf("mirror query %q parsed as %+v", query, got)
-		}
-	}
-	for _, brand := range []string{"İşbir", "Yataş", "Lova"} {
-		got := Deterministic(brand)
-		if got.Scope != ScopeHomeLiving || got.StoreName == "" {
-			t.Fatalf("home brand %q parsed as %+v", brand, got)
 		}
 	}
 }

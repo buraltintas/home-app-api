@@ -257,14 +257,6 @@ func Deterministic(raw string) Intent {
 	n := normalizeText(raw)
 	folded := foldLatin(n)
 	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, Categories: []string{}, ProductTerms: []string{}, StyleTerms: []string{}, Attributes: []string{}, SortPreference: "relevance", SemanticTerms: []string{}}
-	knownHomeStores := []string{"ikea", "koçtaş", "koctas", "madame coco", "english home", "karaca", "paşabahçe", "pasabahce", "vivense", "bellona", "istikbal", "istikbal mobilya", "taç", "tac", "işbir", "isbir", "yataş", "yatas", "lova"}
-	for _, storeName := range knownHomeStores {
-		if containsNormalized(n, folded, storeName) {
-			i.StoreName = storeName
-			i.Scope = ScopeHomeLiving
-			break
-		}
-	}
 	if containsAnyFolded(n, folded, "çeyiz", "ceyiz", "dowry", "aussteuer", "приданое") {
 		i.Categories = appendUnique(i.Categories, "home_textile")
 		i.Categories = appendUnique(i.Categories, "bedding")
@@ -584,6 +576,7 @@ var nonHomeTypes = map[string]bool{
 	"bank": true, "atm": true, "insurance_agency": true, "real_estate_agency": true,
 	"apartment_complex": true, "lodging": true, "hotel": true, "travel_agency": true,
 	"car_repair": true, "car_dealer": true, "car_wash": true, "gas_station": true,
+	"tire_shop": true, "auto_parts_store": true,
 	"gym": true, "sporting_goods_store": true, "night_club": true, "casino": true,
 	"storage": true, "moving_company": true, "shipping_service": true, "courier_service": true,
 	"general_contractor": true, "lawyer": true, "accounting": true, "veterinary_care": true,

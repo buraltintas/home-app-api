@@ -8,6 +8,28 @@ repeating the value involved.
 
 ---
 
+## Store-name searches no longer depend on which search happened first
+
+- A finite list of familiar brands made a full store name call Google while an unfamiliar
+  or partial name searched only the local catalogue. The first partial search therefore
+  returned whatever had previously been imported; searching the full name warmed the
+  catalogue; repeating the partial search suddenly returned more branches. Brand names
+  are no longer classification rules.
+- Unclear text now checks both catalogue names and provider results, then applies the same
+  provider-type and trade-word classifier used for every business in Turkey. Definite
+  out-of-scope requests still do not call the store provider. Name-led searches use the
+  documented local horizon and can return up to the API's thirty-result cap.
+- Tire and auto-parts provider types are explicitly outside home and living, closing the
+  generic false-positive path opened by provider lookup for an unfamiliar name.
+
+## Stored Google identity is useful even without a rating
+
+- Internal search results attached their stored Google source only when that source also
+  had a rating count. A legitimate store with a Google place id, phone or photograph but
+  no reviews therefore showed those facts in search and lost them on other surfaces; in
+  particular the Google Maps action disappeared. The source is now attached whenever it
+  exists, while missing rating fields continue to decode as zero.
+
 ## Twelve stores had a photograph we never went back for
 
 - Reported: one store shows no photograph. Google has none for it either -- nothing to

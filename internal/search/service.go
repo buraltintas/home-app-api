@@ -421,12 +421,14 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// A named store is worth finding wherever it is, so the radius filter is
 		// dropped for name-led intents. Generic queries keep the near-to-far filter.
 		searchRadius := in.RadiusMeters
+		internalLimit := 20
 		if intent.StoreName != "" {
 			searchRadius = 0
+			internalLimit = 30
 		}
 		group.Go(func() error {
 			var providerErr error
-			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, 20, user)
+			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, internalLimit, user)
 			return providerErr
 		})
 		if s.places != nil {
@@ -434,10 +436,14 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			group.Go(func() error {
 				query := placesQuery(intent, in.Query)
 				var providerErr error
+				providerRadius := in.RadiusMeters
+				if intent.StoreName != "" {
+					providerRadius = localHorizonMeters
+				}
 				if localized, ok := s.places.(LocalizedPlacesProvider); ok {
-					external, providerErr = localized.TextSearchLocalized(providerContext, query, in.Latitude, in.Longitude, in.RadiusMeters, requestLocale)
+					external, providerErr = localized.TextSearchLocalized(providerContext, query, in.Latitude, in.Longitude, providerRadius, requestLocale)
 				} else {
-					external, providerErr = s.places.TextSearch(providerContext, query, in.Latitude, in.Longitude, in.RadiusMeters)
+					external, providerErr = s.places.TextSearch(providerContext, query, in.Latitude, in.Longitude, providerRadius)
 				}
 				if providerErr != nil {
 					fallback = joinFallback(fallback, "places_unavailable")
@@ -460,11 +466,31 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// and was classified out of scope, while GÜNEY ANTALYA HALI ve YATAK SATIŞ
 		// MAĞAZASI sat in our own catalogue the whole time. Nobody should have to type a
 		// store's full registered name to find it.
-		named, e := s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 10, user)
+		named, e := s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user)
 		if e != nil {
 			return Response{}, e
 		}
-		if len(named) > 0 {
+		// A partial or previously unseen store name cannot be recognized by a finite
+		// brand list. Ask the provider for unclear text and let the same generic store
+		// classifier used for every city decide whether the matches sell home goods.
+		// Definite out-of-scope requests still never reach the provider unless they match
+		// a store already in our catalogue.
+		if s.places != nil && (len(named) > 0 || intent.Scope == ScopeUnclear) {
+			googleUsed = true
+			var providerErr error
+			if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+				external, providerErr = localized.TextSearchLocalized(ctx, in.Query, in.Latitude, in.Longitude, localHorizonMeters, requestLocale)
+			} else {
+				external, providerErr = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, localHorizonMeters)
+			}
+			if providerErr != nil {
+				fallback = joinFallback(fallback, "places_unavailable")
+				external = nil
+			} else {
+				external = homeLivingOnly(external)
+			}
+		}
+		if len(named) > 0 || len(external) > 0 {
 			internal = named
 			intent.Scope = ScopeHomeLiving
 			// Recording what this turned out to be keeps the ordering honest downstream:
@@ -676,7 +702,7 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
  CASE WHEN jsonb_typeof(attribution->'rating_count')='number' THEN (attribution->>'rating_count')::int ELSE 0 END,
  coalesce(attribution->>'photo_name',''),
  CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END
- FROM store_external_sources WHERE provider='google' AND store_id=ANY($1) AND attribution ? 'rating_count'`, ids)
+	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
 	if err != nil {
 		return err
 	}

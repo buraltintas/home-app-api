@@ -125,19 +125,27 @@ func TestDeterministicRejectsUnrelatedAndMarksChitchatUnclear(t *testing.T) {
 	}
 }
 
-func TestDeterministicRecognizesHomeStoreName(t *testing.T) {
-	for _, query := range []string{"IKEA", "Madame Coco Kadıköy", "Koçtaş"} {
+func TestDeterministicDoesNotSpecialCaseStoreBrands(t *testing.T) {
+	// Store names are discovered through our catalogue and Google's provider data. A
+	// hand-maintained brand list made partial names behave differently before and after
+	// another query happened to import branches into the catalogue.
+	for _, query := range []string{"IKEA", "Madame Coco", "English Home", "Koçtaş"} {
 		intent := Deterministic(query)
-		if intent.Scope != ScopeHomeLiving || intent.StoreName == "" {
-			t.Fatalf("%q produced %+v", query, intent)
-		}
-		if got := internalQuery(intent); !strings.Contains(got, intent.StoreName) {
-			t.Fatalf("internal query %q missing store name %q", got, intent.StoreName)
+		if intent.Scope != ScopeUnclear || intent.StoreName != "" {
+			t.Fatalf("brand %q was special-cased: %+v", query, intent)
 		}
 	}
 	enriched := merge(Deterministic("özel ev mağazası"), Intent{Scope: ScopeHomeLiving, StoreName: "Özel Ev"})
 	if enriched.Scope != ScopeHomeLiving || enriched.StoreName != "Özel Ev" {
 		t.Fatalf("AI store name was not merged: %+v", enriched)
+	}
+}
+
+func TestTireProviderTypesAreOutOfScope(t *testing.T) {
+	for _, providerType := range []string{"tire_shop", "auto_parts_store"} {
+		if IsHomeLivingStore("Örnek İşletme", []string{providerType}) {
+			t.Fatalf("provider type %q classified as home and living", providerType)
+		}
 	}
 }
 
