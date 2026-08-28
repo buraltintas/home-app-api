@@ -30,6 +30,33 @@ When a report names one shop, fix the class of problem it belongs to. Then check
 in the catalogue is in that class, because there is always more than the one reported: two
 renovation firms in a bug report turned out to be seventeen.
 
+## The provider bills by the question, not by the answer
+
+Every call to Google Places costs money. There is no free allowance worth planning around,
+and a backfill that "only" touches the catalogue once is still one paid call per store.
+
+This was learned by spending about a thousand lira in a day. Four separate maintenance
+commands each walked the same catalogue and each asked the provider the same question about
+the same store: categories, then website and phone, then photographs, then closure status.
+Roughly 1,490 calls where a single pass would have made about 600. Nothing was wrong with
+any one command. The waste was in running them one after another instead of together.
+
+So:
+
+- **Ask once, take everything.** The field mask is billed by its most expensive field, and a
+  request for one such field costs what a request for all of them costs. Never split one
+  pass over a catalogue into several.
+- **Say the number before spending it.** A command that will call the provider states how
+  many calls and roughly what that costs, and waits for a person to agree. "It is probably
+  within some free tier" is not an estimate; it is a hope, and this one was wrong.
+- **Cache every answer to disk.** A dry run and the apply that follows it must share one
+  fetch, and an interrupted run must resume rather than start the bill again.
+- **Never call the provider to satisfy curiosity.** Checking one store by hand is a paid
+  call too. The catalogue already holds what was fetched; read that first.
+- **Do not schedule it.** A store people actually search for is refreshed by the search
+  itself, which is already paid for. A recurring backfill pays a second time for data that
+  arrives free.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest
