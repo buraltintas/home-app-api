@@ -229,14 +229,24 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
 //
 // This exists so that typing part of a store's name finds it. Somebody who remembers
 // "güney antalya" should not have to produce "GÜNEY ANTALYA HALI ve YATAK SATIŞ MAĞAZASI"
+// maxNameMatches matches the number of results a search is allowed to return, so this
+// stage never becomes the thing that decides which branches a person is shown.
+const maxNameMatches = 30
+
 // word for word, and should certainly not be told the request was not understood.
 func (s *Service) SearchByName(ctx context.Context, q string, lat, lon *float64, limit int, viewer *uuid.UUID) ([]Item, error) {
 	q = strings.TrimSpace(q)
 	if q == "" || limit < 1 {
 		return nil, nil
 	}
-	if limit > 20 {
-		limit = 20
+	// A chain has as many branches as it has, and somebody who types its name wants the
+	// one they can reach. Twenty was below both the caller's request and the thirty a
+	// search is allowed to return, so the branches were being cut here and the cut was
+	// invisible: a chain with more shops than the cap simply lost the far ones before
+	// anything could rank them by distance. Madame Coco has twenty branches in one city
+	// alone.
+	if limit > maxNameMatches {
+		limit = maxNameMatches
 	}
 	// Three readings of the same words, tried strongest first, because they are not
 	// equally good evidence that this is the store somebody meant.

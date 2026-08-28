@@ -8,6 +8,22 @@ repeating the value involved.
 
 ---
 
+## A chain lost its branches before anything could rank them
+
+- Reported: searching a chain's name returns fewer branches than the chain has, and a
+  second search for the same word returns more than the first.
+- The name search was capped at twenty matches while a search is allowed to return thirty,
+  and the caller had already been changed to ask for thirty. The cap sat below both, and it
+  cut before ranking: a chain with more branches than the cap lost the far ones outright,
+  so distance never got to decide which branch a person was shown. Madame Coco has twenty
+  branches in one city alone; English Home has fifteen.
+- The cap is now the same number a search is allowed to return, and it is a named constant
+  next to that number rather than a figure repeated in two places that drifted apart.
+- The second half of the report is not a defect and is worth writing down so it is not
+  chased again: the first search imports the branches it finds from the provider, so a
+  later search finds them in our own catalogue as well. More results the second time is the
+  catalogue filling in, not the search behaving differently.
+
 ## The closure warning had nothing to warn with
 
 - Reading the status was one half of it. The value is written when a store is imported or
