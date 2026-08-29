@@ -8,6 +8,19 @@ repeating the value involved.
 
 ---
 
+## The list and the store's own page named its categories differently
+
+- Reported: the results list said "Nevresim takimi" and the store's own page said "Yatak",
+  for the same store and the same category.
+- Two sources of truth. Search results carried category slugs and the client translated
+  them from a list of its own; the store's page carried names translated in the database.
+  The two had drifted, and nothing would ever have brought them back into line.
+- Search results now carry the names as well, read from the same translations the store's
+  page reads. The client's own list survives only as a fallback for a result that is not
+  in the catalogue at all -- one that has no page to disagree with.
+
+---
+
 ## Every restaurant called "... Sofrasi" was a tableware shop
 
 - Reported: a Turkish restaurant was filed under Sofra Takimi, and searching "sofra"

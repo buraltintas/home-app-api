@@ -186,8 +186,13 @@ type Result struct {
 	Longitude      float64    `json:"longitude"`
 	DistanceMeters *float64   `json:"distance_meters,omitempty"`
 	Categories     []string   `json:"categories"`
-	Platform       *Platform  `json:"platform,omitempty"`
-	Google         *External  `json:"google,omitempty"`
+	// The category names as this reader's language spells them, read from the same
+	// translations the store's own page reads. The client used to translate the slugs
+	// itself, from a second list that had drifted: a store filed under "bedding" was
+	// "Nevresim takımı" in the results and "Yatak" on its own page.
+	CategoryLabels []string  `json:"category_labels,omitempty"`
+	Platform       *Platform `json:"platform,omitempty"`
+	Google         *External `json:"google,omitempty"`
 	// Photo is the photograph already on file for this store, used when the live provider
 	// response carries none. Without it a store we hold ourselves -- including every
 	// promoted one, which reaches the list without going through Google at all -- renders
