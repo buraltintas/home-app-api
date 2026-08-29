@@ -97,9 +97,16 @@ raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
                     |                                     |
           out_of_scope / unclear                    home_living
           localized guidance only                         |
-                                          +---------------+---------------+
+                                                          |
+                                            internal Postgres search
+                                                          |
+                                              sufficiency gate:
+                                     enough results && relevant results
+                                  && known coverage && no store named outright
                                           |                               |
-                             internal Postgres search             Google Places
+                                    all four hold                    any one fails
+                                          |                               |
+                                  no provider call                   Google Places
                                           |                               |
                                           +---------------+---------------+
                                                           |
@@ -108,7 +115,7 @@ raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
                                       persist search + impressions -> response
 ```
 
-The two home/living providers run concurrently. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above Google-only results; community and Google rating snapshots remain separate. Out-of-scope and unclear requests do not invoke either store provider. A Google-only result is materialized only after the backend refetches provider details; `(provider,external_id)` uniqueness makes this concurrency-safe. Provider retention is configuration-driven and raw Places payloads are not stored.
+The provider is asked only when our own catalogue cannot answer the question. A sufficiency gate sits between the local search and the provider call and skips the call only when all four of its conditions hold; every failing condition is recorded, so the reason a call happened is answerable per search. It is controlled by `SEARCH_LOCAL_FIRST_ENABLED` and, while that is off, the two home/living providers run concurrently as they always have. A small configurable sample of local-only searches asks the provider anyway after the response has gone out, purely to measure what the decision cost; that answer is read and never imported, so the catalogue does not learn from a measurement. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above Google-only results; community and Google rating snapshots remain separate. Out-of-scope and unclear requests do not invoke either store provider. A Google-only result is materialized only after the backend refetches provider details; `(provider,external_id)` uniqueness makes this concurrency-safe. Provider retention is configuration-driven and raw Places payloads are not stored.
 
 Search accepts Turkish, English, German and Russian through one pipeline.
 Unicode-aware normalization preserves Cyrillic and performs only targeted accent
