@@ -234,3 +234,26 @@ func TestSectorLabelAloneIsKept(t *testing.T) {
 		}
 	}
 }
+
+// The bakery from the report. A search for the bed brand "İşbir" came back with "Isbirli
+// Ekmek Taş Firin" because the provider matches names loosely; what put it in front of a
+// reader, and then into the catalogue, was our own import writing a store the classifier
+// had already declined to classify. These are the shapes that verdict has to keep giving,
+// whatever the provider sends back.
+func TestStoreCategoriesDeclinesWhatThisProductIsNotAbout(t *testing.T) {
+	for _, name := range []string{
+		"Isbirli Ekmek Taş Firin",
+		"Aknur Teknik Servis",
+		"Vintage Rent Motorbike",
+		"İbrahim Aksin Spor Kompleksi",
+	} {
+		if got := StoreCategories(name, nil); len(got) != 0 {
+			t.Errorf("StoreCategories(%q) = %v, want none", name, got)
+		}
+	}
+	// And it still says yes to what the product is about, so the rule above cannot be
+	// satisfied by simply refusing everything.
+	if got := StoreCategories("İşbir Yatak Uncalı (Uyku Merkezi)", nil); len(got) == 0 {
+		t.Error("StoreCategories declined a bedding store")
+	}
+}

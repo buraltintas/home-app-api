@@ -149,6 +149,17 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if err != pgx.ErrNoRows {
 			return nil, err
 		}
+		// A place that classifies into none of our categories is not a store for this
+		// product. The classifier already says so -- it returns nothing for a service, a
+		// workshop, a bakery -- and until now that verdict was ignored at exactly the
+		// moment it mattered: the row was written anyway, with no categories, and stayed
+		// in the catalogue. That is how a search for a bed brand came back with a bakery
+		// whose name merely resembled it. Provider matching is fuzzy by design; deciding
+		// what belongs here is ours to do, and this is where we do it.
+		categories := StoreCategories(p.Name, p.Types)
+		if len(categories) == 0 {
+			continue
+		}
 		id := uuid.New()
 		slug := storeSlug(p.Name, id)
 		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone,website) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''),nullif($9,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone, p.Website); err != nil {
@@ -157,7 +168,7 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		// A store now carries the categories it actually sells, worked out from its own
 		// Google types and its own name. Before this an imported store had none at all, and
 		// the categories shown beside a result came from the search that found it.
-		if categories := StoreCategories(p.Name, p.Types); len(categories) > 0 {
+		{
 			if _, err = tx.Exec(ctx, `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug=ANY($2) AND active ON CONFLICT DO NOTHING`, id, categories); err != nil {
 				return nil, err
 			}
@@ -577,6 +588,18 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			results = append(results, r)
 		}
 	}
+	// The same verdict, applied to what is shown. A store already in the catalogue may have
+	// been classified by hand, so its own categories are trusted rather than re-derived --
+	// but a result that belongs to no category of ours has no business in a list of home
+	// and living stores, wherever it came from.
+	kept := results[:0]
+	for _, r := range results {
+		if len(r.Categories) > 0 {
+			kept = append(kept, r)
+		}
+	}
+	results = kept
+
 	if e = s.attachStoredGoogle(ctx, results); e != nil {
 		return Response{}, e
 	}

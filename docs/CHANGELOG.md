@@ -8,6 +8,27 @@ repeating the value involved.
 
 ---
 
+## A search for a bed brand returned a bakery
+
+- Reported: searching "İşbir" returned "Isbirli Ekmek Taş Firin".
+- Our own catalogue search is not what did this. Asked for "İşbir" it returns the İşbir
+  Yatak branches and nothing else -- checked directly against the index. The bakery came
+  from the provider, which matches names loosely by design, and "Isbirli" resembles
+  "İşbir" enough for it.
+- What put it in front of a reader, and then into the catalogue for good, was ours. The
+  classifier had already declined it: it returns no categories for a service, a workshop,
+  a bakery. The import ignored that verdict and wrote the row anyway, with no categories
+  at all. 59 of 838 stores had arrived that way -- technical services, a sports complex, a
+  motorbike rental.
+- A place that classifies into none of our categories is not a store for this product. It
+  is no longer imported, and no result without a category is shown, wherever it came from.
+  A store already in the catalogue keeps its own categories, which may have been set by
+  hand, rather than having them re-derived.
+- Deciding what belongs here was always ours to do. Loose matching is the provider working
+  as intended; the filter is the part we had not written.
+
+---
+
 ## A chain lost its branches before anything could rank them
 
 - Reported: searching a chain's name returns fewer branches than the chain has, and a
