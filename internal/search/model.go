@@ -15,6 +15,7 @@ import (
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
+	"time"
 )
 
 // The enum tags are the contract handed to the model as a structured-output schema.
@@ -54,6 +55,11 @@ type Place struct {
 	BusinessStatus         string
 	// The store's own website, where it has one. Google publishes it; nothing read it.
 	Website string
+
+	// When the store is open, as the provider publishes it. Asked for in the same field
+	// mask that already carries the rating and the website, so it is billed at the tier we
+	// were already paying for -- no separate lookup and no extra request per store.
+	Hours *OpeningHours
 
 	// The number Google publishes in national format. It is asked for in the same field
 	// mask that already carries the rating, so it is billed at the tier we were already
@@ -100,14 +106,64 @@ type Platform struct {
 	FavoriteCount int       `json:"favorite_count"`
 	PostCount     int       `json:"post_count"`
 }
+
+// OpeningHours is what the provider publishes about when a store is open. The descriptions
+// are already phrased for a reader; the periods are what answers "is it open right now",
+// which the descriptions cannot be parsed back into across four languages. The offset is
+// the store's own, not the reader's: whether a shop in Antalya is open does not depend on
+// where the person asking happens to be standing.
+type OpeningHours struct {
+	Periods          []OpeningPeriod `json:"periods,omitempty"`
+	Descriptions     []string        `json:"descriptions,omitempty"`
+	UTCOffsetMinutes int             `json:"utc_offset_minutes"`
+	// Computed when the hours are served, never stored: a stored answer to "open now" is
+	// wrong within the hour.
+	OpenNow *bool `json:"open_now,omitempty"`
+}
+
+// Minutes from midnight, with the day as Google gives it: 0 is Sunday.
+type OpeningPeriod struct {
+	OpenDay     int `json:"open_day"`
+	OpenMinute  int `json:"open_minute"`
+	CloseDay    int `json:"close_day"`
+	CloseMinute int `json:"close_minute"`
+}
+
+// OpenAt answers whether these hours cover the given instant, in the store's own time.
+// A period that closes on a later day than it opens wraps past midnight, so it is walked
+// as a span of minutes across the week rather than compared day by day.
+func (h *OpeningHours) OpenAt(t time.Time) *bool {
+	if h == nil || len(h.Periods) == 0 {
+		return nil
+	}
+	local := t.UTC().Add(time.Duration(h.UTCOffsetMinutes) * time.Minute)
+	now := int(local.Weekday())*24*60 + local.Hour()*60 + local.Minute()
+	week := 7 * 24 * 60
+	open := false
+	for _, p := range h.Periods {
+		start := p.OpenDay*24*60 + p.OpenMinute
+		end := p.CloseDay*24*60 + p.CloseMinute
+		if end <= start {
+			end += week
+		}
+		for _, m := range []int{now, now + week} {
+			if m >= start && m < end {
+				open = true
+			}
+		}
+	}
+	return &open
+}
+
 type External struct {
-	Provider          string   `json:"provider"`
-	PlaceID           string   `json:"place_id"`
-	Rating            float64  `json:"rating"`
-	RatingCount       int      `json:"rating_count"`
-	PhotoName         string   `json:"photo_name,omitempty"`
-	PhotoAttributions []string `json:"photo_attributions,omitempty"`
-	BusinessStatus    string   `json:"business_status,omitempty"`
+	Provider          string        `json:"provider"`
+	PlaceID           string        `json:"place_id"`
+	Rating            float64       `json:"rating"`
+	RatingCount       int           `json:"rating_count"`
+	PhotoName         string        `json:"photo_name,omitempty"`
+	PhotoAttributions []string      `json:"photo_attributions,omitempty"`
+	BusinessStatus    string        `json:"business_status,omitempty"`
+	Hours             *OpeningHours `json:"opening_hours,omitempty"`
 }
 
 // Photo mirrors the stored provider photograph. Attribution travels with it because the

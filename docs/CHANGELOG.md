@@ -8,6 +8,25 @@ repeating the value involved.
 
 ---
 
+## Opening hours, for nothing
+
+- Asked for: show a store's working days and hours in the result list.
+- The provider bills a request at the tier of its most expensive field, and the field mask
+  already asks for the rating, the website and the phone number -- all of which sit in the
+  same tier as opening hours. So the hours arrive on the request we were already paying
+  for: no second lookup, no per-store charge, no change to the bill at all.
+- Stored with the rest of what the provider says about a store. Both what it publishes for
+  a reader -- already phrased, already in the right language -- and the raw periods, which
+  are what can answer "is it open right now" across four languages when the sentences
+  cannot be parsed back.
+- "Open now" is worked out when the hours are served and never stored, because a stored
+  answer to that is wrong within the hour. It is worked out in the store's own time, not
+  the reader's: whether a shop in Antalya is open does not depend on where the person
+  asking is standing. A shift that ends after midnight belongs to the day it started.
+- A store that publishes no hours gets no answer, rather than being shown as closed.
+
+---
+
 ## The same search, paid for twice
 
 - Every search called the provider, including the ones asking a question already asked. Of

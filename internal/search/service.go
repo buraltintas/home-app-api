@@ -113,6 +113,9 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if p.BusinessStatus != "" && p.BusinessStatus != "BUSINESS_STATUS_UNSPECIFIED" {
 			attribution["business_status"] = p.BusinessStatus
 		}
+		if p.Hours != nil {
+			attribution["opening_hours"] = p.Hours
+		}
 		// Kept because we could not get them back. A store's categories are worked out
 		// once, at import, from these types and its name -- and when the classifier later
 		// learned to read something it could not read before, there was no way to apply
@@ -746,7 +749,8 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
  CASE WHEN jsonb_typeof(attribution->'rating_count')='number' THEN (attribution->>'rating_count')::int ELSE 0 END,
  coalesce(attribution->>'photo_name',''),
 	CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END,
-	coalesce(attribution->>'business_status','')
+	coalesce(attribution->>'business_status',''),
+	 CASE WHEN jsonb_typeof(attribution->'opening_hours')='object' THEN attribution->>'opening_hours' ELSE '' END
 	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
 	if err != nil {
 		return err
@@ -756,10 +760,19 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	for rows.Next() {
 		var id uuid.UUID
 		var item External
-		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus); err != nil {
+		var hoursJSON string
+		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus, &hoursJSON); err != nil {
 			return err
 		}
 		item.Provider = "google"
+		if hoursJSON != "" {
+			var hours OpeningHours
+			if json.Unmarshal([]byte(hoursJSON), &hours) == nil {
+				// Answered now, never stored. "Open" is true for as long as it is true.
+				hours.OpenNow = hours.OpenAt(s.now())
+				item.Hours = &hours
+			}
+		}
 		stored[id] = &item
 	}
 	if err = rows.Err(); err != nil {

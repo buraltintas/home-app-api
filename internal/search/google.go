@@ -50,7 +50,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.attributions,places.photos,places.nationalPhoneNumber,places.primaryType,places.websiteUri,places.businessStatus")
+	req.Header.Set("X-Goog-FieldMask", "places.regularOpeningHours,places.utcOffsetMinutes,places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.attributions,places.photos,places.nationalPhoneNumber,places.primaryType,places.websiteUri,places.businessStatus")
 	r, e := g.client.Do(req)
 	if e != nil {
 		return nil, e
@@ -79,6 +79,8 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 			PrimaryType    string        `json:"primaryType"`
 			Website        string        `json:"websiteUri"`
 			BusinessStatus string        `json:"businessStatus"`
+			Hours          googleHours   `json:"regularOpeningHours"`
+			UTCOffset      int           `json:"utcOffsetMinutes"`
 		}
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
@@ -87,6 +89,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	out := make([]Place, 0, len(payload.Places))
 	for _, x := range payload.Places {
 		p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.Address, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.Count, Types: withPrimary(x.PrimaryType, x.Types), Phone: x.Phone, Website: x.Website, BusinessStatus: x.BusinessStatus}
+		p.Hours = openingHours(x.Hours, x.UTCOffset)
 		for _, a := range x.Attributions {
 			p.Attributions = append(p.Attributions, a.Provider+" "+a.ProviderURI)
 		}
@@ -106,6 +109,37 @@ type googlePhoto struct {
 
 // firstPhoto returns the leading photo resource name and its required author
 // attributions. Google's terms require the attribution to be displayed with the photo.
+// The provider's opening hours. The descriptions are already written for a reader in the
+// language the request asked for; the periods are what a machine needs to answer "is it
+// open now", which the descriptions cannot be parsed back into reliably in four languages.
+type googleHours struct {
+	Periods []struct {
+		Open  googleHourPoint `json:"open"`
+		Close googleHourPoint `json:"close"`
+	} `json:"periods"`
+	WeekdayDescriptions []string `json:"weekdayDescriptions"`
+}
+
+type googleHourPoint struct {
+	Day    int `json:"day"`
+	Hour   int `json:"hour"`
+	Minute int `json:"minute"`
+}
+
+func openingHours(h googleHours, offsetMinutes int) *OpeningHours {
+	if len(h.Periods) == 0 && len(h.WeekdayDescriptions) == 0 {
+		return nil
+	}
+	out := &OpeningHours{Descriptions: h.WeekdayDescriptions, UTCOffsetMinutes: offsetMinutes}
+	for _, p := range h.Periods {
+		out.Periods = append(out.Periods, OpeningPeriod{
+			OpenDay: p.Open.Day, OpenMinute: p.Open.Hour*60 + p.Open.Minute,
+			CloseDay: p.Close.Day, CloseMinute: p.Close.Hour*60 + p.Close.Minute,
+		})
+	}
+	return out
+}
+
 func firstPhoto(photos []googlePhoto) (string, []string) {
 	for _, photo := range photos {
 		if !ValidPhotoName(photo.Name) {
@@ -137,7 +171,7 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 	u := g.baseURL + "/places/" + url.PathEscape(id)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus")
+	req.Header.Set("X-Goog-FieldMask", "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus")
 	r, e := g.client.Do(req)
 	if e != nil {
 		return Place{}, e
@@ -159,11 +193,14 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 		PrimaryType      string        `json:"primaryType"`
 		Website          string        `json:"websiteUri"`
 		BusinessStatus   string        `json:"businessStatus"`
+		Hours            googleHours   `json:"regularOpeningHours"`
+		UTCOffset        int           `json:"utcOffsetMinutes"`
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); e != nil {
 		return Place{}, e
 	}
 	p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.UserRatingCount, Types: withPrimary(x.PrimaryType, x.Types), Phone: x.Phone, Website: x.Website, BusinessStatus: x.BusinessStatus}
+	p.Hours = openingHours(x.Hours, x.UTCOffset)
 	p.PhotoName, p.PhotoAttributions = firstPhoto(x.Photos)
 	return p, nil
 }
