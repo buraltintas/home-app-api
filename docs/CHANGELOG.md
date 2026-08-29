@@ -8,6 +8,41 @@ repeating the value involved.
 
 ---
 
+## A search for "yastık" answered with a shop 44 km away, in second place
+
+- Reported from the live site: a search from Antalya put a store in Serik, 44 km out,
+  above a dozen at eight kilometres.
+- Two faults, one on top of the other. A pillow is bedding and the word appeared in none
+  of our vocabulary, so "yastık" classified as nothing: no category, no measured relevance.
+  The intent parser, given a word we could not explain, read it as the name of a shop --
+  and a name-led search deliberately drops the radius filter and lifts every store whose
+  sign carries the word above every store that is nearer. Working exactly as designed, on
+  a premise that was wrong.
+- The vocabulary now names pillows, mattresses and bed bases in four languages, beside the
+  bed it already knew.
+- And a parsed store name is now checked against the trade's own vocabulary before it is
+  believed. Strip the words that name a product, a category or a shop, and if nothing is
+  left then nothing was named -- so "Yastık" is a product while "Bambi Yatak" is a shop.
+  The test is the same table used to classify every store in the country, not a list of
+  words anybody noticed.
+
+---
+
+## Every store's city carried a postcode, and no store had a district
+
+- A Turkish address ends "... 45003 Yunusemre/Manisa, Türkiye" and the whole of that
+  component was stored as the city. Store pages were titled with a postcode nobody asked
+  for, and the district column was empty for the entire catalogue.
+- New imports have been correct since the parser landed; the 837 stores that arrived
+  before it were not. `repair-store-locations` re-reads the addresses we already hold and
+  separates them. No provider call: the information was always in the row, it was simply
+  never split.
+- The parser also mishandled an address with three levels. "Bahtılı Köyü/Kepez/Antalya"
+  stored "Bahtılı Köyü/Kepez" as the district, which is not a district and groups with
+  nothing. Only the level next to the province is the district.
+
+---
+
 ## The provider is now asked only when we cannot answer ourselves
 
 - Every search asked Google in parallel with our own catalogue, whether or not the

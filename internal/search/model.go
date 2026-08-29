@@ -257,7 +257,11 @@ var homeConcepts = []homeConcept{
 	{"decoration", "decoration", []string{"dekorasyon", "dekor", "decoration", "decor", "dekoration", "декор", "ayna", "mirror", "spiegel", "зеркало"}, nil},
 	{"kitchenware", "kitchenware", []string{"mutfak", "tencere", "kitchenware", "cookware", "küchenbedarf", "кухонные товары", "посуда"}, nil},
 	{"bathroom", "bathroom", []string{"banyo", "duşakabin", "dusakabin", "vitrifiye", "armatür", "armatur", "bathroom", "shower cabin", "badezimmer", "ванная"}, nil},
-	{"bedding", "bedding", []string{"yatak", "bedding", "bettwaren", "постель"}, nil},
+	// A pillow is bedding and was in none of these lists, so "yastık" classified as
+	// nothing at all: no category, no relevance, and the intent parser was free to read
+	// it as the name of a shop instead. The other sleep words are here for the same
+	// reason -- they name the goods, not one shop that sells them.
+	{"bedding", "bedding", []string{"yatak", "yastık", "yastik", "baza", "uyku seti", "bedding", "pillow", "mattress", "bettwaren", "kissen", "matratze", "постель", "подушка", "матрас"}, nil},
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
 	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
@@ -477,6 +481,60 @@ func sameFoldedWords(a, b []string) bool {
 // stripEdgeLocation removes a location the parser repeated at the beginning or end of a
 // store name. Middle words stay untouched because Antalya can legitimately be part of a
 // registered name such as "Güney Antalya Halı".
+// The words every shop of a kind shares. A sign says "mağaza"; so does the next one.
+// They cannot distinguish a store and so cannot make a store name on their own.
+var shopWords = []string{
+	"mağaza", "mağazası", "mağazaları", "mağazacılık", "dükkan", "dükkanı",
+	"satış", "satis", "satıcı", "market", "store", "stores", "shop", "shops",
+	"laden", "geschäft", "магазин", "ürünleri", "urunleri", "dünyası", "dunyasi",
+}
+
+// genericStoreName reports whether a parsed store name is not a name at all but the
+// thing being looked for. The parser hands back "Yastık" as a store name often enough to
+// matter, and the consequence is not cosmetic: a name-led search drops the radius filter
+// and lifts every shop whose sign carries the word above every shop that is nearer. A
+// search for "yastık" from Antalya answered with a shop 44 km away in second place, above
+// a dozen at eight kilometres. Reported from the live site.
+//
+// The test is the trade's own vocabulary -- the same table used to classify every store
+// in the country, not a list of words somebody noticed. Strip what names a product, a
+// category or a shop, and if nothing is left then nothing was named.
+func genericStoreName(name string) bool {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return false
+	}
+	remaining := foldLatin(normalizeText(trimmed))
+	matched := false
+	strip := func(term string) {
+		term = foldLatin(normalizeText(term))
+		if term == "" || !strings.Contains(remaining, term) {
+			return
+		}
+		matched = true
+		remaining = strings.ReplaceAll(remaining, term, " ")
+	}
+	for _, concept := range homeConcepts {
+		for _, term := range concept.terms {
+			strip(term)
+		}
+	}
+	if !matched {
+		return false
+	}
+	for _, word := range shopWords {
+		strip(word)
+	}
+	// Whatever is left has to be capable of being a name. One or two stray letters are
+	// what a Turkish suffix leaves behind ("yastıkçı" minus "yastık"), not a shop.
+	for _, field := range strings.Fields(remaining) {
+		if utf8.RuneCountInString(field) > 2 {
+			return false
+		}
+	}
+	return true
+}
+
 func stripEdgeLocation(storeName, location string) string {
 	storeWords := nameWords(storeName)
 	locationWords := nameWords(location)

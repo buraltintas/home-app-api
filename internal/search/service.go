@@ -261,16 +261,19 @@ func storeSlug(name string, id uuid.UUID) string {
 // This is the country's own address format rather than anything about a particular shop,
 // so it holds for a store nobody has looked at, in a town nobody has visited.
 func cityFromAddress(address string) string {
-	city, _ := cityAndDistrict(address)
+	city, _ := CityAndDistrict(address)
 	return city
 }
 
 func districtFromAddress(address string) string {
-	_, district := cityAndDistrict(address)
+	_, district := CityAndDistrict(address)
 	return district
 }
 
-func cityAndDistrict(address string) (string, string) {
+// CityAndDistrict is exported because the catalogue predates it. Every store imported
+// before this parser existed had the whole component stored as its city, and putting them
+// right is a local pass over addresses we already hold -- no provider call, no guessing.
+func CityAndDistrict(address string) (string, string) {
 	parts := strings.Split(address, ",")
 	for i := len(parts) - 1; i >= 0; i-- {
 		v := strings.TrimSpace(parts[i])
@@ -282,10 +285,16 @@ func cityAndDistrict(address string) (string, string) {
 		// "Kepez/Antalya" -- the district comes first, the province last. A component with
 		// no slash is the province on its own, which is the normal shape for a province
 		// that is also its own centre.
+		//
+		// Some addresses carry a third level: "Bahtılı Köyü/Kepez/Antalya" is a village
+		// inside a district inside a province. Taking everything before the last slash as
+		// the district stored "Bahtılı Köyü/Kepez", which is not a district and matches
+		// nothing. Only the segment next to the province is the district; anything finer
+		// than that belongs to the address, not to a column two stores can be grouped by.
 		city, district := v, ""
-		if slash := strings.LastIndex(v, "/"); slash >= 0 {
-			district = strings.TrimSpace(v[:slash])
-			city = strings.TrimSpace(v[slash+1:])
+		if parts := strings.Split(v, "/"); len(parts) > 1 {
+			city = strings.TrimSpace(parts[len(parts)-1])
+			district = strings.TrimSpace(parts[len(parts)-2])
 		}
 		if city == "" {
 			city = v
@@ -473,6 +482,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		if e == nil {
 			intent = merge(intent, enriched)
 			intent.StoreName = stripEdgeLocation(intent.StoreName, intent.LocationText)
+			// A product is not a store. Left in place it turns an ordinary category search
+			// into a name-led one, which abandons the radius filter and ranks by whose sign
+			// carries the word rather than by what is nearby.
+			if genericStoreName(intent.StoreName) {
+				intent.StoreName = ""
+			}
 			aiUsed = true
 		} else {
 			// Every silent degradation here reaches the user as "we did not understand

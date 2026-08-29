@@ -298,13 +298,39 @@ func TestCityAndDistrictFromTurkishAddress(t *testing.T) {
 		{"Bir Sokak No:2, Antalya, Türkiye", "Antalya", ""},
 		// No postcode at all.
 		{"Bir Cadde, Muratpaşa/Antalya, Türkiye", "Antalya", "Muratpaşa"},
+		// A village inside a district inside a province. Only the level next to the
+		// province is the district; the rest is street detail.
+		{"Bir Yol, 07220 Bahtılı Köyü/Kepez/Antalya, Türkiye", "Antalya", "Kepez"},
 		// Nothing usable.
 		{"Türkiye", "Bilinmiyor", ""},
 	}
 	for _, c := range cases {
-		city, district := cityAndDistrict(c.address)
+		city, district := CityAndDistrict(c.address)
 		if city != c.city || district != c.district {
 			t.Errorf("cityAndDistrict(%q) = (%q, %q), want (%q, %q)", c.address, city, district, c.city, c.district)
 		}
+	}
+}
+
+// A product is not a store. The intent parser hands back "Yastık" as a store name, and a
+// name-led search drops the radius filter and lifts every shop whose sign carries the word
+// above every shop that is nearer -- which is how a search from Antalya answered with a
+// shop 44 km away in second place, above a dozen at eight kilometres.
+func TestAProductWordIsNotAStoreName(t *testing.T) {
+	generic := []string{"Yastık", "yastik", "perde", "PERDE MAĞAZASI", "halı", "mobilya mağazası", "nevresim", "curtain", "möbel", "ковер", "ev tekstili ürünleri"}
+	for _, name := range generic {
+		if !genericStoreName(name) {
+			t.Errorf("genericStoreName(%q) = false, want it treated as a product rather than a name", name)
+		}
+	}
+	// A real sign carries a word of its own beside the trade, and that word is the name.
+	named := []string{"Yataş", "Bambi Yatak", "İşbir Yatak", "Taç Antalya Fabrika Satış Mağazası", "Sipahioğlu Home", "Koçtaş", "Vintage Perde Döşemealtı"}
+	for _, name := range named {
+		if genericStoreName(name) {
+			t.Errorf("genericStoreName(%q) = true, want it kept as a name", name)
+		}
+	}
+	if genericStoreName("") {
+		t.Error("an empty name is nothing to strip")
 	}
 }
