@@ -624,6 +624,32 @@ var googleTypeCategories = map[string]string{
 //
 // Only unambiguous types are listed. A "supermarket" sells home goods in Turkey often
 // enough that excluding it would cost real shops, and that trade is not worth making.
+// foreignTradeTypes are the part of nonHomeTypes that name a different business
+// altogether rather than a business that sells labour. The distinction decides where each
+// is allowed to speak. A contractor is judged after the shop's own sign, because Google
+// hands "general_contractor" to any small shop that also fits what it sells, and the sign
+// is the better evidence. A restaurant is judged before it: no word on a sign makes a
+// kebab house a shop, and reading the sign first is how every "... Sofrası" in the country
+// ended up filed under tableware and every "Halı Saha" under carpets.
+var foreignTradeTypes = map[string]bool{
+	"bakery": true, "restaurant": true, "cafe": true, "bar": true, "meal_takeaway": true,
+	"meal_delivery": true, "food": true, "food_store": true, "grocery_store": true,
+	"supermarket": true, "turkish_restaurant": true, "family_restaurant": true,
+	"kebab_shop": true, "middle_eastern_restaurant": true, "pizza_restaurant": true,
+	"coffee_shop": true, "ice_cream_shop": true, "diner": true, "fast_food_restaurant": true,
+	"pharmacy": true, "drugstore": true, "hospital": true, "medical_clinic": true,
+	"dentist": true, "doctor": true, "veterinary_care": true,
+	"beauty_salon": true, "hair_salon": true, "hair_care": true, "nail_salon": true, "spa": true,
+	"school": true, "primary_school": true, "secondary_school": true, "university": true,
+	"educational_institution": true, "child_care_agency": true, "preschool": true,
+	"bank": true, "atm": true, "insurance_agency": true, "real_estate_agency": true,
+	"lodging": true, "hotel": true, "motel": true, "travel_agency": true,
+	"car_repair": true, "car_dealer": true, "car_wash": true, "gas_station": true,
+	"gym": true, "fitness_center": true, "sports_activity_location": true,
+	"sports_complex": true, "stadium": true, "night_club": true, "casino": true,
+	"place_of_worship": true, "mosque": true, "cemetery": true, "funeral_home": true,
+}
+
 var nonHomeTypes = map[string]bool{
 	"bakery": true, "restaurant": true, "cafe": true, "bar": true, "meal_takeaway": true,
 	"food_store": true, "grocery_store": true, "pharmacy": true, "drugstore": true,
@@ -792,12 +818,26 @@ func isHomeLivingPlace(name string, types []string) bool {
 			return true
 		}
 	}
-	// The shop's own sign, before the provider's verdict against it. A name that plainly
-	// says "perde" or "halı" is what the trade itself calls the business, and it outranks
-	// a type list that has already been seen to be wrong.
+	// A trade the provider names outright, before the shop's own sign. These are not the
+	// vague sector labels that were seen to be wrong about contractors -- "restaurant",
+	// "pharmacy", "car_repair" are exact, and no word on a sign should overrule them.
+	// Reading the sign first is how every restaurant in the country called "... Sofrası"
+	// became a tableware shop: "sofra" is a real product word, and it is also what half
+	// the kebab houses in Turkey are called.
+	//
+	for _, t := range types {
+		if foreignTradeTypes[strings.ToLower(strings.TrimSpace(t))] {
+			return false
+		}
+	}
+	// Now the shop's own sign. A name that plainly says "perde" or "halı" is what the
+	// trade itself calls the business, and it still outranks a type list that says only
+	// that this is a building somewhere.
 	if name != "" && namesAProduct(normalized, folded) {
 		return true
 	}
+	// The rest of the disqualifying types, after the sign: these are the ones that name a
+	// business selling labour, and Google gives them to shops that also fit what they sell.
 	for _, t := range types {
 		if nonHomeTypes[strings.ToLower(strings.TrimSpace(t))] {
 			return false
@@ -830,6 +870,9 @@ func StoreCategories(name string, types []string) []string {
 			seen[slug] = true
 			out = append(out, slug)
 		}
+	}
+	if !isHomeLivingPlace(name, types) {
+		return out
 	}
 	normalized := normalizeText(name)
 	folded := foldLatin(normalized)

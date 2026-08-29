@@ -257,3 +257,34 @@ func TestStoreCategoriesDeclinesWhatThisProductIsNotAbout(t *testing.T) {
 		t.Error("StoreCategories declined a bedding store")
 	}
 }
+
+// Half the kebab houses in Turkey are called "... Sofrası", and "sofra" is also a real
+// word for tableware. Reading the sign before the provider's verdict turned every one of
+// them into a tableware shop -- "Urfa Sofrası", typed by Google as a turkish_restaurant,
+// was sitting in the catalogue under Sofra Takımı. A trade the provider names outright is
+// exact, and no word on a sign overrules it.
+func TestATradeNamedOutrightBeatsTheSign(t *testing.T) {
+	restaurant := []string{"turkish_restaurant", "restaurant", "food", "point_of_interest"}
+	for _, name := range []string{"Urfa Sofrası", "Sofra Lahmacun & Pide", "Ece Sofra Restaurant", "Sofraya Buyurun"} {
+		if IsHomeLivingStore(name, restaurant) {
+			t.Errorf("IsHomeLivingStore(%q, restaurant) = true, want false", name)
+		}
+		if got := StoreCategories(name, restaurant); len(got) != 0 {
+			t.Errorf("StoreCategories(%q, restaurant) = %v, want none", name, got)
+		}
+	}
+
+	// The sign must still win where the provider says only that this is a building. That
+	// is the case the ordering was written for and it has to keep working.
+	vague := []string{"point_of_interest", "establishment"}
+	if !IsHomeLivingStore("Sofra Ev Tekstili", vague) {
+		t.Error("a tableware shop was rejected when the provider said nothing useful")
+	}
+	if got := StoreCategories("Anadolu Sofra Takımları", vague); len(got) == 0 {
+		t.Error("a tableware shop got no categories when the provider said nothing useful")
+	}
+	// And a sector label is still not a trade: a shop is kept on its own sign.
+	if !IsHomeLivingStore("Yılmaz Halı", []string{"home_goods_store"}) {
+		t.Error("a carpet shop was rejected")
+	}
+}

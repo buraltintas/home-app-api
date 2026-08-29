@@ -8,6 +8,34 @@ repeating the value involved.
 
 ---
 
+## Every restaurant called "... Sofrasi" was a tableware shop
+
+- Reported: a Turkish restaurant was filed under Sofra Takimi, and searching "sofra"
+  returned restaurants. The report asked whether the category should be dropped. It should
+  not -- tableware is a real thing people shop for. What was wrong is who got the last word.
+- The classifier read the shop's own sign before the provider's verdict. That ordering was
+  written for a good reason: Google types a curtain shop that also hangs curtains as a
+  general contractor, and the sign is the better evidence there. But it also meant no type
+  could ever overrule a product word, and "sofra" is both a real word for tableware and
+  what half the kebab houses in the country are called.
+- The disqualifying types were doing two different jobs under one name. Some name a
+  business that sells labour -- contractor, service -- and Google gives those to shops too,
+  so they are still judged after the sign. Others name a different business altogether --
+  restaurant, pharmacy, gym, hotel -- and no word on a sign makes a kebab house a shop.
+  Those are now judged first.
+- 48 stores in the catalogue were wrong in exactly this way, and the shapes go well beyond
+  the one reported: hairdressers called "Ayna" under Decoration, six football pitches
+  called "Hali Saha" under Carpets, a fruit and vegetable market hall likewise, an English
+  school called "English at home" under Home Accessories, cooking workshops under
+  Kitchenware. Their category links are gone; the stores keep their photographs, ratings
+  and reviews and simply stop claiming to sell things they do not sell.
+- The correction was worked out from the provider types already stored against each store.
+  No request to the provider was made, for any of it.
+- The two functions that decide this can no longer disagree: the one that works out what a
+  store sells now asks the one that decides whether it belongs here at all.
+
+---
+
 ## Opening hours, for nothing
 
 - Asked for: show a store's working days and hours in the result list.

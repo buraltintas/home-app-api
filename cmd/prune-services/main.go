@@ -38,7 +38,12 @@ func main() {
 	defer db.Close()
 
 	rows, err := db.Query(ctx, `
-SELECT s.id::text, s.name, coalesce(string_agg(c.slug, ',' ORDER BY c.slug), '')
+SELECT s.id::text, s.name, coalesce(string_agg(c.slug, ',' ORDER BY c.slug), ''),
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'types'))
+           FROM store_external_sources x
+           WHERE x.store_id = s.id AND x.provider = 'google'
+             AND jsonb_typeof(x.attribution->'types') = 'array'
+           LIMIT 1), '{}')
 FROM stores s
 JOIN store_category_links l ON l.store_id = s.id
 JOIN store_categories c ON c.id = l.category_id
@@ -47,13 +52,20 @@ GROUP BY s.id, s.name
 ORDER BY s.name`)
 	must(err)
 
-	type victim struct{ id, name, cats string }
+	type victim struct {
+		id, name, cats string
+		types          []string
+	}
 	var found []victim
 	for rows.Next() {
 		var v victim
-		must(rows.Scan(&v.id, &v.name, &v.cats))
-		// The rule, not a list. A store is a service business if its own name says so.
-		if !search.IsHomeLivingStore(v.name, nil) {
+		must(rows.Scan(&v.id, &v.name, &v.cats, &v.types))
+		// The rule, not a list -- and the whole rule. This read the name and nothing else,
+		// so it could only ever catch a business that gives itself away in writing. The
+		// provider's types were stored for exactly this, and they are what says that
+		// "Urfa Sofrası" is a restaurant and that a "Halı Saha" is a football pitch rather
+		// than a carpet shop. Without them the pass found nothing at all.
+		if !search.IsHomeLivingStore(v.name, v.types) {
 			found = append(found, v)
 		}
 	}
