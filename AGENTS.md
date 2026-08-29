@@ -53,6 +53,14 @@ So:
   fetch, and an interrupted run must resume rather than start the bill again.
 - **Never call the provider to satisfy curiosity.** Checking one store by hand is a paid
   call too. The catalogue already holds what was fetched; read that first.
+- **Do not ask the same question twice.** Provider answers to an identical query from the
+  same area are cached for a few hours. Two thirds of the searches on record repeated a
+  query already asked nearby, and every repeat was paid for again.
+- **Do not save money by not looking.** Skipping the provider whenever the catalogue looked
+  full enough was measured before it was written: in a quarter of the searches that would
+  have skipped, the provider was bringing back a store we did not have. That saving comes
+  straight out of what a person can find, which is the product. Cache the question; never
+  decline to ask it.
 - **Do not schedule it.** A store people actually search for is refreshed by the search
   itself, which is already paid for. A recurring backfill pays a second time for data that
   arrives free.

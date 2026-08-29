@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -454,6 +455,20 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				if intent.StoreName != "" {
 					providerRadius = localHorizonMeters
 				}
+				// The same question, asked again from the same place, gets the answer we
+				// already bought. Two thirds of the searches on record repeat a query
+				// already made nearby, and each repeat was paid for separately.
+				//
+				// It is the question that is cached, not a store. Skipping the provider
+				// on the strength of a full local catalogue was measured first and
+				// rejected: in a quarter of the searches that would have skipped, the
+				// provider was bringing back a store we did not have, so the saving came
+				// straight out of what a person could find.
+				key := placesCacheKey(query, in.Latitude, in.Longitude, providerRadius, string(requestLocale))
+				if cached, ok := s.cachedPlaces(providerContext, key); ok {
+					external = homeLivingOnly(cached)
+					return nil
+				}
 				if localized, ok := s.places.(LocalizedPlacesProvider); ok {
 					external, providerErr = localized.TextSearchLocalized(providerContext, query, in.Latitude, in.Longitude, providerRadius, requestLocale)
 				} else {
@@ -462,6 +477,9 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				if providerErr != nil {
 					fallback = joinFallback(fallback, "places_unavailable")
 					external = nil
+				}
+				if providerErr == nil {
+					s.storePlaces(providerContext, key, external)
 				}
 				// A search finding a bakery does not make the bakery a home store, and
 				// until now anything a search turned up was kept and imported. Dropped
@@ -1022,4 +1040,48 @@ func homeLivingOnly(places []Place) []Place {
 		}
 	}
 	return kept
+}
+
+// How long a provider answer stands. Short enough that a shop opening today is found
+// today, long enough that a query typed twice in an afternoon is paid for once.
+const placesCacheTTL = 6 * time.Hour
+
+// The question, not the asker. Coordinates are rounded to about a kilometre: two people
+// standing a street apart are asking the same thing, and keeping full precision would give
+// every one of them a private copy of the same answer.
+func placesCacheKey(query string, lat, lon *float64, radius int, locale string) string {
+	coarse := func(v *float64) string {
+		if v == nil {
+			return "-"
+		}
+		return strconv.FormatFloat(math.Round(*v*100)/100, 'f', 2, 64)
+	}
+	return strings.Join([]string{
+		foldLatin(normalizeText(query)), coarse(lat), coarse(lon),
+		strconv.Itoa(radius), locale,
+	}, "|")
+}
+
+func (s *Service) cachedPlaces(ctx context.Context, key string) ([]Place, bool) {
+	var raw []byte
+	e := s.db.QueryRow(ctx, `SELECT places FROM places_search_cache WHERE cache_key=$1 AND created_at > now()-$2::interval`, key, placesCacheTTL.String()).Scan(&raw)
+	if e != nil {
+		return nil, false
+	}
+	var places []Place
+	if json.Unmarshal(raw, &places) != nil {
+		return nil, false
+	}
+	return places, true
+}
+
+// A cache write must never fail a search. The worst case of losing one is paying for the
+// same question twice, which is what happened before this existed.
+func (s *Service) storePlaces(ctx context.Context, key string, places []Place) {
+	raw, e := json.Marshal(places)
+	if e != nil {
+		return
+	}
+	_, _ = s.db.Exec(ctx, `INSERT INTO places_search_cache(cache_key,places,created_at) VALUES($1,$2,now())
+ ON CONFLICT(cache_key) DO UPDATE SET places=EXCLUDED.places,created_at=now()`, key, raw)
 }

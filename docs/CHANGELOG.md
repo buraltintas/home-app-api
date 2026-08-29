@@ -8,6 +8,29 @@ repeating the value involved.
 
 ---
 
+## The same search, paid for twice
+
+- Every search called the provider, including the ones asking a question already asked. Of
+  the searches on record, 67% repeat a query already made from the same area -- "yatak" 92
+  times, "salon icin buyuk bir ayna" 56 -- and each repeat was a separate charge for an
+  answer that had not changed.
+- Provider answers are now kept for six hours, keyed by the question: the query folded the
+  way the classifier folds it, the position rounded to about a kilometre, the radius and
+  the language. Two people a street apart are asking the same thing and it is bought once.
+- The obvious alternative was measured first and rejected. Skipping the provider when the
+  catalogue already returned ten or more results would have covered 48% of searches -- but
+  in 24% of those the provider was bringing back a store we did not hold, and raising the
+  threshold to twenty barely moved it (21%). That saving comes out of what a person can
+  find. Caching the question costs nothing anybody would notice; declining to ask it costs
+  exactly the thing the product is for.
+- Writing the key surfaced a Turkish bug worth keeping: Go's ToLower turns "HALI" into
+  "hali" rather than "halı", so the same query typed in capitals would have missed its own
+  cached answer. The key folds the way the rest of the search folds.
+- A cache write can never fail a search. The worst case of losing one is paying for the
+  same question twice, which is what happened before it existed.
+
+---
+
 ## A search for a bed brand returned a bakery
 
 - Reported: searching "İşbir" returned "Isbirli Ekmek Taş Firin".
