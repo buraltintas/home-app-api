@@ -56,11 +56,27 @@ So:
 - **Do not ask the same question twice.** Provider answers to an identical query from the
   same area are cached for a few hours. Two thirds of the searches on record repeated a
   query already asked nearby, and every repeat was paid for again.
-- **Do not save money by not looking.** Skipping the provider whenever the catalogue looked
-  full enough was measured before it was written: in a quarter of the searches that would
-  have skipped, the provider was bringing back a store we did not have. That saving comes
-  straight out of what a person can find, which is the product. Cache the question; never
-  decline to ask it.
+- **Do not save money by not looking -- and a result count is not looking.** Skipping the
+  provider whenever the catalogue merely looked full enough was measured before it was
+  written: in a quarter of the searches that would have skipped, the provider was bringing
+  back a store we did not have, and on our own ranking the stores only it knows about score
+  a median 114 against 70 for the ones we hold. When the provider adds something it tends
+  to add something good. A search may be answered locally only when four things hold at
+  once -- enough results, results that are actually about what was asked, enough catalogue
+  held nearby for their absence to mean anything, and no store named outright -- and the
+  decision has to be checked against reality by asking the provider anyway on a small
+  sample, off the request path, with nothing imported from it. A measurement that changes
+  what it measures is not a measurement.
+- **The measured ceiling is not the target.** Three quarters of past searches ended with
+  the provider adding nothing; that is the most a perfect gate could ever have saved, not
+  what a real one should reach on its first day. Thresholds start conservative and move on
+  evidence. Loosening a threshold to hit a number is spending the product to flatter a
+  metric.
+- **Asking less often also refreshes less often.** What the provider told us has a shelf
+  life -- photographs may only be shown while the record is recent -- and today a record is
+  refreshed as a side effect of being asked about. Any change that reduces provider calls
+  therefore quietly ages the catalogue too. Say so when making one, and give the freshness
+  its own schedule rather than leaving it to depend on how often somebody happens to search.
 - **Do not schedule it.** A store people actually search for is refreshed by the search
   itself, which is already paid for. A recurring backfill pays a second time for data that
   arrives free.

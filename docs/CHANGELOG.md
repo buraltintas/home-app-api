@@ -8,6 +8,71 @@ repeating the value involved.
 
 ---
 
+## The provider is now asked only when we cannot answer ourselves
+
+- Every search asked Google in parallel with our own catalogue, whether or not the
+  catalogue could already answer it. That is a bill that grows with traffic rather than
+  with the product. On the searches on record, three quarters of them ended with Google
+  adding no store we did not already hold -- each of those was paid for and changed
+  nothing a person saw.
+- A sufficiency gate now runs between the local search and the provider call. It asks four
+  things, and all four have to hold before the call is skipped: enough results, results
+  that are actually about what was asked, enough of the surrounding catalogue held for
+  their absence to mean anything, and no store named outright. Somebody who types "Yatas
+  Atasehir" wants that store, and a wall of similar shops is not an answer to a name.
+- Counting results alone would have been the wrong rule. Measured on our own ranking, the
+  stores only Google knows about score a median 114 against 70 for the ones we already
+  hold: when the provider adds something, it tends to add something good. So relevance is
+  a condition in its own right, not a tie-breaker.
+- Nothing after the provider call changed. The home-and-living filter, place_id
+  deduplication, the catalogue import, persistence and ranking all run exactly as they
+  did. Only when the call starts is different.
+- Behind `SEARCH_LOCAL_FIRST_ENABLED`, off by default. With the flag off the search
+  behaves exactly as it does today, including asking the provider in parallel, and the
+  recorded reason says `gate_disabled`. One configuration change reverts the behaviour.
+- Every threshold lives in one policy struct fed from configuration, because the right
+  values are not knowable in advance. They start deliberately conservative: eight results,
+  0.6 relevance, forty stores known within fifteen kilometres. The first version is not
+  trying to reach the ceiling the historical data suggests -- 55-65% local-only on real
+  traffic would be a normal and good start.
+- A 5% sample of local-only searches asks the provider anyway, after the answer has gone
+  out, purely to find out what the decision cost. It is read, never imported: the
+  catalogue does not learn from a measurement. The number it produces is the High-Relevance
+  Miss Rate -- how often staying local cost somebody a store that would have outranked
+  everything they were shown.
+- Recorded per search: the decision, every failing condition, the measured relevance, how
+  much catalogue was held nearby, and the local, provider and total latencies, with the
+  city and district so a national rate cannot hide the towns where the catalogue is thin.
+
+**Known consequence, not yet addressed.** A store's Google photo is only shown while its
+stored provider record is less than thirty days old, and today every search refreshes the
+records it touches. Asking the provider less often means refreshing less often, so a store
+that stops appearing in fallback answers will quietly lose its photo in search results
+after a month. The fix is a background refresh keyed on `refreshed_at`, which costs one
+call per store per month instead of one per search -- deliberately out of this change, and
+worth doing before the flag is turned up.
+
+---
+
+## A place import wrote a district column that had no value bound to it
+
+- The insert named ten parameters and passed nine. Every store imported from the provider
+  would have failed on the missing bind. Caught before it shipped; the district parsed out
+  of the address is now actually passed.
+- A Turkish address ends "... 07070 Konyaalti/Antalya, Turkiye", and the whole of that
+  last component was being stored as the city. That is why a store page was titled with a
+  postcode nobody asked for and why the district column was empty for the whole catalogue.
+  City and district are now separated, and the postcode dropped.
+
+---
+
+## The integration suite did not compile
+
+- `slices` was used and never imported, so `make integration-test` failed before running a
+  single test. Nothing was wrong with the tests themselves.
+
+---
+
 ## The list and the store's own page named its categories differently
 
 - Reported: the results list said "Nevresim takimi" and the store's own page said "Yatak",

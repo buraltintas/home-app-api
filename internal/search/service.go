@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"math"
+	"math/rand/v2"
 	"os"
 	"sort"
 	"strconv"
@@ -36,7 +37,16 @@ type Service struct {
 	attributionWindow time.Duration
 	visitorTTL        time.Duration
 	now               func() time.Time
+	policy            SufficiencyPolicy
+	// sample draws the shadow measurement lottery. A field rather than a direct call to
+	// the random number generator so a test can decide the outcome.
+	sample func() float64
 }
+
+// UseSufficiencyPolicy installs the local-first search policy. Nothing calls the gate
+// until this is given a policy with Enabled set, so a service built without it behaves
+// exactly as it did before the gate existed.
+func (s *Service) UseSufficiencyPolicy(p SufficiencyPolicy) { s.policy = p }
 
 func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (uuid.UUID, error) {
 	placeID = strings.TrimSpace(placeID)
@@ -166,7 +176,7 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		}
 		id := uuid.New()
 		slug := storeSlug(p.Name, id)
-		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone,website) VALUES($1,$2,$3,$4,$5,'',ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''),nullif($9,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone, p.Website); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone,website) VALUES($1,$2,$3,$4,$5,$10,ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''),nullif($9,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone, p.Website, districtFromAddress(p.Address)); err != nil {
 			return nil, err
 		}
 		// A store now carries the categories it actually sells, worked out from its own
@@ -241,23 +251,72 @@ func storeSlug(name string, id uuid.UUID) string {
 	}
 	return base + "-" + id.String()[:8]
 }
+
+// A Turkish address ends the way the post office writes it: "... 07260 Kepez/Antalya,
+// Türkiye". The last component before the country is therefore a postcode, a district and
+// a province, and it was being stored whole as the city. That is why a store's page was
+// titled "BAMBİ YATAK ŞANLIURFA — 63320 Karaköprü/Şanlıurfa": nobody asked for a postcode,
+// it simply came along with the province and nothing ever separated them.
+//
+// This is the country's own address format rather than anything about a particular shop,
+// so it holds for a store nobody has looked at, in a town nobody has visited.
 func cityFromAddress(address string) string {
+	city, _ := cityAndDistrict(address)
+	return city
+}
+
+func districtFromAddress(address string) string {
+	_, district := cityAndDistrict(address)
+	return district
+}
+
+func cityAndDistrict(address string) (string, string) {
 	parts := strings.Split(address, ",")
 	for i := len(parts) - 1; i >= 0; i-- {
 		v := strings.TrimSpace(parts[i])
 		low := strings.ToLower(v)
-		if v != "" && strings.ToUpper(v) != "TR" && low != "türkiye" && low != "turkey" {
-			if utf8.RuneCountInString(v) > 100 {
-				v = string([]rune(v)[:100])
-			}
-			return v
+		if v == "" || strings.ToUpper(v) == "TR" || low == "türkiye" || low == "turkey" {
+			continue
 		}
+		v = strings.TrimSpace(trimLeadingPostcode(v))
+		// "Kepez/Antalya" -- the district comes first, the province last. A component with
+		// no slash is the province on its own, which is the normal shape for a province
+		// that is also its own centre.
+		city, district := v, ""
+		if slash := strings.LastIndex(v, "/"); slash >= 0 {
+			district = strings.TrimSpace(v[:slash])
+			city = strings.TrimSpace(v[slash+1:])
+		}
+		if city == "" {
+			city = v
+			district = ""
+		}
+		return clamp(city), clamp(district)
 	}
-	return "Bilinmiyor"
+	return "Bilinmiyor", ""
+}
+
+// Leading digits are a postcode, and a postcode is not part of a place's name.
+func trimLeadingPostcode(v string) string {
+	i := 0
+	for i < len(v) && v[i] >= '0' && v[i] <= '9' {
+		i++
+	}
+	if i == 0 || i == len(v) {
+		return v
+	}
+	return strings.TrimSpace(v[i:])
+}
+
+func clamp(v string) string {
+	if utf8.RuneCountInString(v) > 100 {
+		return string([]rune(v)[:100])
+	}
+	return v
 }
 
 func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int, report *reporting.Service, attribution, visitorTTL time.Duration) *Service {
-	return &Service{db, stores, ai, places, model, decimals, report, attribution, visitorTTL, time.Now}
+	return &Service{db: db, stores: stores, ai: ai, places: places, model: model, locationDecimals: decimals, report: report, attributionWindow: attribution, visitorTTL: visitorTTL, now: time.Now, sample: rand.Float64}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	started := time.Now()
@@ -434,6 +493,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	var internal []storepkg.Item
 	var external []Place
 	googleUsed := false
+	// What the gate saw and what it decided, recorded on the search either way. While the
+	// flag is off this says "gate_disabled", which is itself worth being able to count.
+	decision := gateDecision{Reasons: []string{reasonGateDisabled}}
+	observed := sufficiency{Coverage: coverageUnknown}
+	var localElapsed, placesElapsed time.Duration
 	if intent.Scope == ScopeHomeLiving {
 		group, providerContext := errgroup.WithContext(ctx)
 		// A named store is worth finding wherever it is, so the radius filter is
@@ -444,56 +508,57 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			searchRadius = 0
 			internalLimit = 30
 		}
+		localStarted := time.Now()
 		group.Go(func() error {
 			var providerErr error
 			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, internalLimit, user)
 			return providerErr
 		})
-		if s.places != nil {
+		coverage := coverageUnknown
+		if s.policy.Enabled {
+			// Counted alongside the catalogue search rather than after it, so knowing how
+			// much of the neighbourhood we hold costs no wall clock time of its own.
+			group.Go(func() error {
+				coverage = s.catalogueCoverage(providerContext, in.Latitude, in.Longitude, s.policy.CoverageRadiusMeters)
+				return nil
+			})
+		} else if s.places != nil {
+			// The behaviour this product has always had, kept whole behind the flag: the
+			// provider is asked in parallel, before anyone has looked at what we hold.
 			googleUsed = true
 			group.Go(func() error {
-				query := placesQuery(intent, in.Query)
-				var providerErr error
-				providerRadius := in.RadiusMeters
-				if intent.StoreName != "" {
-					providerRadius = localHorizonMeters
+				places, reason := s.providerSearch(providerContext, intent, in, requestLocale)
+				external = places
+				if reason != "" {
+					fallback = joinFallback(fallback, reason)
 				}
-				// The same question, asked again from the same place, gets the answer we
-				// already bought. Two thirds of the searches on record repeat a query
-				// already made nearby, and each repeat was paid for separately.
-				//
-				// It is the question that is cached, not a store. Skipping the provider
-				// on the strength of a full local catalogue was measured first and
-				// rejected: in a quarter of the searches that would have skipped, the
-				// provider was bringing back a store we did not have, so the saving came
-				// straight out of what a person could find.
-				key := placesCacheKey(query, in.Latitude, in.Longitude, providerRadius, string(requestLocale))
-				if cached, ok := s.cachedPlaces(providerContext, key); ok {
-					external = homeLivingOnly(cached)
-					return nil
-				}
-				if localized, ok := s.places.(LocalizedPlacesProvider); ok {
-					external, providerErr = localized.TextSearchLocalized(providerContext, query, in.Latitude, in.Longitude, providerRadius, requestLocale)
-				} else {
-					external, providerErr = s.places.TextSearch(providerContext, query, in.Latitude, in.Longitude, providerRadius)
-				}
-				if providerErr != nil {
-					fallback = joinFallback(fallback, "places_unavailable")
-					external = nil
-				}
-				if providerErr == nil {
-					s.storePlaces(providerContext, key, external)
-				}
-				// A search finding a bakery does not make the bakery a home store, and
-				// until now anything a search turned up was kept and imported. Dropped
-				// here, at the door, rather than filtered out of the results later --
-				// otherwise it still lands in the catalogue and in the sitemap.
-				external = homeLivingOnly(external)
 				return nil
 			})
 		}
 		if e := group.Wait(); e != nil {
 			return Response{}, e
+		}
+		localElapsed = time.Since(localStarted)
+		observed = sufficiency{
+			ResultCount:   len(internal),
+			Relevance:     localRelevance(internal, intent, s.policy.relevanceSample()),
+			Coverage:      coverage,
+			ExplicitStore: intent.StoreName != "",
+		}
+		decision = s.policy.decide(observed)
+		// The single change to the flow: when what we already hold answers the question,
+		// the provider is not asked. Everything downstream of a provider call -- the
+		// home-and-living filter, place_id deduplication, the catalogue import, the
+		// ranking -- runs exactly as before whenever the call does happen.
+		if s.policy.Enabled && !decision.LocalOnly && s.places != nil {
+			googleUsed = true
+			placesStarted := time.Now()
+			places, reason := s.providerSearch(ctx, intent, in, requestLocale)
+			external = places
+			if reason != "" {
+				fallback = joinFallback(fallback, reason)
+			}
+			placesElapsed = time.Since(placesStarted)
 		}
 	} else {
 		// Before telling somebody we did not understand them, check whether they named a
@@ -646,6 +711,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		results = results[:30]
 	}
 	searchID := uuid.New()
+	searchCity, searchDistrict := searchPlace(results)
 	intentJSON, _ := json.Marshal(intent)
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
@@ -653,7 +719,9 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	defer tx.Rollback(ctx)
 	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
-	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status,query_language) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed',$20)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed, intent.QueryLanguage)
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status,query_language,local_only,gate_reason,local_relevance,catalogue_coverage,local_duration_ms,places_duration_ms,search_city,search_district) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed',$20,$21,$22,$23,$24,$25,$26,$27,$28)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed, intent.QueryLanguage,
+		decision.LocalOnly, nilIf(decision.reason() == "", decision.reason()), observed.Relevance, nilIf(observed.Coverage == coverageUnknown, observed.Coverage),
+		localElapsed.Milliseconds(), nilIf(placesElapsed == 0, placesElapsed.Milliseconds()), nilIf(searchCity == "", searchCity), nilIf(searchDistrict == "", searchDistrict))
 	if e != nil {
 		return Response{}, e
 	}
@@ -689,6 +757,22 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return Response{}, e
+	}
+	observability.SearchGate(decision.LocalOnly, decision.Reasons)
+	observability.SearchStage("local", localElapsed)
+	if placesElapsed > 0 {
+		observability.SearchStage("places", placesElapsed)
+	}
+	observability.SearchStage(map[bool]string{true: "total_local_only", false: "total_fallback"}[decision.LocalOnly], time.Since(start))
+	// A small sample of the searches we decided not to pay for is asked anyway, after the
+	// answer has already gone out, purely to find out what the decision cost. Detached
+	// from the request so it can never delay or alter it.
+	if decision.LocalOnly && s.places != nil && s.shadowSampled() {
+		go s.measureShadow(context.WithoutCancel(ctx), shadowMeasurement{
+			SearchID: searchID, Intent: intent, Request: in, Locale: requestLocale,
+			LocalResultCount: len(internal), LocalTopScore: topScore(results),
+			Coverage: observed.Coverage, City: searchCity, District: searchDistrict,
+		})
 	}
 	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
 }
@@ -1076,7 +1160,53 @@ func placesCacheKey(query string, lat, lon *float64, radius int, locale string) 
 	}, "|")
 }
 
+// providerSearch is the Google branch exactly as it has always been: the same query, the
+// same shared cache, the same home-and-living filter applied at the door. What the
+// sufficiency gate changed is when this runs -- never what it does once it does.
+//
+// The returned string is a fallback reason, empty when the call went through.
+func (s *Service) providerSearch(ctx context.Context, intent Intent, in Request, locale i18n.Locale) ([]Place, string) {
+	if s.places == nil {
+		return nil, ""
+	}
+	query := placesQuery(intent, in.Query)
+	providerRadius := in.RadiusMeters
+	if intent.StoreName != "" {
+		providerRadius = localHorizonMeters
+	}
+	// The same question, asked again from the same place, gets the answer we already
+	// bought. Two thirds of the searches on record repeat a query already made nearby,
+	// and each repeat was paid for separately.
+	//
+	// It is the question that is cached, not a store. Skipping the provider on the
+	// strength of a full local catalogue is now the gate's job, and is decided before
+	// this is ever reached.
+	key := placesCacheKey(query, in.Latitude, in.Longitude, providerRadius, string(locale))
+	if cached, ok := s.cachedPlaces(ctx, key); ok {
+		return homeLivingOnly(cached), ""
+	}
+	var places []Place
+	var providerErr error
+	if localized, ok := s.places.(LocalizedPlacesProvider); ok {
+		places, providerErr = localized.TextSearchLocalized(ctx, query, in.Latitude, in.Longitude, providerRadius, locale)
+	} else {
+		places, providerErr = s.places.TextSearch(ctx, query, in.Latitude, in.Longitude, providerRadius)
+	}
+	if providerErr != nil {
+		return nil, "places_unavailable"
+	}
+	s.storePlaces(ctx, key, places)
+	// A search finding a bakery does not make the bakery a home store, and anything a
+	// search turned up used to be kept and imported. Dropped here, at the door, rather
+	// than filtered out of the results later -- otherwise it still lands in the
+	// catalogue and in the sitemap.
+	return homeLivingOnly(places), ""
+}
+
 func (s *Service) cachedPlaces(ctx context.Context, key string) ([]Place, bool) {
+	if s.db == nil {
+		return nil, false
+	}
 	var raw []byte
 	e := s.db.QueryRow(ctx, `SELECT places FROM places_search_cache WHERE cache_key=$1 AND created_at > now()-$2::interval`, key, placesCacheTTL.String()).Scan(&raw)
 	if e != nil {
@@ -1092,6 +1222,9 @@ func (s *Service) cachedPlaces(ctx context.Context, key string) ([]Place, bool) 
 // A cache write must never fail a search. The worst case of losing one is paying for the
 // same question twice, which is what happened before this existed.
 func (s *Service) storePlaces(ctx context.Context, key string, places []Place) {
+	if s.db == nil {
+		return
+	}
 	raw, e := json.Marshal(places)
 	if e != nil {
 		return

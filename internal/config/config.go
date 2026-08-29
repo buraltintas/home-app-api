@@ -16,37 +16,45 @@ import (
 )
 
 type Config struct {
-	Environment, HTTPAddr, DatabaseURL                                     string
-	BFFSecrets                                                             []string
-	AccessTokenSecret, OTPHashSecret                                       string
-	AccessTokenTTL, RefreshTokenTTL                                        time.Duration
-	OTPTTL                                                                 time.Duration
-	OTPMaxAttempts                                                         int
-	OTPEmailRequestLimit, OTPIPRequestLimit                                int
-	OTPVisitorRequestLimit                                                 int
-	AppReviewEmail, AppReviewCode                                          string
-	GoogleClientID, GooglePlacesAPIKey                                     string
-	OpenAIAPIKey, OpenAIModel                                              string
-	OpenAITimeout                                                          time.Duration
-	EmailProvider, EmailFrom                                               string
-	FeedbackNotifyEmail                                                    string
-	EmailDevelopmentDir                                                    string
-	EmailAPIURL, EmailAPIKey                                               string
-	GmailServiceAccountFile, GmailServiceAccountJSON                       string
-	GmailImpersonatedUser, GmailAPIURL                                     string
-	ObjectStorageProvider, Bucket                                          string
-	ObjectStorageRegion, ObjectStorageEndpoint                             string
-	GCSSigningServiceAccount                                               string
-	ObjectStorageLocalDir, ObjectStoragePublicURL                          string
-	ObjectStorageAccessKey, ObjectStorageSecretKey                         string
-	ObjectStoragePathStyle                                                 bool
-	ObjectStorageUploadTTL                                                 time.Duration
-	MediaMaxBytes                                                          int64
-	StoreReviewRadiusMeters, StoreLocationMaxAccuracyMeters                float64
-	StoreVisitProofTTL                                                     time.Duration
-	SearchLocationDecimals                                                 int
-	ReportingTimezone                                                      string
-	SearchAttributionWindow                                                time.Duration
+	Environment, HTTPAddr, DatabaseURL                      string
+	BFFSecrets                                              []string
+	AccessTokenSecret, OTPHashSecret                        string
+	AccessTokenTTL, RefreshTokenTTL                         time.Duration
+	OTPTTL                                                  time.Duration
+	OTPMaxAttempts                                          int
+	OTPEmailRequestLimit, OTPIPRequestLimit                 int
+	OTPVisitorRequestLimit                                  int
+	AppReviewEmail, AppReviewCode                           string
+	GoogleClientID, GooglePlacesAPIKey                      string
+	OpenAIAPIKey, OpenAIModel                               string
+	OpenAITimeout                                           time.Duration
+	EmailProvider, EmailFrom                                string
+	FeedbackNotifyEmail                                     string
+	EmailDevelopmentDir                                     string
+	EmailAPIURL, EmailAPIKey                                string
+	GmailServiceAccountFile, GmailServiceAccountJSON        string
+	GmailImpersonatedUser, GmailAPIURL                      string
+	ObjectStorageProvider, Bucket                           string
+	ObjectStorageRegion, ObjectStorageEndpoint              string
+	GCSSigningServiceAccount                                string
+	ObjectStorageLocalDir, ObjectStoragePublicURL           string
+	ObjectStorageAccessKey, ObjectStorageSecretKey          string
+	ObjectStoragePathStyle                                  bool
+	ObjectStorageUploadTTL                                  time.Duration
+	MediaMaxBytes                                           int64
+	StoreReviewRadiusMeters, StoreLocationMaxAccuracyMeters float64
+	StoreVisitProofTTL                                      time.Duration
+	SearchLocationDecimals                                  int
+	ReportingTimezone                                       string
+	SearchAttributionWindow                                 time.Duration
+	// Local-first search. SearchLocalFirstEnabled is the feature flag: while it is false
+	// the search asks the provider on every request, exactly as it always has. The
+	// thresholds sit beside it so they can be moved from a deployment rather than a
+	// release -- they are meant to move as the shadow measurements come in.
+	SearchLocalFirstEnabled                                                bool
+	SearchGateMinResults, SearchGateMinCoverage                            int
+	SearchGateCoverageRadiusMeters, SearchGateRelevanceSample              int
+	SearchGateMinRelevance, SearchShadowRate                               float64
 	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
 	MetricsToken                                                           string
 	AdminEmails                                                            []string
@@ -159,6 +167,40 @@ func Load() (Config, error) {
 		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
 	}
 	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
+	if c.SearchLocalFirstEnabled, err = boolean("SEARCH_LOCAL_FIRST_ENABLED", false); err != nil {
+		return c, err
+	}
+	// Conservative on purpose. The first version of the gate is not trying to reach the
+	// ceiling the historical data suggests; it is trying not to make search worse.
+	if c.SearchGateMinResults, err = integer("SEARCH_GATE_MIN_RESULTS", 8); err != nil {
+		return c, err
+	}
+	if c.SearchGateRelevanceSample, err = integer("SEARCH_GATE_RELEVANCE_SAMPLE", 5); err != nil {
+		return c, err
+	}
+	if c.SearchGateMinCoverage, err = integer("SEARCH_GATE_MIN_COVERAGE", 40); err != nil {
+		return c, err
+	}
+	if c.SearchGateCoverageRadiusMeters, err = integer("SEARCH_GATE_COVERAGE_RADIUS_METERS", 15000); err != nil {
+		return c, err
+	}
+	if c.SearchGateMinRelevance, err = number("SEARCH_GATE_MIN_RELEVANCE", 0.6); err != nil {
+		return c, err
+	}
+	if c.SearchShadowRate, err = number("SEARCH_SHADOW_RATE", 0.05); err != nil {
+		return c, err
+	}
+	if c.SearchGateMinResults < 0 || c.SearchGateRelevanceSample < 1 || c.SearchGateMinCoverage < 0 || c.SearchGateCoverageRadiusMeters < 100 {
+		return c, errors.New("search gate thresholds must be positive")
+	}
+	if c.SearchGateMinRelevance < 0 || c.SearchGateMinRelevance > 1 {
+		return c, errors.New("SEARCH_GATE_MIN_RELEVANCE must be between 0 and 1")
+	}
+	// A shadow call costs what a real one costs. Sampling everything would spend the
+	// whole saving on proving it, so the rate is capped well below that.
+	if c.SearchShadowRate < 0 || c.SearchShadowRate > 0.5 {
+		return c, errors.New("SEARCH_SHADOW_RATE must be between 0 and 0.5")
+	}
 	if c.SearchRetentionDays, err = integer("SEARCH_RETENTION_DAYS", 365); err != nil {
 		return c, err
 	}

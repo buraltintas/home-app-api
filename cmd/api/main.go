@@ -79,6 +79,15 @@ func main() {
 		places = searchpkg.NewGooglePlaces(cfg.GooglePlacesAPIKey)
 	}
 	searchSvc := searchpkg.NewService(db, stores, ai, places, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow, time.Duration(cfg.VisitorRetentionDays)*24*time.Hour)
+	searchSvc.UseSufficiencyPolicy(searchpkg.SufficiencyPolicy{
+		Enabled:              cfg.SearchLocalFirstEnabled,
+		MinResults:           cfg.SearchGateMinResults,
+		MinRelevance:         cfg.SearchGateMinRelevance,
+		RelevanceSample:      cfg.SearchGateRelevanceSample,
+		MinCoverage:          cfg.SearchGateMinCoverage,
+		CoverageRadiusMeters: cfg.SearchGateCoverageRadiusMeters,
+		ShadowRate:           cfg.SearchShadowRate,
+	})
 	users := userpkg.NewService(db, reportSvc)
 	var storage media.ObjectStorage
 	switch cfg.ObjectStorageProvider {

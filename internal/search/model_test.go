@@ -284,3 +284,27 @@ func TestFromStoreCarriesTheStoredPhoto(t *testing.T) {
 		t.Fatal("expected an invalid photo reference to be dropped")
 	}
 }
+
+// A Turkish address ends the way the post office writes it, and the last component before
+// the country carries three things at once: a postcode, a district and a province. Storing
+// it whole is how a store's page came to be titled with a postcode nobody asked for, and
+// how the district column stayed empty for every store in the catalogue.
+func TestCityAndDistrictFromTurkishAddress(t *testing.T) {
+	cases := []struct{ address, city, district string }{
+		{"Meltem, 3808. Sk. No:5, 07070 Konyaaltı/Antalya, Türkiye", "Antalya", "Konyaaltı"},
+		{"AKPIYAR MAH. GAP BLV, 63320 Karaköprü/Şanlıurfa, Türkiye", "Şanlıurfa", "Karaköprü"},
+		{"Bağdat Cd. No:1, 34710 Kadıköy/İstanbul, Türkiye", "İstanbul", "Kadıköy"},
+		// No district, which is the ordinary shape for a province that is its own centre.
+		{"Bir Sokak No:2, Antalya, Türkiye", "Antalya", ""},
+		// No postcode at all.
+		{"Bir Cadde, Muratpaşa/Antalya, Türkiye", "Antalya", "Muratpaşa"},
+		// Nothing usable.
+		{"Türkiye", "Bilinmiyor", ""},
+	}
+	for _, c := range cases {
+		city, district := cityAndDistrict(c.address)
+		if city != c.city || district != c.district {
+			t.Errorf("cityAndDistrict(%q) = (%q, %q), want (%q, %q)", c.address, city, district, c.city, c.district)
+		}
+	}
+}
