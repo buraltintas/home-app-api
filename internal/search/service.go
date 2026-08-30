@@ -717,9 +717,22 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			results[i].score -= penalty
 		}
 	}
-	// A named store is worth finding wherever it is; a generic query is not.
-	if intent.StoreName == "" && in.Latitude != nil {
-		results = withinLocalHorizon(results)
+	// A named store is worth finding wherever it is -- but only when it is not here.
+	//
+	// Dropping the horizon for every name search was too broad. Somebody in Antalya
+	// searching a chain got its branches in other provinces listed beside the local ones,
+	// because each of those branches had been learned from a search made in that province
+	// on another day. The name was matched; the distance stopped mattering at all.
+	//
+	// The rule now: if the name they typed exists inside the horizon, that is the answer
+	// and a branch four provinces away is not part of it. Only when nothing nearby carries
+	// the name is the nearest one anywhere worth showing -- which is the case the loosened
+	// rule was written for in the first place.
+	if in.Latitude != nil {
+		near := withinLocalHorizon(results)
+		if intent.StoreName == "" || containsNameHit(near) {
+			results = near
+		}
 	}
 	rankResults(results, in.Latitude != nil, intent.StoreName != "")
 	if len(results) > 30 {

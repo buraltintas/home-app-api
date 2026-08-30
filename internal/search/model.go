@@ -1081,6 +1081,16 @@ func distanceBand(distance *float64) int {
 const localHorizonMeters = 50000
 const minLocalResults = 5
 
+// Whether the store somebody named is among these results at all.
+func containsNameHit(results []Result) bool {
+	for _, r := range results {
+		if r.nameHit {
+			return true
+		}
+	}
+	return false
+}
+
 func withinLocalHorizon(results []Result) []Result {
 	local := make([]Result, 0, len(results))
 	for _, r := range results {

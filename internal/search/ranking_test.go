@@ -360,3 +360,36 @@ func TestSearchResultAlwaysSerializesCategoryArray(t *testing.T) {
 		t.Fatalf("empty categories must be an array: %s", encoded)
 	}
 }
+
+// Somebody in Antalya searching a chain got its branches in other provinces listed
+// beside the local ones, because each had been learned from a search made there on
+// another day. Dropping the radius for a name search was too broad: the name they typed
+// exists here, and a branch four provinces away is not part of that answer.
+func TestANamedStoreNearbyKeepsTheDistantBranchesOut(t *testing.T) {
+	at := func(v float64) *float64 { return &v }
+	near := Result{Name: "İşbir Yatak Antalya", DistanceMeters: at(6000), nameHit: true}
+	far := Result{Name: "İşbir Yatak Adana", DistanceMeters: at(480000), nameHit: true}
+	other := Result{Name: "Bir Yatak Mağazası", DistanceMeters: at(4000)}
+
+	// The horizon only applies once there is a real local list behind it; a handful of
+	// results is not enough to justify hiding anything.
+	filler := make([]Result, 0, 6)
+	for i := range 6 {
+		filler = append(filler, Result{Name: "Yakın Mağaza", DistanceMeters: at(float64(3000 + i*100))})
+	}
+	kept := withinLocalHorizon(append([]Result{near, far, other}, filler...))
+	if containsNameHit(kept) != true {
+		t.Fatal("the branch in the searcher's own city should survive the horizon")
+	}
+	for _, r := range kept {
+		if r.Name == far.Name {
+			t.Error("a branch 480 km away is not part of an answer that exists here")
+		}
+	}
+
+	// With nothing nearby carrying the name, the nearest one anywhere is worth showing.
+	onlyFar := append([]Result{far, other}, filler...)
+	if containsNameHit(withinLocalHorizon(onlyFar)) {
+		t.Fatal("the distant branch must not be inside the horizon")
+	}
+}

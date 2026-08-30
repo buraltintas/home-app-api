@@ -8,6 +8,19 @@ repeating the value involved.
 
 ---
 
+## Searching a chain listed its branches in other provinces
+
+- Reported: an "İşbir" search from Antalya returned İşbir branches in provinces the
+  searcher had searched from on other days. Each of those had been learned from those
+  searches, and the name matched, so distance stopped applying at all.
+- Dropping the radius for a name-led search was deliberate -- a store somebody names is
+  worth finding wherever it is -- but too broad. If the name they typed exists inside the
+  50 km horizon, that is the answer, and a branch four provinces away is not part of it.
+  Only when nothing nearby carries the name is the nearest one anywhere worth showing,
+  which is the case the loosened rule was written for.
+
+---
+
 ## A search for "yastık" answered with a shop 44 km away, in second place
 
 - Reported from the live site: a search from Antalya put a store in Serik, 44 km out,
