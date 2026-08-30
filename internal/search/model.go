@@ -316,6 +316,48 @@ func containsWord(normalized, folded, term string) bool {
 	return false
 }
 
+// The words a business uses when it sells something to eat or drink. Kept to terms that
+// mean nothing else in a home and living shop: "fırın" is left out because an oven is a
+// kitchen appliance, and "ocak" because a hob is one too -- both are named here only in
+// the phrases where they can only be a bakery.
+var foodTradeWords = []string{
+	"yemek", "yemekleri", "kahvalti", "lokanta", "restoran", "restaurant", "kebap", "kebab",
+	"donerci", "pide", "lahmacun", "corba", "manti", "borek", "pastane", "patisserie",
+	"sarkuteri", "kasap", "manav", "bakkal", "meyhane", "dondurma", "baklava",
+	"kunefe", "waffle", "pizza", "burger", "cig kofte", "bufe", "kafeterya", "kokorec",
+	"ekmek firin", "tas firin", "pide firin", "unlu mamul", "kuruyemis", "sut urunleri",
+}
+
+// Matched from the start of a word, allowing what Turkish adds to the end of one.
+// A plain substring match is too loose -- "Tekeli Kilim" is a carpet shop that contains
+// "tekel" -- and a whole-word match is too tight, because the sign says "Lokantası", not
+// "lokanta". The word has to begin where a word begins; what follows it is grammar.
+func namesAFoodBusiness(normalized, folded string) bool {
+	for _, word := range foodTradeWords {
+		if beginsWord(normalized, word) || beginsWord(foldLatin(folded), foldLatin(word)) {
+			return true
+		}
+	}
+	return false
+}
+
+func beginsWord(haystack, needle string) bool {
+	if needle == "" {
+		return false
+	}
+	for offset := 0; ; {
+		index := strings.Index(haystack[offset:], needle)
+		if index < 0 {
+			return false
+		}
+		start := offset + index
+		if start == 0 || !isWordRune(rune(haystack[start-1])) {
+			return true
+		}
+		offset = start + 1
+	}
+}
+
 func isWordRune(r rune) bool {
 	return r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r > 127
 }
@@ -711,6 +753,14 @@ var foreignTradeTypes = map[string]bool{
 	"gym": true, "fitness_center": true, "sports_activity_location": true,
 	"sports_complex": true, "stadium": true, "night_club": true, "casino": true,
 	"place_of_worship": true, "mosque": true, "cemetery": true, "funeral_home": true,
+	// Food and drink retail. A delicatessen and an off-licence sell things to eat, and the
+	// provider says so plainly; a sign reading "Sofra" does not make either of them a
+	// tableware shop.
+	"liquor_store": true, "wine_store": true, "deli": true, "delicatessen": true,
+	"butcher_shop": true, "candy_store": true, "chocolate_shop": true, "dessert_shop": true,
+	"greengrocer": true, "fruit_and_vegetable_store": true, "convenience_store": true,
+	"tobacco_shop": true, "juice_shop": true, "tea_house": true, "cafeteria": true,
+	"catering_service": true, "banquet_hall": true, "buffet_restaurant": true,
 }
 
 var nonHomeTypes = map[string]bool{
@@ -892,6 +942,16 @@ func isHomeLivingPlace(name string, types []string) bool {
 		if foreignTradeTypes[strings.ToLower(strings.TrimSpace(t))] {
 			return false
 		}
+	}
+	// Some shops carry no telling type at all -- "manufacturer", "point_of_interest",
+	// "establishment" say nothing -- and then the sign is all there is. But a sign can name
+	// two trades at once, and "sofra" is the clearest case in the language: it is what a
+	// dinner service is called and it is what half the country's eating houses are called.
+	// A word that names two trades cannot decide on its own, so the food trade's own
+	// vocabulary gets to veto. "Bizim Sofra Günlük Ev Yemekleri Kahvaltı" tells you what it
+	// is twice over; only one of those readings was being heard.
+	if name != "" && namesAFoodBusiness(normalized, folded) {
+		return false
 	}
 	// Now the shop's own sign. A name that plainly says "perde" or "halı" is what the
 	// trade itself calls the business, and it still outranks a type list that says only

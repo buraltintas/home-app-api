@@ -8,6 +8,29 @@ repeating the value involved.
 
 ---
 
+## A delicatessen and a lokanta were still filed under tableware
+
+- Two shops reported from the live site, both reading "Sofra" on the sign. The classifier
+  was reading the provider's trade before the sign, which was the earlier fix -- but one of
+  them is typed `liquor_store`, which was not in the list of trades that are plainly not
+  ours, and the other carries no telling type at all ("manufacturer", "establishment"), so
+  the sign was everything.
+- Food and drink retail is now named in that list: an off-licence, a delicatessen, a
+  butcher, a greengrocer. The provider says what they are.
+- And where the sign is all there is, the food trade's own vocabulary gets to veto. A word
+  can name two trades -- "sofra" is what a dinner service is called and what half the
+  country's eating houses are called -- and a word that names two cannot decide alone.
+  "Bizim Sofra Günlük Ev Yemekleri Kahvaltı" says what it is twice; only one reading was
+  being heard.
+- Matched from the start of a word, allowing what Turkish adds to the end of one. A plain
+  substring match threw "Tekeli Kilim", a carpet shop, out of the catalogue; a whole-word
+  match missed "Lokantası". Oven and hob are deliberately absent from the vocabulary,
+  because both are kitchen appliances.
+- Two stores in the catalogue were reclassified by the existing prune command, which reads
+  the provider types already stored. No provider call.
+
+---
+
 ## Searching a chain listed its branches in other provinces
 
 - Reported: an "İşbir" search from Antalya returned İşbir branches in provinces the

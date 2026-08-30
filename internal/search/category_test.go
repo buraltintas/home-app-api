@@ -288,3 +288,64 @@ func TestATradeNamedOutrightBeatsTheSign(t *testing.T) {
 		t.Error("a carpet shop was rejected")
 	}
 }
+
+// A sign can name two trades at once. "Sofra" is what a dinner service is called and it is
+// what half the country's eating houses are called, so it cannot decide on its own -- and
+// two shops reported from the live site were filed under tableware on the strength of it.
+func TestAFoodBusinessIsNotATablewareShop(t *testing.T) {
+	cases := []struct {
+		name  string
+		types []string
+	}{
+		// No telling type at all, so the sign is everything -- and it says food twice.
+		{"Bizim Sofra Günlük Ev Yemekleri Kahvaltı", []string{"manufacturer", "point_of_interest", "establishment"}},
+		// The provider names the trade outright.
+		{"SOFRA ŞARKÜTERİ&TEKEL", []string{"liquor_store", "store", "point_of_interest"}},
+		{"Sofra Lokantası", nil},
+		{"Anadolu Sofrası Kebap", nil},
+		{"Köşe Pastanesi", nil},
+	}
+	for _, c := range cases {
+		if got := StoreCategories(c.name, c.types); len(got) > 0 {
+			t.Errorf("StoreCategories(%q) = %v, want nothing", c.name, got)
+		}
+	}
+
+	// The word still works where it is the only trade named.
+	shops := []struct {
+		name  string
+		types []string
+	}{
+		{"Sofra Takımı Dünyası", nil},
+		{"Zücaciye Sofra", []string{"home_goods_store"}},
+	}
+	for _, c := range shops {
+		if got := StoreCategories(c.name, c.types); len(got) == 0 {
+			t.Errorf("StoreCategories(%q) returned nothing; a tableware shop is still a shop", c.name)
+		}
+	}
+}
+
+// A word inside another word is not that word, and Turkish adds to the end of words.
+// "Tekeli Kilim" is a carpet shop; "Sofra Lokantası" is not a tableware shop.
+func TestTheFoodVocabularyReadsWordsNotLetters(t *testing.T) {
+	for _, name := range []string{"Tekeli Kilim", "Tekeli", "Yatak Odası Dünyası"} {
+		if namesAFoodBusiness(normalizeText(name), foldLatin(normalizeText(name))) {
+			t.Errorf("%q was read as a food business", name)
+		}
+	}
+	for _, name := range []string{"Sofra Lokantası", "Hacı Baba Kebapçısı", "Köşe Pastanesi"} {
+		if !namesAFoodBusiness(normalizeText(name), foldLatin(normalizeText(name))) {
+			t.Errorf("%q was not read as a food business", name)
+		}
+	}
+}
+
+// An oven and a hob are kitchen appliances. The food vocabulary must not swallow them.
+func TestKitchenAppliancesSurviveTheFoodVocabulary(t *testing.T) {
+	for _, name := range []string{"Ankastre Fırın ve Ocak Merkezi", "Arçelik Ankastre"} {
+		if namesAFoodBusiness(normalizeText(name), foldLatin(normalizeText(name))) {
+			t.Errorf("%q was read as a food business", name)
+		}
+	}
+}
