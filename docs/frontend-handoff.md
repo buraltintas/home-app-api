@@ -288,6 +288,14 @@ For an explicit unrelated request such as a tyre shop, `scope` is `out_of_scope`
 
 For `home_living`, parsed intent drives internal and Google Places queries concurrently to reduce latency. Indirect requests such as “çeyiz almak istiyorum” and “nevresim takımı lazım” are valid home/living searches, not guidance states.
 
+Home discovery can read three non-mutating public signals without inventing editorial data:
+
+- `GET /v1/search/highlights` returns optional `rating_gainer` and `most_reviewed` stores for the rolling 30-day window. A store must have at least five active reviews; absent signals are omitted.
+- `GET /v1/search/popular-cities?limit=5` returns `{items:[{name,search_count}]}` for completed searches in the rolling 30-day window. A city is omitted until at least three searches exist; the limit is capped at 10. No district, coordinate, query, visitor, or user data is returned.
+- `GET /v1/categories` returns active localized categories ordered by their rolling 30-day `search_count`.
+
+Treat every list as live enhancement data: omit an empty section rather than manufacturing placeholders or counts.
+
 `fallback_state` is omitted normally and may be `ai_unavailable_or_invalid`, `places_unavailable`, or a comma-joined combination. Absence of configured AI uses deterministic parsing without necessarily emitting an AI fallback marker; UI should rely only on the returned field.
 
 Classic `GET /stores/search` and `/nearby` query internal data and still return a `search_id`; they do not return per-result impression IDs, so use hybrid POST search for full per-result instrumentation.

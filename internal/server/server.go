@@ -116,6 +116,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/categories", s.storeCategories)
 		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
 		r.Get("/search/highlights", s.searchHighlights)
+		r.Get("/search/popular-cities", s.searchPopularCities)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
@@ -957,6 +958,17 @@ func (s *Server) searchHighlights(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, items)
+}
+
+// searchPopularCities exposes only rolling city-level totals that crossed the public
+// threshold. It never returns a district, coordinate, query, visitor or user identifier.
+func (s *Server) searchPopularCities(w http.ResponseWriter, r *http.Request) {
+	items, e := s.search.PopularCities(r.Context(), queryInt(r, "limit", 5))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // storeCategories lists browsable categories with how often each has been searched, so the

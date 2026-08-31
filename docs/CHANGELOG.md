@@ -8,6 +8,16 @@ repeating the value involved.
 
 ---
 
+## Home discovery trends are live without exposing individual searches
+
+- A public read endpoint now returns the most searched cities from the rolling 30-day
+  window, capped at ten and withheld until a city has at least three completed searches.
+  It exposes no district, coordinate, query, visitor, or user data.
+- The frontend contract now groups this city signal with the existing monthly store
+  highlights and category search totals so Home can show all three without invented data.
+
+---
+
 ## Catalogue stores are an explicit editorial state
 
 - Stores can now be marked as catalogue entries by an administrator without making them
