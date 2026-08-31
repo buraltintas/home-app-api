@@ -89,6 +89,21 @@ func TestInternalResultClassificationAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestCatalogueMarkerIsCopiedWithoutChangingScore(t *testing.T) {
+	id := uuid.New()
+	base := storepkg.Item{ID: id, Name: "Işık Ev", Platform: storepkg.Stats{AverageRating: 4.7, ReviewCount: 82, FavoriteCount: 240, PostCount: 82}}
+	standard := fromStore(base, 3)
+	base.IsCatalogStore = true
+	catalogue := fromStore(base, 3)
+
+	if !catalogue.CatalogStore {
+		t.Fatal("catalogue marker was not copied to the search contract")
+	}
+	if catalogue.score != standard.score {
+		t.Fatalf("catalogue marker changed ranking score: standard=%v catalogue=%v", standard.score, catalogue.score)
+	}
+}
+
 func TestDeterministicUnderstandsIndirectHomeNeeds(t *testing.T) {
 	for _, test := range []struct {
 		query      string

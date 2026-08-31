@@ -66,21 +66,22 @@ func (s *Service) Users(ctx context.Context, query string, limit, offset int) ([
 }
 
 type StoreRow struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	Slug         string    `json:"slug"`
-	City         string    `json:"city"`
-	IsPremium    bool      `json:"is_premium"`
-	CoverMediaID string    `json:"cover_media_id,omitempty"`
-	Categories   []string  `json:"categories"`
-	ReviewCount  int       `json:"review_count"`
-	Rating       float64   `json:"average_rating"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Slug           string    `json:"slug"`
+	City           string    `json:"city"`
+	IsPremium      bool      `json:"is_premium"`
+	IsCatalogStore bool      `json:"is_catalog_store"`
+	CoverMediaID   string    `json:"cover_media_id,omitempty"`
+	Categories     []string  `json:"categories"`
+	ReviewCount    int       `json:"review_count"`
+	Rating         float64   `json:"average_rating"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, limit, offset int) ([]StoreRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,coalesce(s.cover_media_id::text,''),
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,s.is_catalog_store,coalesce(s.cover_media_id::text,''),
  coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),
  ss.review_count,ss.average_rating,s.created_at
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id
@@ -94,7 +95,7 @@ func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, li
 	out := []StoreRow{}
 	for rows.Next() {
 		var x StoreRow
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.IsCatalogStore, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -327,6 +328,28 @@ func (s *Service) SetStorePremium(ctx context.Context, actor uuid.UUID, email st
 		return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
 	if e = record(ctx, tx, actor, email, "store.premium", "store", store, map[string]any{"is_premium": premium}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+// SetStoreCatalogStatus controls the editorial catalogue marker independently from paid
+// placement. The flag changes presentation only; categories remain an explicit admin
+// choice and search ranking continues to follow the same rules as every other store.
+func (s *Service) SetStoreCatalogStatus(ctx context.Context, actor uuid.UUID, email string, store uuid.UUID, catalog bool) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, `UPDATE stores SET is_catalog_store=$2,updated_at=now() WHERE id=$1 AND deleted_at IS NULL`, store, catalog)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+	}
+	if e = record(ctx, tx, actor, email, "store.catalog", "store", store, map[string]any{"is_catalog_store": catalog}); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

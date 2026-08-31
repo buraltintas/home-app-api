@@ -8,6 +8,18 @@ repeating the value involved.
 
 ---
 
+## Catalogue stores are an explicit editorial state
+
+- Stores can now be marked as catalogue entries by an administrator without making them
+  promoted or changing search order. The operation is audited independently from premium
+  placement and category editing.
+- Store detail and hybrid search contracts expose the marker so clients can present the
+  same editorial state everywhere instead of inferring it from a name, category, or image.
+- The schema defaults existing and newly imported stores to standard, making catalogue
+  membership an intentional operator decision.
+
+---
+
 ## A ferry terminal was offered as a home location, then rejected
 
 - Manual location search offered “Karşıyaka Vapur İskelesi” because Google's autocomplete

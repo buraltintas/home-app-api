@@ -211,6 +211,31 @@ func (s *Server) adminSetPremium(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"id": id, "is_premium": body.IsPremium})
 }
 
+func (s *Server) adminSetCatalogStore(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var body struct {
+		IsCatalogStore bool `json:"is_catalog_store"`
+	}
+	if e = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if e = s.admin.SetStoreCatalogStatus(r.Context(), actor, email, id, body.IsCatalogStore); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"id": id, "is_catalog_store": body.IsCatalogStore})
+}
+
 func (s *Server) adminSetStoreCover(w http.ResponseWriter, r *http.Request) {
 	actor, email, ok := s.adminActor(r)
 	if !ok {

@@ -148,6 +148,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Post("/feedback/{id}/reply", s.adminReplyFeedback)
 			r.Get("/categories", s.adminCategories)
 			r.Post("/stores/{id}/premium", s.adminSetPremium)
+			r.Post("/stores/{id}/catalog", s.adminSetCatalogStore)
 			r.Post("/stores/{id}/categories", s.adminSetStoreCategories)
 			r.Put("/stores/{id}/cover", s.adminSetStoreCover)
 			r.Delete("/stores/{id}/cover", s.adminClearStoreCover)

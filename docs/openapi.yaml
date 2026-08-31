@@ -625,11 +625,12 @@ components:
         refreshed_at: {type: string, format: date-time}
     Store:
       type: object
-      required: [id, name, slug, address, city, district, latitude, longitude, categories, category_labels, platform, viewer_has_favorited, viewer_has_reviewed]
+      required: [id, name, slug, is_catalog_store, address, city, district, latitude, longitude, categories, category_labels, platform, viewer_has_favorited, viewer_has_reviewed]
       properties:
         id: {type: string, format: uuid}
         name: {type: string}
         slug: {type: string}
+        is_catalog_store: {type: boolean, description: Editorial catalogue marker; does not affect ranking or paid placement.}
         brand_name: {type: string}
         address: {type: string}
         city: {type: string}
@@ -676,6 +677,7 @@ components:
         longitude: {type: number}
         distance_meters: {type: number, minimum: 0}
         categories: {type: array, items: {type: string}}
+        catalog_store: {type: boolean, description: Present and true for an editorial catalogue store; does not affect ranking.}
         photo: {$ref: '#/components/schemas/StorePhoto'}
         platform:
           type: object

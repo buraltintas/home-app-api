@@ -685,7 +685,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, Premium: m.Premium, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
@@ -819,6 +819,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 type mappedStore struct {
 	Platform       Platform
 	Premium        bool
+	CatalogStore   bool
 	Photo          *Photo
 	Categories     []string
 	CategoryLabels []string
@@ -833,7 +834,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,coalesce(s.cover_media_id::text,''),coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id JOIN store_category_translations t ON t.category_id=c.id AND t.locale=$2 WHERE l.store_id=s.id),'{}') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids, i18n.FromContext(ctx))
+	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,coalesce(s.cover_media_id::text,''),coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id JOIN store_category_translations t ON t.category_id=c.id AND t.locale=$2 WHERE l.store_id=s.id),'{}') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids, i18n.FromContext(ctx))
 	if e != nil {
 		return nil, e
 	}
@@ -842,7 +843,7 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 		var id string
 		var coverMediaID string
 		var m mappedStore
-		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &coverMediaID, &m.Categories, &m.CategoryLabels); e != nil {
+		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &m.CatalogStore, &coverMediaID, &m.Categories, &m.CategoryLabels); e != nil {
 			return nil, e
 		}
 		if coverMediaID != "" {

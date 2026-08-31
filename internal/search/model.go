@@ -206,7 +206,10 @@ type Result struct {
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
 	Premium bool `json:"premium,omitempty"`
-	score   float64
+	// CatalogStore is an administrator-curated presentation marker. It never changes
+	// ranking and is independent from paid placement.
+	CatalogStore bool `json:"catalog_store,omitempty"`
+	score        float64
 	// Set when the visitor named a store and this result is one of them. Ranking needs to
 	// tell "the shop you asked for" from "a shop like it"; without the distinction a chain
 	// with several branches came back in no useful order at all.
@@ -675,7 +678,7 @@ func fromStore(x storepkg.Item, rank int) Result {
 			photo = &Photo{Source: "google", Name: x.Photo.Name, Attributions: x.Photo.Attributions}
 		}
 	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Phone: x.Phone, Premium: x.IsPremium, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Phone: x.Phone, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

@@ -163,6 +163,16 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `POST /v1/media/uploads` | required | declaration → upload authorization | media/input |
 | `POST /v1/media/{id}/complete` | owner | dimensions → 204 | media state/upload errors |
 | `POST /v1/feedback` | optional | `{kind?,message,contact_email?}` → 204; private, never published | input/rate |
+
+Store detail always returns `store.is_catalog_store`. Hybrid search results return
+`catalog_store: true` for catalogue stores and omit the field otherwise. This is an
+editorial presentation marker only: it is independent from `premium`, does not alter
+ranking, and should be rendered consistently in search and store detail.
+
+The web operator surface exposes `POST /admin/stores/{id}/catalog` with
+`{"is_catalog_store": boolean}`. It requires administrator authentication, records an
+audit event, and is separate from category editing and paid promotion.
+
 | `POST /v1/admin/feedback/{id}/reply` | admin | `{message}` → 204 and closes the queue item; signed-in feedback only | auth/input |
 
 ### Private product messages
@@ -333,13 +343,13 @@ Push tables/services support device platform/token, locale, preferences, templat
 
 Next.js should proxy `/v1` calls server-side, inject its server-only secret, forward bearer token, `X-Locale`/`Accept-Language`, visitor ID, origin attribution headers, status, error body, `Retry-After`, and request ID without rewriting stable error codes. Keep refresh tokens in an appropriate secure server-side/HTTP-only session design; never expose the backend BFF secret to browser code.
 
-React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, implement and synchronize the private current/manual profile location choice above, explain the review/nearby benefit immediately before asking location permission, send fresh OS coordinates plus horizontal accuracy for the 500 m current review/on-site visit check, and follow the direct-upload sequence. Valid mobile location always has priority over manual discovery location; a persisted discovery location is never proof of presence. Treat the embedded BFF header as public/recoverable and never as user authentication.
+React Native should use secure token storage, serialize refreshes, persist visitor UUID and unconsumed visit-proof IDs, forward device locale, implement and synchronize the private current/manual profile location choice above, explain the review/nearby benefit immediately before asking location permission, send fresh OS coordinates plus horizontal accuracy for the configured current review/on-site visit check, and follow the direct-upload sequence. Valid mobile location always has priority over manual discovery location; a persisted discovery location is never proof of presence. Treat the embedded BFF header as public/recoverable and never as user authentication.
 
 ## 15. Backend-supported frontend states
 
 | Resource | States to model |
 |---|---|
-| Store | platform-reviewed; no community reviews (`review_count=0`); Google-only search result needing resolution; enriched platform+Google; viewer favorited/not; viewer reviewed/not. |
+| Store | platform-reviewed; no community reviews (`review_count=0`); Google-only search result needing resolution; enriched platform+Google; catalogue/standard; viewer favorited/not; viewer reviewed/not. |
 | Post | liked/not, author followed/not, store favorited/not, media/no media. Published posts are visit-verified; an unverified published state is not produced. |
 | User | anonymous viewer, authenticated own profile, authenticated other profile; following state is available in post context. |
 | Search | product/category intent, bare store-name intent, results, zero results, Google-only result, provider fallback marker, provider hard error, persisted visitor. |
@@ -349,7 +359,7 @@ React Native should use secure token storage, serialize refreshes, persist visit
 ## 16. Current limitations and non-contracts
 
 - No push registration/preferences HTTP API or active frontend notification flow.
-- No merchant accounts/store claiming or admin HTTP API.
+- No merchant accounts or store claiming. The existing administrator HTTP surface is an operator-only contract, not a merchant API.
 - No nested comments, collections, or review translation.
 - Store phone, website, country, cover image, and opening hours are not exposed.
 - Sending JSON `null` for nullable scalar profile fields is currently a no-op (the PATCH decoder cannot distinguish it from omission); clear text fields with `""` where allowed, while relationship/housing/occupation/age scalars cannot currently be reset to SQL null.
