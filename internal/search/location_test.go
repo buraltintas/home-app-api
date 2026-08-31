@@ -63,6 +63,18 @@ func TestResolveLocationsFiltersBusinessesAndPreservesProviderOrder(t *testing.T
 	}
 }
 
+func TestResolveLocationsRejectsPointOfInterestEvenWhenPredictionSaysPremise(t *testing.T) {
+	provider := &locationPlacesStub{places: []Place{
+		{PlaceID: "ferry", Name: "Karşıyaka Vapur İskelesi", Address: "Karşıyaka/İzmir", Types: []string{"ferry_terminal", "point_of_interest", "establishment", "premise"}},
+		{PlaceID: "district", Name: "Karşıyaka", Address: "İzmir, Türkiye", Types: []string{"administrative_area_level_2", "political"}},
+	}}
+	service := &Service{places: provider}
+	items, err := service.ResolveLocations(context.Background(), "Karşıyaka", 5, nil, nil)
+	if err != nil || len(items) != 1 || items[0].PlaceID != "district" {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+}
+
 func TestResolveLocationsValidatesInputBeforeProviderCall(t *testing.T) {
 	service := &Service{}
 	if _, err := service.ResolveLocations(context.Background(), "x", 5, nil, nil); err == nil {

@@ -8,6 +8,18 @@ repeating the value involved.
 
 ---
 
+## A ferry terminal was offered as a home location, then rejected
+
+- Manual location search offered “Karşıyaka Vapur İskelesi” because Google's autocomplete
+  prediction labelled the point of interest as both an establishment and a premise. The
+  premise label passed the geographic filter; the resolved record then correctly failed,
+  leaving the person with a choice the product itself would not accept.
+- Provider-level point-of-interest and establishment markers now veto an address-shaped
+  type. Districts, neighbourhoods, streets and genuine premises remain valid; named POIs
+  no longer enter the choice list only to fail one step later.
+
+---
+
 ## Product feedback can receive a private in-app answer
 
 - Feedback from a signed-in account now appears under that account's private messages,

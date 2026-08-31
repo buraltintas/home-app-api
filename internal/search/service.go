@@ -405,6 +405,15 @@ func (s *Service) ResolveLocationPlace(ctx context.Context, placeID string) (Loc
 }
 
 func isGeographicPlace(types []string) bool {
+	// Autocomplete predictions sometimes attach `premise` to a named point of interest.
+	// That made a ferry terminal look selectable here, then fail when Place Details returned
+	// its actual establishment types. A POI is not a manually chosen area even when it also
+	// carries an address-shaped type; provider-level POI markers therefore veto the result.
+	for _, placeType := range types {
+		if placeType == "establishment" || placeType == "point_of_interest" {
+			return false
+		}
+	}
 	for _, placeType := range types {
 		switch placeType {
 		case "administrative_area_level_1", "administrative_area_level_2", "administrative_area_level_3", "administrative_area_level_4", "locality", "neighborhood", "postal_town", "sublocality", "sublocality_level_1", "sublocality_level_2":
