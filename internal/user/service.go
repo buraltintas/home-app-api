@@ -384,6 +384,7 @@ func (s *Service) DeleteAccount(ctx context.Context, user uuid.UUID) error {
 		`DELETE FROM follows WHERE follower_id=$1 OR following_id=$1`,
 		`DELETE FROM favorites WHERE user_id=$1`,
 		`DELETE FROM searches WHERE user_id=$1`,
+		`DELETE FROM feedback WHERE user_id=$1`,
 		`DELETE FROM store_visit_verifications WHERE user_id=$1`,
 		`UPDATE media SET status='deleted' WHERE owner_user_id=$1 AND status<>'deleted'`,
 		`DELETE FROM push_devices WHERE user_id=$1`,

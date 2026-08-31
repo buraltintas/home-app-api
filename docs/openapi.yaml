@@ -25,6 +25,8 @@ tags:
   - {name: Discovery}
   - {name: Social}
   - {name: Profile}
+  - {name: Feedback}
+  - {name: Admin}
   - {name: Media}
 paths:
   /health:
@@ -354,6 +356,47 @@ paths:
       summary: Clear the authenticated user's private discovery location
       security: [{bffSecret: [], bearerAuth: []}]
       responses: {'204': {description: Cleared}}
+  /v1/me/messages:
+    get:
+      tags: [Profile, Feedback]
+      summary: Feedback sent by the authenticated user and private administrator replies
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/Limit'}]
+      responses:
+        '200':
+          description: Messages newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties: {items: {type: array, items: {$ref: '#/components/schemas/FeedbackMessage'}}}
+  /v1/feedback:
+    post:
+      tags: [Feedback]
+      summary: Send private product feedback, anonymously or while signed in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                kind: {type: string, enum: [suggestion, problem, praise, other]}
+                message: {type: string, minLength: 5, maxLength: 4000}
+                contact_email: {type: string, format: email, maxLength: 320}
+      responses: {'204': {description: Recorded}, '422': {$ref: '#/components/responses/Error'}}
+  /v1/admin/feedback/{id}/reply:
+    post:
+      tags: [Admin, Feedback]
+      summary: Privately reply to feedback owned by a signed-in user
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [message], properties: {message: {type: string, minLength: 1, maxLength: 4000}}}}}
+      responses: {'204': {description: Reply stored and feedback closed}, '422': {$ref: '#/components/responses/Error'}}
   /v1/me/searches:
     get:
       tags: [Profile]
@@ -457,6 +500,17 @@ components:
               accuracy_meters: {type: number, exclusiveMinimum: 0}
   schemas:
     Locale: {type: string, enum: [tr, en, de, ru]}
+    FeedbackMessage:
+      type: object
+      required: [id, kind, message, status, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [suggestion, problem, praise, other]}
+        message: {type: string}
+        status: {type: string, enum: [new, read, handled]}
+        created_at: {type: string, format: date-time}
+        reply: {type: string}
+        replied_at: {type: string, format: date-time}
     LocationResult:
       type: object
       required: [provider, place_id, name, address, latitude, longitude, types, attributions]

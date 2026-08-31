@@ -8,6 +8,7 @@ import (
 	"context"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/google/uuid"
@@ -445,6 +446,7 @@ func (s *Service) RecordUserDeletion(ctx context.Context, actor uuid.UUID, email
 
 type FeedbackRow struct {
 	ID           uuid.UUID  `json:"id"`
+	UserID       *uuid.UUID `json:"user_id,omitempty"`
 	Kind         string     `json:"kind"`
 	Message      string     `json:"message"`
 	ContactEmail string     `json:"contact_email,omitempty"`
@@ -453,6 +455,8 @@ type FeedbackRow struct {
 	Status       string     `json:"status"`
 	CreatedAt    time.Time  `json:"created_at"`
 	HandledAt    *time.Time `json:"handled_at,omitempty"`
+	Reply        string     `json:"reply,omitempty"`
+	RepliedAt    *time.Time `json:"replied_at,omitempty"`
 }
 
 // Feedback lists what people have told us about the product, newest first. The author is
@@ -460,8 +464,9 @@ type FeedbackRow struct {
 // normal case and not a gap.
 func (s *Service) Feedback(ctx context.Context, q string, limit, offset int) ([]FeedbackRow, error) {
 	q = strings.TrimSpace(q)
-	rows, e := s.db.Query(ctx, `SELECT f.id,f.kind,f.message,coalesce(f.contact_email::text,''),
- coalesce(p.display_name,p.username,''),f.locale::text,f.status,f.created_at,f.handled_at
+	rows, e := s.db.Query(ctx, `SELECT f.id,f.user_id,f.kind,f.message,coalesce(f.contact_email::text,''),
+ coalesce(p.display_name,p.username,''),f.locale::text,f.status,f.created_at,f.handled_at,
+ coalesce(f.reply,''),f.replied_at
  FROM feedback f LEFT JOIN user_profiles p ON p.user_id=f.user_id
  WHERE ($1='' OR f.message ILIKE '%'||$1||'%' OR f.contact_email::text ILIKE '%'||$1||'%')
  ORDER BY f.created_at DESC LIMIT $2 OFFSET $3`, q, clamp(limit), offset)
@@ -472,12 +477,47 @@ func (s *Service) Feedback(ctx context.Context, q string, limit, offset int) ([]
 	out := []FeedbackRow{}
 	for rows.Next() {
 		var x FeedbackRow
-		if e = rows.Scan(&x.ID, &x.Kind, &x.Message, &x.ContactEmail, &x.Author, &x.Locale, &x.Status, &x.CreatedAt, &x.HandledAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.UserID, &x.Kind, &x.Message, &x.ContactEmail, &x.Author, &x.Locale, &x.Status, &x.CreatedAt, &x.HandledAt, &x.Reply, &x.RepliedAt); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+func validateFeedbackReply(value string) (string, error) {
+	reply := strings.TrimSpace(value)
+	if n := utf8.RuneCountInString(reply); n < 1 || n > 4000 {
+		return "", httpapi.E(422, "INVALID_FEEDBACK_REPLY", "Reply must be between 1 and 4000 characters")
+	}
+	return reply, nil
+}
+
+// ReplyFeedback writes one private answer for a signed-in sender and closes the queue item
+// in the same transaction. Anonymous feedback cannot receive an in-product answer because
+// it has no account ownership boundary.
+func (s *Service) ReplyFeedback(ctx context.Context, actor uuid.UUID, email string, id uuid.UUID, value string) error {
+	reply, e := validateFeedbackReply(value)
+	if e != nil {
+		return e
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	tag, e := tx.Exec(ctx, `UPDATE feedback SET reply=$2,replied_at=now(),replied_by=$3,status='handled',handled_at=now()
+ WHERE id=$1 AND user_id IS NOT NULL`, id, reply, actor)
+	if e != nil {
+		return e
+	}
+	if tag.RowsAffected() == 0 {
+		return httpapi.E(422, "FEEDBACK_NOT_REPLYABLE", "Feedback does not belong to a signed-in user")
+	}
+	if e = record(ctx, tx, actor, email, "feedback.reply", "feedback", id, nil); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }
 
 // SetFeedbackStatus marks a message read or handled so a queue of one person's attention

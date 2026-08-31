@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
@@ -32,6 +33,43 @@ type Input struct {
 	Kind         string `json:"kind"`
 	Message      string `json:"message"`
 	ContactEmail string `json:"contact_email"`
+}
+
+type Message struct {
+	ID        uuid.UUID  `json:"id"`
+	Kind      string     `json:"kind"`
+	Message   string     `json:"message"`
+	Status    string     `json:"status"`
+	CreatedAt time.Time  `json:"created_at"`
+	Reply     string     `json:"reply,omitempty"`
+	RepliedAt *time.Time `json:"replied_at,omitempty"`
+}
+
+// Messages returns only feedback written while this account was signed in. Matching by
+// contact address would expose anonymous messages to a later account that happens to use
+// the same address; user_id is the ownership boundary.
+func (s *Service) Messages(ctx context.Context, user uuid.UUID, limit, offset int) ([]Message, error) {
+	if limit < 1 || limit > 100 {
+		limit = 50
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, e := s.db.Query(ctx, `SELECT id,kind,message,status,created_at,coalesce(reply,''),replied_at
+ FROM feedback WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, user, limit, offset)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var item Message
+		if e = rows.Scan(&item.ID, &item.Kind, &item.Message, &item.Status, &item.CreatedAt, &item.Reply, &item.RepliedAt); e != nil {
+			return nil, e
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 // Create records one message. Anonymous visitors may send feedback: browsing does not need

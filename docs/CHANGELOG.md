@@ -8,6 +8,20 @@ repeating the value involved.
 
 ---
 
+## Product feedback can receive a private in-app answer
+
+- Feedback from a signed-in account now appears under that account's private messages,
+  together with any administrator reply. Pending messages stay visible, so “sent” does not
+  become an unexplained disappearance while somebody waits for an answer.
+- The operator feedback queue can answer an owned message and close it atomically. The
+  action is audited without copying the private reply into audit metadata.
+- Anonymous feedback remains anonymous and cannot be claimed later by matching an email
+  address; account ownership, not contact text, is the boundary for reading a message.
+- Account deletion removes owned feedback and replies with the rest of the private profile;
+  signing in again starts with an empty message history, like every other purged section.
+
+---
+
 ## A delicatessen and a lokanta were still filed under tableware
 
 - Two shops reported from the live site, both reading "Sofra" on the sign. The classifier

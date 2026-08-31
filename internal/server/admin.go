@@ -400,3 +400,27 @@ func (s *Server) adminSetFeedbackStatus(w http.ResponseWriter, r *http.Request) 
 	}
 	w.WriteHeader(204)
 }
+
+func (s *Server) adminReplyFeedback(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var in struct {
+		Message string `json:"message"`
+	}
+	if e = Decode(w, r, &in, 16<<10); e == nil {
+		e = s.admin.ReplyFeedback(r.Context(), actor, email, id, in.Message)
+	}
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

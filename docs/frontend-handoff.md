@@ -8,7 +8,7 @@ Boşa Gezme! is a social discovery and physical-store review platform focused on
 
 `Discover → Search → Open Store → Visit Physically → Review → Social Interaction`
 
-Stores do not need to be platform members. Browsing is anonymous; login is required for mutations. Review creation is proximity checked by the backend (500 m by default) using either current coordinates or a single-use proof captured while the user was on site.
+Stores do not need to be platform members. Browsing is anonymous; login is required for mutations. Review creation is proximity checked by the backend (2 km by default, configurable with `STORE_REVIEW_RADIUS_METERS`) using either current coordinates or a single-use proof captured while the user was on site.
 
 ## 2. Connection and client headers
 
@@ -51,8 +51,9 @@ The current Go API also expects this header from React Native. A secret embedded
 | Request/verify OTP, Google login, refresh | Anonymous |
 | Create/delete review, upload media, like, comment, follow, favorite | Authenticated |
 | Delete review/comment | Owner only; non-owner is surfaced as not found |
-| Own profile/edit/delete, own search history/delete | Authenticated owner |
-| Admin routes | None exposed |
+| Own profile/edit/delete, own search history/delete, own feedback/messages | Authenticated owner |
+| Feedback submission | Anonymous or authenticated; only authenticated submissions can receive in-product replies |
+| Admin routes | Authenticated administrator; web operator surface only |
 
 ## 5. Authentication and sessions
 
@@ -156,10 +157,22 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `PUT`, `DELETE /v1/me/discovery-location` | required | persist current/manual private discovery location → private profile; clear → 204 | input/rate/provider errors |
 | `DELETE /v1/me` | required | anonymize/delete → 204 | auth |
 | `GET /v1/me/searches` | required | limit → `{items}` default 30/max 100 | auth |
+| `GET /v1/me/messages` | required | limit → private feedback and administrator replies, newest first | auth |
 | `DELETE /v1/me/searches` | required | all → 204 | auth |
 | `DELETE /v1/me/searches/{id}` | owner | one → 204 | not found |
 | `POST /v1/media/uploads` | required | declaration → upload authorization | media/input |
 | `POST /v1/media/{id}/complete` | owner | dimensions → 204 | media state/upload errors |
+| `POST /v1/feedback` | optional | `{kind?,message,contact_email?}` → 204; private, never published | input/rate |
+| `POST /v1/admin/feedback/{id}/reply` | admin | `{message}` → 204 and closes the queue item; signed-in feedback only | auth/input |
+
+### Private product messages
+
+`GET /v1/me/messages` returns only feedback whose `user_id` is the authenticated owner.
+The backend deliberately does not claim anonymous feedback by matching an email address;
+doing so could expose a private message to a later account that happens to control the same
+address. Each item contains the original `kind`, `message`, `status`, and `created_at`, plus
+`reply` and `replied_at` after an administrator answers. Clients show pending messages and
+answers together under **My messages / Mesajlarım** in the private profile.
 
 Exact request/response schemas and status responses are in OpenAPI.
 

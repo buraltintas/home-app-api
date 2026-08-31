@@ -145,6 +145,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Get("/audit", s.adminAudit)
 			r.Get("/feedback", s.adminFeedback)
 			r.Post("/feedback/{id}/status", s.adminSetFeedbackStatus)
+			r.Post("/feedback/{id}/reply", s.adminReplyFeedback)
 			r.Get("/categories", s.adminCategories)
 			r.Post("/stores/{id}/premium", s.adminSetPremium)
 			r.Post("/stores/{id}/categories", s.adminSetStoreCategories)
@@ -171,6 +172,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.With(writeLimit.Middleware).Put("/me/discovery-location", s.updateDiscoveryLocation)
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/favorites", s.myFavorites)
+			r.Get("/me/messages", s.myMessages)
 			r.Get("/me/searches", s.mySearches)
 			r.Delete("/me/searches", s.deleteMySearches)
 			r.Delete("/me/searches/{id}", s.deleteMySearch)
@@ -905,6 +907,16 @@ func (s *Server) createFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (s *Server) myMessages(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	items, e := s.feedback.Messages(r.Context(), p.UserID, queryInt(r, "limit", 50), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 // searchSuggestions answers with what people around a point have searched for. It needs
