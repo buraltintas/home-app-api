@@ -8,6 +8,16 @@ repeating the value involved.
 
 ---
 
+## Public transport landmarks can be used as a manual search origin
+
+- Google classifies ferry, rail, metro and bus terminals as establishments and points of
+  interest. The location picker offered these recognisable landmarks but rejected the
+  selection when it resolved the provider record, so a person could not search around a
+  place such as a ferry terminal.
+- Provider-typed public transport landmarks are now valid search anchors after their place
+  ID and coordinates are re-fetched and verified. Ordinary shops remain excluded, and a
+  manually selected origin still provides no evidence that somebody visited a store.
+
 ## Home discovery trends are live without exposing individual searches
 
 - A public read endpoint now returns the most searched cities from the rolling 30-day
@@ -27,18 +37,6 @@ repeating the value involved.
   same editorial state everywhere instead of inferring it from a name, category, or image.
 - The schema defaults existing and newly imported stores to standard, making catalogue
   membership an intentional operator decision.
-
----
-
-## A ferry terminal was offered as a home location, then rejected
-
-- Manual location search offered “Karşıyaka Vapur İskelesi” because Google's autocomplete
-  prediction labelled the point of interest as both an establishment and a premise. The
-  premise label passed the geographic filter; the resolved record then correctly failed,
-  leaving the person with a choice the product itself would not accept.
-- Provider-level point-of-interest and establishment markers now veto an address-shaped
-  type. Districts, neighbourhoods, streets and genuine premises remain valid; named POIs
-  no longer enter the choice list only to fail one step later.
 
 ---
 

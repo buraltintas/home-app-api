@@ -37,7 +37,7 @@ func (s *locationPlacesStub) PlaceDetails(context.Context, string) (Place, error
 	return s.detail, nil
 }
 
-func TestResolveLocationPlaceAcceptsOnlyVerifiedGeographicPlaces(t *testing.T) {
+func TestResolveLocationPlaceAcceptsOnlyVerifiedLocationAnchors(t *testing.T) {
 	provider := &locationPlacesStub{detail: Place{PlaceID: "kadikoy", Name: "Kadıköy", Address: "İstanbul, Türkiye", Latitude: 40.99, Longitude: 29.03, Types: []string{"administrative_area_level_2", "political"}}}
 	service := &Service{places: provider}
 	item, err := service.ResolveLocationPlace(context.Background(), "kadikoy")
@@ -47,6 +47,15 @@ func TestResolveLocationPlaceAcceptsOnlyVerifiedGeographicPlaces(t *testing.T) {
 	provider.detail.Types = []string{"furniture_store"}
 	if _, err = service.ResolveLocationPlace(context.Background(), "kadikoy"); err == nil {
 		t.Fatal("business accepted as a profile location")
+	}
+}
+
+func TestResolveLocationPlaceAcceptsVerifiedPublicTransportLandmark(t *testing.T) {
+	provider := &locationPlacesStub{detail: Place{PlaceID: "ferry", Name: "Karşıyaka Vapur İskelesi", Address: "Karşıyaka/İzmir", Latitude: 38.455, Longitude: 27.12, Types: []string{"ferry_terminal", "point_of_interest", "establishment"}}}
+	service := &Service{places: provider}
+	item, err := service.ResolveLocationPlace(context.Background(), "ferry")
+	if err != nil || item.PlaceID != "ferry" || item.Latitude == 0 || item.Longitude == 0 {
+		t.Fatalf("item=%+v err=%v", item, err)
 	}
 }
 
@@ -63,14 +72,15 @@ func TestResolveLocationsFiltersBusinessesAndPreservesProviderOrder(t *testing.T
 	}
 }
 
-func TestResolveLocationsRejectsPointOfInterestEvenWhenPredictionSaysPremise(t *testing.T) {
+func TestResolveLocationsIncludesPublicTransportLandmarkButNotOrdinaryBusiness(t *testing.T) {
 	provider := &locationPlacesStub{places: []Place{
 		{PlaceID: "ferry", Name: "Karşıyaka Vapur İskelesi", Address: "Karşıyaka/İzmir", Types: []string{"ferry_terminal", "point_of_interest", "establishment", "premise"}},
+		{PlaceID: "shop", Name: "Karşıyaka Mobilya", Address: "Karşıyaka/İzmir", Types: []string{"furniture_store", "point_of_interest", "establishment", "premise"}},
 		{PlaceID: "district", Name: "Karşıyaka", Address: "İzmir, Türkiye", Types: []string{"administrative_area_level_2", "political"}},
 	}}
 	service := &Service{places: provider}
 	items, err := service.ResolveLocations(context.Background(), "Karşıyaka", 5, nil, nil)
-	if err != nil || len(items) != 1 || items[0].PlaceID != "district" {
+	if err != nil || len(items) != 2 || items[0].PlaceID != "ferry" || items[1].PlaceID != "district" {
 		t.Fatalf("items=%+v err=%v", items, err)
 	}
 }

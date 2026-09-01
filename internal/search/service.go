@@ -351,10 +351,9 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int,
 		places, err = auto.Autocomplete(ctx, query, i18n.FromContext(ctx), lat, lon)
 		// Google can interpret “Uluç Mahallesi” as the establishment named “Uluç
 		// Mahallesi Muhtarlığı” while the shorter “Uluç” returns the actual
-		// administrative area. Keep the establishment filter, then retry a conservative
-		// Turkish neighbourhood suffix only when the first response has no geographic
-		// prediction at all.
-		if err == nil && !containsGeographicPlace(places) {
+		// administrative area. Retry a conservative Turkish neighbourhood suffix only
+		// when the first response has no usable area or public landmark at all.
+		if err == nil && !containsLocationAnchor(places) {
 			if fallback := locationAutocompleteFallback(query); fallback != query {
 				places, err = auto.Autocomplete(ctx, fallback, i18n.FromContext(ctx), lat, lon)
 			}
@@ -373,7 +372,7 @@ func (s *Service) ResolveLocations(ctx context.Context, query string, limit int,
 		// any, and the one the person picks is resolved through ResolveLocationPlace --
 		// so the coordinates a search is run against are always fetched by us, never
 		// taken from the client.
-		if !isGeographicPlace(place.Types) || strings.TrimSpace(place.PlaceID) == "" || strings.TrimSpace(place.Name) == "" {
+		if !isLocationAnchor(place.Types) || strings.TrimSpace(place.PlaceID) == "" || strings.TrimSpace(place.Name) == "" {
 			continue
 		}
 		results = append(results, LocationResult{Provider: "google", PlaceID: place.PlaceID, Name: place.Name, Address: place.Address, Latitude: place.Latitude, Longitude: place.Longitude, Types: append([]string{}, place.Types...), Attributions: append([]string{}, place.Attributions...)})
@@ -398,21 +397,30 @@ func (s *Service) ResolveLocationPlace(ctx context.Context, placeID string) (Loc
 	if err != nil {
 		return LocationResult{}, httpapi.E(502, "PLACES_UNAVAILABLE", "Location provider is temporarily unavailable")
 	}
-	if place.PlaceID != placeID || strings.TrimSpace(place.Name) == "" || !isGeographicPlace(place.Types) || !storepkg.ValidCoordinates(place.Latitude, place.Longitude) {
+	if place.PlaceID != placeID || strings.TrimSpace(place.Name) == "" || !isLocationAnchor(place.Types) || !storepkg.ValidCoordinates(place.Latitude, place.Longitude) {
 		return LocationResult{}, httpapi.E(422, "INVALID_LOCATION", "The selected location could not be verified")
 	}
 	return LocationResult{Provider: "google", PlaceID: place.PlaceID, Name: strings.TrimSpace(place.Name), Address: strings.TrimSpace(place.Address), Latitude: place.Latitude, Longitude: place.Longitude, Types: append([]string{}, place.Types...), Attributions: append([]string{}, place.Attributions...)}, nil
 }
 
-func isGeographicPlace(types []string) bool {
-	// Autocomplete predictions sometimes attach `premise` to a named point of interest.
-	// That made a ferry terminal look selectable here, then fail when Place Details returned
-	// its actual establishment types. A POI is not a manually chosen area even when it also
-	// carries an address-shaped type; provider-level POI markers therefore veto the result.
+func isLocationAnchor(types []string) bool {
+	// A manually entered search origin is not a profile address and it is not visit proof.
+	// It only needs to be an unambiguous point people use to describe where they are. Google
+	// classifies ferry, rail and bus terminals as establishments/POIs, so rejecting every
+	// POI made valid landmark choices appear in autocomplete and then fail on selection.
+	// Accept provider-typed public location anchors, while ordinary shops and businesses
+	// still have no accepted type and therefore remain outside this location picker.
+	providerPOI := false
 	for _, placeType := range types {
-		if placeType == "establishment" || placeType == "point_of_interest" {
-			return false
+		switch placeType {
+		case "airport", "bus_station", "ferry_terminal", "light_rail_station", "subway_station", "train_station", "transit_station":
+			return true
+		case "establishment", "point_of_interest":
+			providerPOI = true
 		}
+	}
+	if providerPOI {
+		return false
 	}
 	for _, placeType := range types {
 		switch placeType {
@@ -427,9 +435,9 @@ func isGeographicPlace(types []string) bool {
 	return false
 }
 
-func containsGeographicPlace(places []Place) bool {
+func containsLocationAnchor(places []Place) bool {
 	for _, place := range places {
-		if isGeographicPlace(place.Types) {
+		if isLocationAnchor(place.Types) {
 			return true
 		}
 	}
