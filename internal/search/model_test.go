@@ -131,6 +131,13 @@ func TestDeterministicUnderstandsWhiteGoodsAsHomeRetail(t *testing.T) {
 	}
 }
 
+func TestDeterministicKeepsSmallAppliancesSeparateFromHomeAccessories(t *testing.T) {
+	intent := Deterministic("küçük ev aletleri")
+	if intent.Scope != ScopeHomeLiving || intent.StoreName != "" || !has(intent.Categories, "small_appliances") || has(intent.Categories, "home_accessories") || !has(intent.ProductTerms, "small_appliance") {
+		t.Fatalf("small appliances parsed as %+v", intent)
+	}
+}
+
 func TestDeterministicRejectsUnrelatedAndMarksChitchatUnclear(t *testing.T) {
 	if got := Deterministic("Yakınımda lastikçi lazım").Scope; got != ScopeOutOfScope {
 		t.Fatalf("lastikçi scope=%q", got)

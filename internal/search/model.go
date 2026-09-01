@@ -267,6 +267,10 @@ var homeConcepts = []homeConcept{
 	{"bedding", "bedding", []string{"yatak", "yastık", "yastik", "baza", "uyku seti", "bedding", "pillow", "mattress", "bettwaren", "kissen", "matratze", "постель", "подушка", "матрас"}, nil},
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
 	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	// Small appliances are their own catalogue category. Treating the phrase as generic
+	// home goods made a product-led search rank decoration and accessory shops, even though
+	// the provider already distinguishes electronics retailers from home-goods stores.
+	{"small_appliances", "small_appliance", []string{"küçük ev aletleri", "kucuk ev aletleri", "small appliance", "small appliances", "küchengeräte", "kuchengerate", "мелкая бытовая техника"}, nil},
 	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
 	// Trade words that name the business plainly and were simply missing. "Mefruşat" is
 	// how a great many Turkish home textile shops describe themselves, and an "uyku

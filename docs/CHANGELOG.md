@@ -8,6 +8,14 @@ repeating the value involved.
 
 ---
 
+## Small-appliance searches no longer fall into home accessories
+
+- “Küçük ev aletleri” was missing from the product vocabulary even though the catalogue
+  already has a dedicated small-appliances category. The search therefore had no precise
+  category signal and could rank decoration and accessory stores.
+- The trade phrase and its shipped-language equivalents now resolve directly to small
+  appliances. The rule is category-wide and uses no store or brand exception.
+
 ## Public transport landmarks can be used as a manual search origin
 
 - Google classifies ferry, rail, metro and bus terminals as establishments and points of
