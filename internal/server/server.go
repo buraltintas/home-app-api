@@ -93,8 +93,11 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 	}
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(appmw.BFF(bff))
-		r.Use(appmw.NewLimiter(180, 40).Middleware)
+		// Identity is read before the limit is counted, so the limit can be counted against
+		// the person rather than against the web server that delivered their request. The
+		// account lookup stays behind the limiter, because that one touches the database.
 		r.Use(appmw.OptionalAuth(tokens))
+		r.Use(appmw.NewLimiter(180, 40).Middleware)
 		r.Use(appmw.ActiveAccount(s.db))
 		r.Use(appmw.UserLocale(s.db))
 		r.Get("/runtime-config", func(w http.ResponseWriter, r *http.Request) {

@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The rate limit counted the web server, not the person
+
+- Reported as store pages failing when opened from a results list and working after a
+  refresh. Two faults meeting.
+- Every request reaches this service from the web server, so the limiter -- which keys on
+  the remote address -- put the entire product in one bucket: 180 a minute, burst 40,
+  shared by everybody. It also ran before authentication, so the per-account key it already
+  had could never apply.
+- A results page then began prefetching every store it listed: two dozen server renders,
+  each a read of this service, arriving at once from that one address. The burst emptied,
+  and the stores the page had just listed came back 429 -- which the web app turned into
+  "this store is no longer in our list" and cached.
+- The limit is now counted against the person: their account when signed in, their browsing
+  session when not, the address only when there is neither. Identity is read before the
+  count; the account lookup stays behind it, because that one touches the database.
+
 ---
 
 ## Small-appliance searches no longer fall into home accessories

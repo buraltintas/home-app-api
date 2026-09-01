@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -99,5 +100,36 @@ func TestOptionalAndRequiredAuth(t *testing.T) {
 	OptionalAuth(m)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })).ServeHTTP(w, invalid)
 	if w.Code != 401 {
 		t.Fatalf("invalid optional token silently became anonymous: %d", w.Code)
+	}
+}
+
+// Every request reaches this service from the web server, so keying the limit on the
+// remote address put the entire product in one bucket. A results page prefetching two
+// dozen store links emptied it, and the stores it had just listed came back as 429s.
+func TestTheLimitCountsThePersonNotTheDeliveringServer(t *testing.T) {
+	visitor := uuid.New().String()
+	other := uuid.New().String()
+
+	shared := httptest.NewRequest(http.MethodGet, "/v1/stores/x", nil)
+	shared.RemoteAddr = "10.0.0.1:4242"
+	mine := shared.Clone(shared.Context())
+	mine.Header.Set("X-Visitor-Session-ID", visitor)
+	theirs := shared.Clone(shared.Context())
+	theirs.Header.Set("X-Visitor-Session-ID", other)
+
+	if limiterKey(mine) == limiterKey(theirs) {
+		t.Fatal("two browsing sessions from the same web server share a bucket")
+	}
+	if limiterKey(mine) != "v:"+visitor {
+		t.Errorf("visitor key = %q", limiterKey(mine))
+	}
+	// Nothing to go on falls back to the address, which is all there is.
+	if limiterKey(shared) != "10.0.0.1" {
+		t.Errorf("fallback key = %q", limiterKey(shared))
+	}
+
+	signedIn := shared.Clone(context.WithValue(shared.Context(), principalKey, Principal{UserID: uuid.New()}))
+	if limiterKey(signedIn) == limiterKey(shared) {
+		t.Error("a signed-in request should be counted against the account")
 	}
 }

@@ -104,10 +104,7 @@ func NewLimiter(perMinute int, burst int) *Limiter {
 }
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := clientIP(r)
-		if p, ok := PrincipalFrom(r.Context()); ok {
-			key = "u:" + p.UserID.String()
-		}
+		key := limiterKey(r)
 		l.mu.Lock()
 		v := l.clients[key]
 		if v == nil {
@@ -133,6 +130,29 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+// Who this request is for, not who delivered it.
+//
+// Every request reaches this service from the web server, so the remote address is the
+// same for all of them -- one bucket for the entire product. It held for a while because
+// nobody generated a burst; then a results page with two dozen store links began prefetching
+// them, twenty-odd renders arriving at once from that single address, and the bucket emptied.
+// The page that emptied it then got 429s for stores that plainly exist.
+//
+// So the key is the person: their account when they are signed in, their browsing session
+// when they are not. The address is only the last resort, for a first request that carries
+// neither.
+func limiterKey(r *http.Request) string {
+	if p, ok := PrincipalFrom(r.Context()); ok {
+		return "u:" + p.UserID.String()
+	}
+	if visitor := strings.TrimSpace(r.Header.Get("X-Visitor-Session-ID")); visitor != "" {
+		if _, err := uuid.Parse(visitor); err == nil {
+			return "v:" + visitor
+		}
+	}
+	return clientIP(r)
+}
+
 func clientIP(r *http.Request) string {
 	h, _, e := net.SplitHostPort(r.RemoteAddr)
 	if e == nil {
