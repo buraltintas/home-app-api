@@ -271,7 +271,22 @@ var homeConcepts = []homeConcept{
 	// home goods made a product-led search rank decoration and accessory shops, even though
 	// the provider already distinguishes electronics retailers from home-goods stores.
 	{"small_appliances", "small_appliance", []string{"küçük ev aletleri", "kucuk ev aletleri", "small appliance", "small appliances", "küchengeräte", "kuchengerate", "мелкая бытовая техника"}, nil},
-	{"household", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, nil},
+	// White goods have their own catalogue category and were being answered out of the
+	// general household bucket -- which also holds hardware shops, paint shops, tile shops
+	// and builders' merchants. A search for "beyaz eşya" was searching 214 stores of which
+	// most sell nothing of the kind.
+	//
+	// The category was there and empty, because the only way into it was Google's
+	// "appliance_store" type and Google does not send it here: it appears in none of the 969
+	// Google records we hold. "Çağrı Beyaz Eşya Dünyası" arrives typed only as
+	// "store, point_of_interest, establishment" -- the provider does not say what it sells.
+	// So the evidence has to be the shop's own sign, which is the trade's own words and
+	// therefore travels to every city.
+	// The extra runs one way and only one way. A white-goods dealer sells kettles and
+	// blenders as well -- ask anyone who has bought a fridge in Turkey -- so a shop that
+	// says "beyaz eşya" answers for small appliances too. The reverse is not true: a shop
+	// that sells kettles is not thereby selling washing machines.
+	{"major_appliances", "home_appliance", []string{"beyaz eşya", "beyaz esya", "white goods", "home appliance", "household appliance", "haushaltsgerät", "haushaltsgerat", "бытовая техника"}, []string{"small_appliances"}},
 	// Trade words that name the business plainly and were simply missing. "Mefruşat" is
 	// how a great many Turkish home textile shops describe themselves, and an "uyku
 	// merkezi" sells beds and nothing else.
@@ -822,11 +837,13 @@ var nonHomeTypes = map[string]bool{
 // Bare "tamir" is left out on the same principle that leaves out "montaj": a maker often
 // repairs what it makes, and "YIKILMAZ MOBİLYA ... imalatı ve tamir" is a furniture shop
 // with a workshop, not a repairman. "Tamirci" names the person, and a shop never calls
-// itself one.
+// itself one. The two-word forms are safe where the single word is not: "tamir bakım" and
+// "bakım onarım" are the trade's name for a maintenance contract, and no shop that sells
+// goods describes itself with either.
 var serviceBusinessStems = []string{
 	"tadilat", "mimar", "müteahhit", "muteahhit",
 	"taahhüt", "taahhut", "restorasyon", "hizmet",
-	"servis", "tamirci",
+	"servis", "tamirci", "tamir bakım", "tamir bakim", "bakım onarım", "bakim onarim",
 }
 
 // namesAService reports whether a store's own name says it sells labour rather than goods.

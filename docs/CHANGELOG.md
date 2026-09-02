@@ -24,6 +24,31 @@ repeating the value involved.
 
 ---
 
+## White goods had a category of their own and nothing could ever enter it
+
+- Searching "beyaz eşya" searched the general household bucket: 214 stores that also hold
+  hardware shops, paint shops, tile shops and builders' merchants. Of 25 stores with "beyaz
+  eşya" in their own name, 24 were filed there and one carried anything more specific.
+- `major_appliances` existed and was empty, because the only way in was Google's
+  `appliance_store` type -- which appears in none of the 969 Google records we hold. "Çağrı
+  Beyaz Eşya Dünyası" arrives typed only as "store, point_of_interest, establishment": the
+  provider does not say what it sells. So the evidence has to be the shop's own sign, which
+  is the trade's own words and therefore holds in a city nobody has visited.
+- A white-goods dealer also sells kettles and blenders, so the category carries
+  `small_appliances` with it -- one way only. A shop that sells kettles is not thereby
+  selling washing machines.
+- Backfilled from names and types already stored, with no provider call:
+  `small_appliances` 14 → 38 stores, `major_appliances` 0 → 19.
+- "Tamir bakım" and "bakım onarım" join the repair words. The two-word forms are safe where
+  bare "tamir" is not: they are the trade's name for a maintenance contract, and no shop
+  selling goods describes itself with either. "Antalya beyaz eşya ve klima tamir bakım
+  onarım montaj" was still being read as a shop.
+- `align-categories` gained `-keep-all`. Retiring a store and giving it a category are two
+  decisions and they were welded together; whoever runs it can now take one and leave the
+  other. The report still says what would have been retired.
+
+---
+
 ## A review is eight scores now
 
 - Eight criteria -- product availability, value, layout, staff attention, staff knowledge,

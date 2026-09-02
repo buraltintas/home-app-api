@@ -1,6 +1,7 @@
 package search
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -124,10 +125,27 @@ func TestDeterministicUnderstandsIndirectHomeNeeds(t *testing.T) {
 	}
 }
 
+// White goods have their own category rather than sharing the general household bucket with
+// hardware shops and builders' merchants, and the search reaches small appliances too --
+// a dealer who sells fridges sells kettles.
 func TestDeterministicUnderstandsWhiteGoodsAsHomeRetail(t *testing.T) {
 	intent := Deterministic("beyaz eşya")
-	if intent.Scope != ScopeHomeLiving || intent.StoreName != "" || !has(intent.Categories, "household") || !has(intent.ProductTerms, "home_appliance") {
+	if intent.Scope != ScopeHomeLiving || intent.StoreName != "" || !has(intent.Categories, "major_appliances") || !has(intent.Categories, "small_appliances") || !has(intent.ProductTerms, "home_appliance") {
 		t.Fatalf("white goods parsed as %+v", intent)
+	}
+	if has(intent.Categories, "household") {
+		t.Fatalf("white goods still fell into the general household bucket: %+v", intent)
+	}
+	// One way only: a shop selling kettles is not thereby selling washing machines.
+	small := Deterministic("küçük ev aletleri")
+	if !has(small.Categories, "small_appliances") || has(small.Categories, "major_appliances") {
+		t.Fatalf("small appliances reached back into white goods: %+v", small)
+	}
+	// And a store named for white goods carries both, which is what makes it findable
+	// under either search.
+	cats := StoreCategories("Çağrı Beyaz Eşya Dünyası", []string{"store", "point_of_interest", "establishment"})
+	if !slices.Contains(cats, "major_appliances") || !slices.Contains(cats, "small_appliances") {
+		t.Fatalf("a white goods shop was classified as %v", cats)
 	}
 }
 

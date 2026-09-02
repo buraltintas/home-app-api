@@ -51,6 +51,12 @@ func main() {
 	fetch := flag.Bool("fetch", false, "ask Google for the types of stores that have none stored")
 	cachePath := flag.String("cache", "/tmp/store-types-all.json", "where fetched types are kept, so a dry run and an apply share one fetch")
 	report := flag.String("report", "/tmp/align-report.txt", "where the full store-by-store decision is written")
+	// Retiring a store and giving it a category are two different decisions, and they were
+	// welded together here: you could not accept the second without also accepting the
+	// first. Whoever runs this is entitled to take one and leave the other, so the retiring
+	// half can be switched off. Nothing is skipped silently -- the report and the summary
+	// still say what would have been retired.
+	keep := flag.Bool("keep-all", false, "do not retire anything; only add the categories the classifier derives")
 	flag.Parse()
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -228,6 +234,9 @@ WHERE store_id=$1::uuid AND provider='google' AND NOT attribution ? 'types'`, st
 
 	inserted, retired := 0, 0
 	for _, st := range all {
+		if st.retire && *keep {
+			continue
+		}
 		if st.retire {
 			tag, err := tx.Exec(ctx, `UPDATE stores SET deleted_at=now() WHERE id=$1::uuid AND deleted_at IS NULL`, st.id)
 			must(err)
@@ -241,7 +250,11 @@ WHERE store_id=$1::uuid AND provider='google' AND NOT attribution ? 'types'`, st
 		}
 	}
 	must(tx.Commit(ctx))
-	fmt.Printf("\nretired %d stores, added %d category rows, stored types for %d stores.\n", retired, inserted, storedTypes)
+	if *keep {
+		fmt.Printf("\n-keep-all: nothing retired. added %d category rows, stored types for %d stores.\n", inserted, storedTypes)
+	} else {
+		fmt.Printf("\nretired %d stores, added %d category rows, stored types for %d stores.\n", retired, inserted, storedTypes)
+	}
 }
 
 func sample(title string, list []store, n int) {

@@ -13,6 +13,7 @@ func TestNamesAServiceReadsRepairTrades(t *testing.T) {
 		"SD Teknik Servis - Beyaz Eşya Tamircisi",
 		"Servis Plus Beyaz Eşya Klima Kombi Servisi",
 		"Hurma beyaz eşya teknik servis",
+		"Antalya beyaz eşya ve klima tamir bakım onarım montaj",
 	}
 	shops := []string{
 		"Akay Ev Aletleri, Antalya (Fakir, Stilevs, Arnica, Korkmaz, DeLonghi, Veito, Braun Yetkili Servis)",
