@@ -1,78 +1,83 @@
-3N Sofra
-3N Sofra Sivas
-ARENA HALI SAHA
-ATU MUTFAK ATÖLYESİ
-Adrasan Sofra
-Aknur Teknik Servis
-Aksoy Teknik Servis (Arzum, Fakir, Fantom, Ufo, Stilevs, DeLonghi, Karaca, Braun Yetkili Servis)
-Anadolu'dan Mutfak
-Ant tekno grup beyaz.eşya klima Küçük ev aletleri tamir bakım servisi
-Antalya Yıldızlar Endüstriyel Day. Türk. Mal. Tic.
-Antalya beyaz eşya ve klima tamir bakım onarım montaj
-AyNa Beauty & Spa|WomenOnly
-Ayna Kuafor
-Aynaa Kuaför
-Beyaz Eşya Servisi
-Beyaz Eşya Servisi - ALP TEKNİK
-Beyaz Eşya Servisi Antalya - AY Teknik
-Bizim Sofra Günlük Ev Yemekleri Kahvaltı
-Büyülü Ayna Studio Coiffeur
-Can Halı Saha
-Ciğer'Cee Mersin Sofrası
-Ece Sofra Restaurant
-Efsane kir sofrasi
-Elektrikli ev aletleri teknik servisi
-English at home
-F & M Mutfak
-Fay teknik Klima kombi beyaz eşya servisi
-Gezer Soğutma - Beyaz Eşya Servisi
-Hurma beyaz eşya teknik servis
-Ipragaz Onur Ticaret
-KARAKAŞ ELEKTRONİK - Televizyon Ekran Değişimi - Televizyon Tamiri - Televizyon Servisi - Tokat Thomson servisi
-KERVAN SOFRASI
-Kartall Teknik Beyaz Eşya Servisi
-Kayseri Sofrası Bahçelievler Börek&Mantı
-Kosar Halı Saha
-Kırık Ayna Bayan Kuaförü
-MARINA SPOR KOMPLEKSI ( HALI SAHA )
-Mardin Olimpik Halı Saha
-Mardin Sebze Ve Meyve Halı
-Nasıroğulları Halı Saha
-Onur Halı Saha
-SD Teknik Servis - Beyaz Eşya Tamircisi
-SOFRA KEBAP
-SOFRA RESTAURANT
-SOFRA ŞARKÜTERİ&TEKEL
-Servis Plus Beyaz Eşya Klima Kombi Servisi
-Sihirli Ayna Bayan Kuafòrü
-Sofra
-Sofra - Günaydın
-Sofra 620
-Sofra Cafe Restaurant Kazım &Sibel Ustanin Yeri
-Sofra Esnaf Lokantası
-Sofra Lahmacun & Pide
-Sofra Restaurant Kaş
-Sofra Restoran ve Cafe
-Sofraya Buyurun
-Tekke Diyarbakır sofrası
-Tencere ya da Tepsi şeklindeki Ev Yemek ve Pasta Ürünleri
-Tokat Dedeler Beyaz Eşya Teknik Servis
-Tokat robot süpürge servisi Dcrobot
-Urfa Sofrası
-Urfa Sultan Sofrası Hurma Sait Usta
-Urfa Teknik Servis Elektronik & Beyaz Eşya Tamir Merkezi
-Urfa sultan sofrası liman
-Ustam Marangoz &bilgisayar teknik servis ve kamera sistemleri
-Uzman Teknik Servis (Beyaz eşya küçük ev aletleri klima televizyon) Eca Kumtel Lüxell Boğazlıyan Yetkili Servisi
-Yöremar Mutfak Kafe Sarkuteri Altinkum
-Zemin Home Cafe - Vintage Cafe
-Zeytinyağlı NEFİS MUTFAK Ev Yemekleri restaurant
-ÇINAR TEKNİK ISITMA ISITMA VE SOĞUTMA KÜÇÜK EV ALETLERİ SERVİS
-ÇKS BEYAZ EŞYA KLİMA SERVİSİ
-Çidem Halı Saha
-Özcan Teknik kırıkkale kombi servisi.beyaz eşya servisi.klima servisi.küçük ev aletleri servisi tamircisi
-Özdemir Halı Saha
-Özçevik Servis - Fakir, Karaca, Homend, Arnica, Libelle, Delonghi, Braun, Thomas, Lura, Goldmaster Yetkili Servisi
-İbrahim Aksin Spor Kompleksi
-Şahhane Sofra
-Şanlıurfa Beyaz Eşya Tamircisi
+# Stores retired on 2026-09-02: businesses that are not home and living.
+# Soft-deleted -- clearing deleted_at brings any of them back whole.
+# id	name
+d1e8018b-95ac-4c64-acbf-1ab3ff403200	3N Sofra
+1563e3ae-1164-4948-a610-75c430d0193d	3N Sofra Sivas
+8d8b470d-b4d6-407e-bd3f-240d2174b233	ARENA HALI SAHA
+50bd3c2b-1af2-40ae-acad-41211bc74a19	ATU MUTFAK ATÖLYESİ
+f95a16fc-4684-4a0e-bbbb-cc865a0134de	Adrasan Sofra
+48a3f00f-5dd3-4598-828a-e8522dc7a0fa	Aknur Teknik Servis
+71e647d8-9ce9-4406-bfee-c9e587053422	Aksoy Teknik Servis (Arzum, Fakir, Fantom, Ufo, Stilevs, DeLonghi, Karaca, Braun Yetkili Servis)
+fc86ae8e-8636-42a2-9467-d969e6751498	Anadolu'dan Mutfak
+84d2fa8a-8b75-4563-ba80-69669a08b71f	Ant tekno grup beyaz.eşya klima Küçük ev aletleri tamir bakım servisi
+601e7266-e869-43d4-938e-084238189d47	Antalya Yıldızlar Endüstriyel Day. Türk. Mal. Tic.
+79f2c14d-0e2b-401d-95b6-c2c0e07e225d	Antalya beyaz eşya ve klima tamir bakım onarım montaj
+b9cb3727-0cdc-44fa-aa07-d7b4079ad265	AyNa Beauty & Spa|WomenOnly
+c73aee82-f9a9-401c-b2cf-5fc3a2ad2e7a	Ayna Kuafor
+c1c04b5b-e722-491f-94c9-85b07c0092f9	Aynaa Kuaför
+2aba0a4c-b2fc-44a6-b50e-def7539a4a95	Beyaz Eşya Servisi
+ec4a9b1a-5990-4433-8ed7-1962069f45f3	Beyaz Eşya Servisi - ALP TEKNİK
+f6b636f7-b481-4c2f-ac55-e07fe7abd6d6	Beyaz Eşya Servisi Antalya - AY Teknik
+94720023-b8c8-4495-81e4-54c001ef7a13	Bizim Sofra Günlük Ev Yemekleri Kahvaltı
+ad2da26e-10c2-48f8-a1c3-8d292829b3d3	Büyülü Ayna Studio Coiffeur
+01120625-bcf4-46bb-a2de-eb52022a3aa8	Can Halı Saha
+81c65723-9eae-4f8b-94e1-98783d5f7357	Ciğer'Cee Mersin Sofrası
+335d410f-98e0-447a-870b-a4dde00237d7	Ece Sofra Restaurant
+a1a2f52e-ac38-4ff5-a785-9c4cb2464ca6	Efsane kir sofrasi
+f7e9de62-94bf-4273-b09a-be6c9cb7019c	Elektrikli ev aletleri teknik servisi
+5605d7a5-00cb-4e9d-a4d8-8812781a8f2b	English at home
+9df6624d-ebd4-408a-9f99-9642c7ca75f0	F & M Mutfak
+5fe99a0b-bf6d-4213-884e-55ca24ae3dd3	Fay teknik Klima kombi beyaz eşya servisi
+241fadc6-944f-49af-9a77-60015a118fc3	Gezer Soğutma - Beyaz Eşya Servisi
+50dcd71b-8dfb-439a-960e-6167d9272c65	Hurma beyaz eşya teknik servis
+3b6a1ba9-be45-4c54-961c-140441af5c72	Ipragaz Onur Ticaret
+14e8edd5-9e8e-4b28-829f-5c1cf6f32774	KARAKAŞ ELEKTRONİK - Televizyon Ekran Değişimi - Televizyon Tamiri - Televizyon Servisi - Tokat Thomson servisi
+cb5de85c-3207-4e17-a78e-73334494bcb5	KERVAN SOFRASI
+a202c3fd-ea8c-4112-b52b-2249ad5bf19a	Kartall Teknik Beyaz Eşya Servisi
+e1b9da09-f28e-44f2-972e-3ab6a1e463bc	Kayseri Sofrası Bahçelievler Börek&Mantı
+ee89eb73-2a5c-41b6-99d9-09dac36f3a64	Kosar Halı Saha
+1ab7067d-12dc-432d-9bbd-97fa783c3b26	Kırık Ayna Bayan Kuaförü
+f4326bc2-24a7-480f-b610-23861a2b16c6	MARINA SPOR KOMPLEKSI ( HALI SAHA )
+2df4b7ce-1803-4e37-89f9-fcebe6705f28	Mardin Olimpik Halı Saha
+e22fa47f-2251-4ef0-b68a-91d4e3375913	Mardin Sebze Ve Meyve Halı
+93472d63-a03a-441a-8560-5cdc40e072fe	Nasıroğulları Halı Saha
+4d1c2fea-5279-4362-a924-21c2934ccb27	Onur Halı Saha
+bccd0da5-0c0b-4d5d-85b2-6e8e77f3e254	SD Teknik Servis - Beyaz Eşya Tamircisi
+959c74b2-8a64-454d-96b0-883de1b68ceb	SOFRA KEBAP
+f8a2771c-efd5-445e-9e37-9f247817a403	SOFRA RESTAURANT
+9e047bdd-d6a7-42f7-8a3b-52744cf9a170	SOFRA ŞARKÜTERİ&TEKEL
+5eaeef88-801e-4ff9-b162-2be88deef510	Servis Plus Beyaz Eşya Klima Kombi Servisi
+648f5b18-274a-4638-9f20-c1be18f69583	Sihirli Ayna Bayan Kuafòrü
+0a7571ed-d147-46ea-a184-d4352bef1a0e	Sofra
+35ee8927-e297-45dc-a959-bb51f7f4c14a	Sofra
+2337e428-f8e5-4148-bf89-8336be670703	Sofra
+62431787-6a95-4c08-bfd0-4dcbce4e339b	Sofra - Günaydın
+2138d984-b245-41e9-8073-56fc1db6fe39	Sofra 620
+f3867e0f-feef-4fb4-841e-7f5028f6a700	Sofra Cafe Restaurant Kazım &Sibel Ustanin Yeri
+e6c80462-eed0-4690-a793-429bfdc8a152	Sofra Esnaf Lokantası
+600df7c0-242e-4343-8df0-f2e39f465dc1	Sofra Lahmacun & Pide
+c90d54f7-2f26-4d68-99e1-8092ac0ce68e	Sofra Restaurant Kaş
+3d07209a-e5af-4130-8279-404293c17d3c	Sofra Restoran ve Cafe
+3ba46e2a-230c-4f48-b550-11a978706d0f	Sofraya Buyurun
+d886ad7b-4aef-481f-af26-e49b8fbebd08	Tekke Diyarbakır sofrası
+3fa92255-3224-4beb-a472-76a47b9db212	Tencere ya da Tepsi şeklindeki Ev Yemek ve Pasta Ürünleri
+5848c821-a253-4a63-92f5-ba9d72981111	Tokat Dedeler Beyaz Eşya Teknik Servis
+05aaefcb-01ee-4c95-b052-ebc7bc85b5e1	Tokat robot süpürge servisi Dcrobot
+f2058940-9c7d-40e2-858e-8bfe85453d59	Urfa Sofrası
+a4133e17-a149-4426-974f-3b0e04e57a34	Urfa Sultan Sofrası Hurma Sait Usta
+e0e623e1-dd67-4d58-b7c3-e0facb01c7ff	Urfa Teknik Servis Elektronik & Beyaz Eşya Tamir Merkezi
+893cab67-d8b7-4241-a957-2c7c2899720b	Urfa sultan sofrası liman
+ded016b2-2de8-4557-82dd-910aa3d1221f	Ustam Marangoz &bilgisayar teknik servis ve kamera sistemleri
+da8387a1-ab6f-4d7a-85f1-ebb317b6d462	Uzman Teknik Servis (Beyaz eşya küçük ev aletleri klima televizyon) Eca Kumtel Lüxell Boğazlıyan Yetkili Servisi
+424a7d1d-80b6-414f-9dc4-7ed69367ad97	Yöremar Mutfak Kafe Sarkuteri Altinkum
+0b8104d5-d76c-46af-96a8-ebea94708687	Zemin Home Cafe - Vintage Cafe
+d0c34fa2-3e6e-4dbb-8d39-3399ab81c702	Zeytinyağlı NEFİS MUTFAK Ev Yemekleri restaurant
+cbc3191c-791d-4be3-ba49-94166aae10dd	ÇINAR TEKNİK ISITMA ISITMA VE SOĞUTMA KÜÇÜK EV ALETLERİ SERVİS
+84dcf39b-ba51-44c3-8dee-819ddd94995a	ÇKS BEYAZ EŞYA KLİMA SERVİSİ
+041a747c-690e-4547-8aa2-cb626764a2ab	Çidem Halı Saha
+6c0de778-0652-4f5f-ac57-d25b7e53734e	Özcan Teknik kırıkkale kombi servisi.beyaz eşya servisi.klima servisi.küçük ev aletleri servisi tamircisi
+1ea27397-82a5-4140-96b8-aff13e6f8017	Özdemir Halı Saha
+19a20412-7252-4127-bdf8-ea13dc01fe75	Özçevik Servis - Fakir, Karaca, Homend, Arnica, Libelle, Delonghi, Braun, Thomas, Lura, Goldmaster Yetkili Servisi
+c8ceb122-5cd9-4bfe-b8ab-9bfa57ad2498	İbrahim Aksin Spor Kompleksi
+e96ce102-f4d0-445a-b51b-df4e31f6bc02	Şahhane Sofra
+3179e49f-3d59-4166-8909-80cd968872dc	Şanlıurfa Beyaz Eşya Tamircisi
