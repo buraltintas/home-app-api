@@ -355,7 +355,28 @@ var foodTradeWords = []string{
 // "tekel" -- and a whole-word match is too tight, because the sign says "Lokantası", not
 // "lokanta". The word has to begin where a word begins; what follows it is grammar.
 func namesAFoodBusiness(normalized, folded string) bool {
-	for _, word := range foodTradeWords {
+	return namesTradeIn(foodTradeWords, normalized, folded)
+}
+
+// Other trades whose own words collide with ours. A "halı saha" is a five-a-side football
+// pitch and contains the word for carpet, which is why two of them were sitting in the
+// catalogue classified as carpet shops: Google typed one "playground" and the other nothing
+// at all, so the sign decided, and the sign says "halı".
+//
+// The compound is the whole point. "Halı" alone is a carpet and must stay one; "halı saha"
+// is never anything but a football pitch, in any city in the country. That is what makes
+// this a rule rather than a patch -- nobody has to add the next pitch by name.
+var otherTradeWords = []string{
+	"hali saha", "halı saha",
+}
+
+// namesAnotherTrade reports whether the sign names a business in some other line of work.
+func namesAnotherTrade(normalized, folded string) bool {
+	return namesAFoodBusiness(normalized, folded) || namesTradeIn(otherTradeWords, normalized, folded)
+}
+
+func namesTradeIn(words []string, normalized, folded string) bool {
+	for _, word := range words {
 		if beginsWord(normalized, word) || beginsWord(foldLatin(folded), foldLatin(word)) {
 			return true
 		}
@@ -1016,7 +1037,7 @@ func isHomeLivingPlace(name string, types []string) bool {
 	// A word that names two trades cannot decide on its own, so the food trade's own
 	// vocabulary gets to veto. "Bizim Sofra Günlük Ev Yemekleri Kahvaltı" tells you what it
 	// is twice over; only one of those readings was being heard.
-	if name != "" && namesAFoodBusiness(normalized, folded) {
+	if name != "" && namesAnotherTrade(normalized, folded) {
 		return false
 	}
 	// Now the shop's own sign. A name that plainly says "perde" or "halı" is what the

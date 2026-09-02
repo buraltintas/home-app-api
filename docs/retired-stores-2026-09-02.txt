@@ -1,5 +1,6 @@
 3N Sofra
 3N Sofra Sivas
+ARENA HALI SAHA
 ATU MUTFAK ATÖLYESİ
 Adrasan Sofra
 Aknur Teknik Servis
@@ -36,6 +37,7 @@ Kırık Ayna Bayan Kuaförü
 MARINA SPOR KOMPLEKSI ( HALI SAHA )
 Mardin Olimpik Halı Saha
 Mardin Sebze Ve Meyve Halı
+Nasıroğulları Halı Saha
 Onur Halı Saha
 SD Teknik Servis - Beyaz Eşya Tamircisi
 SOFRA KEBAP
@@ -43,8 +45,6 @@ SOFRA RESTAURANT
 SOFRA ŞARKÜTERİ&TEKEL
 Servis Plus Beyaz Eşya Klima Kombi Servisi
 Sihirli Ayna Bayan Kuafòrü
-Sofra
-Sofra
 Sofra
 Sofra - Günaydın
 Sofra 620

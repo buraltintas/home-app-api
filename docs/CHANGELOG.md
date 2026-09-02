@@ -24,11 +24,16 @@ repeating the value involved.
 
 ---
 
-## Seventy-eight businesses that were never home and living leave the catalogue
+## Eighty businesses that were never home and living leave the catalogue
 
 - Kebab houses, five-a-side football pitches, hairdressers, spas, a language school, an LPG
   dealer, a fruit-and-vegetable wholesale market, and the repair services. The catalogue
   collected them because anything a search turned up was kept.
+- Two pitches survived the first pass **classified as carpet shops**, which is the trap the
+  classifier already warned about in a comment: Google typed one "playground" and the other
+  nothing at all, so the sign decided, and the sign says "halı". The compound is the fix.
+  "Halı" alone is a carpet and stays one; "halı saha" is never anything but a football pitch,
+  in any city in the country -- so nobody has to add the next pitch by name.
 - **Why having no category was not enough.** A store is found by its name *or* by its
   category -- the two are an OR, not an AND. Taking the categories away closes one of the
   two doors and lowers the ranking; the name still matches. Measured: a search for "ayna"
@@ -43,7 +48,7 @@ repeating the value involved.
 
 ### What this costs in search
 
-- Seventy-eight store URLs stop being served and leave the sitemap. They were indexable
+- Eighty store URLs stop being served and leave the sitemap. They were indexable
   pages with a name, an address and a map, and whatever standing they had goes with them.
 - That is the point of the change rather than a side effect -- a kebab house ranking for
   home and living queries is the damage, not the benefit -- but it is a real loss of pages

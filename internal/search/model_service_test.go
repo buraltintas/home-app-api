@@ -36,3 +36,17 @@ func TestNamesAServiceReadsRepairTrades(t *testing.T) {
 		}
 	}
 }
+
+// "Halı" is a carpet and must stay one; "halı saha" is a football pitch and never anything
+// else. Both of these were sitting in the catalogue classified as carpet shops.
+func TestAFootballPitchIsNotACarpetShop(t *testing.T) {
+	for _, name := range []string{"ARENA HALI SAHA", "Nasıroğulları Halı Saha", "Çidem Halı Saha"} {
+		if cats := StoreCategories(name, []string{"playground", "point_of_interest", "establishment"}); len(cats) != 0 {
+			t.Errorf("%q was classified as %v", name, cats)
+		}
+	}
+	// The word on its own is untouched.
+	if cats := StoreCategories("Tekeli Halı Kilim", []string{"point_of_interest", "establishment"}); len(cats) == 0 {
+		t.Error("a carpet shop lost its category")
+	}
+}
