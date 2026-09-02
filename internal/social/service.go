@@ -36,18 +36,61 @@ func NewService(db *pgxpool.Pool, cfg Config, report *reporting.Service) *Servic
 	return &Service{db: db, cfg: cfg, report: report}
 }
 
+// ReviewCriteria is the review. Eight scores, all of them given, no text and no photograph:
+// what a shop is like is answered the same way by everyone, and answers that can be counted
+// are worth more to the next visitor than a paragraph nobody reads.
+//
+// All eight are required together. A review with three of them filled in is not a shorter
+// review, it is a different measurement, and averaging it against a complete one would
+// quietly make the two mean the same thing.
+type ReviewCriteria struct {
+	Availability   int `json:"availability"`
+	Value          int `json:"value"`
+	Layout         int `json:"layout"`
+	StaffCare      int `json:"staff_care"`
+	StaffKnowledge int `json:"staff_knowledge"`
+	Checkout       int `json:"checkout"`
+	Returns        int `json:"returns"`
+	Cleanliness    int `json:"cleanliness"`
+}
+
+func (c ReviewCriteria) scores() [8]int {
+	return [8]int{c.Availability, c.Value, c.Layout, c.StaffCare, c.StaffKnowledge, c.Checkout, c.Returns, c.Cleanliness}
+}
+
+func (c ReviewCriteria) valid() bool {
+	for _, score := range c.scores() {
+		if score < 1 || score > 5 {
+			return false
+		}
+	}
+	return true
+}
+
+// overall is the rating the store carries away from this review: the mean of the eight,
+// rounded to the nearest star. Nobody is asked for it separately, because a ninth score
+// that is supposed to summarise the other eight is a ninth thing to disagree with.
+func (c ReviewCriteria) overall() int {
+	total := 0
+	for _, score := range c.scores() {
+		total += score
+	}
+	return (total*2 + len(c.scores())) / (len(c.scores()) * 2)
+}
+
 type CreatePost struct {
-	StoreID              uuid.UUID   `json:"store_id"`
-	Text                 string      `json:"text"`
-	Rating               int         `json:"rating"`
-	Latitude             float64     `json:"latitude"`
-	Longitude            float64     `json:"longitude"`
-	AccuracyMeters       *float64    `json:"accuracy_meters"`
-	VisitVerificationID  *uuid.UUID  `json:"visit_verification_id"`
-	MediaIDs             []uuid.UUID `json:"media_ids"`
-	OriginSearchID       *uuid.UUID  `json:"origin_search_id"`
-	OriginSearchResultID *uuid.UUID  `json:"origin_search_result_id"`
-	ContentLanguage      *string     `json:"content_language"`
+	StoreID              uuid.UUID       `json:"store_id"`
+	Text                 string          `json:"text"`
+	Criteria             *ReviewCriteria `json:"criteria"`
+	Rating               int             `json:"rating"`
+	Latitude             float64         `json:"latitude"`
+	Longitude            float64         `json:"longitude"`
+	AccuracyMeters       *float64        `json:"accuracy_meters"`
+	VisitVerificationID  *uuid.UUID      `json:"visit_verification_id"`
+	MediaIDs             []uuid.UUID     `json:"media_ids"`
+	OriginSearchID       *uuid.UUID      `json:"origin_search_id"`
+	OriginSearchResultID *uuid.UUID      `json:"origin_search_result_id"`
+	ContentLanguage      *string         `json:"content_language"`
 }
 
 type VisitVerification struct {
@@ -114,7 +157,23 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	in.Text = strings.TrimSpace(in.Text)
 	textLength := utf8.RuneCountInString(in.Text)
 	hasProof := in.VisitVerificationID != nil
-	if in.StoreID == uuid.Nil || textLength < 3 || textLength > 5000 || in.Rating < 1 || in.Rating > 5 || (!hasProof && !storepkg.ValidCoordinates(in.Latitude, in.Longitude)) || len(in.MediaIDs) > 10 {
+	// The eight criteria are the review, and the overall rating is derived from them rather
+	// than asked for. Text is no longer required alongside them.
+	//
+	// A caller that sends no criteria at all is an older client -- the phone app still posts
+	// a paragraph and one star -- and it is held to the contract it was written against
+	// rather than rejected. Its reviews arrive without the eight, which is exactly what the
+	// nullable columns are for. Sending some of the eight is not a third contract: it is a
+	// broken one, and it is refused.
+	if in.Criteria != nil {
+		if !in.Criteria.valid() {
+			return uuid.Nil, httpapi.E(422, "REVIEW_CRITERIA_INCOMPLETE", "All eight review criteria are required, each between 1 and 5")
+		}
+		in.Rating = in.Criteria.overall()
+	} else if textLength < 3 || in.Rating < 1 || in.Rating > 5 {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if in.StoreID == uuid.Nil || textLength > 5000 || (!hasProof && !storepkg.ValidCoordinates(in.Latitude, in.Longitude)) || len(in.MediaIDs) > 10 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	if hasProof && (in.Latitude != 0 || in.Longitude != 0 || in.AccuracyMeters != nil) {
@@ -182,7 +241,16 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
 	}
 	id := uuid.New()
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, id, user, in.StoreID, in.Text, in.Rating, distance, verifiedAt, in.ContentLanguage)
+	// nil rather than zero for a review that carries no criteria: the columns are nullable
+	// because "not asked" is not a score, and a zero would fail the check constraint anyway.
+	criteria := make([]any, 8)
+	if in.Criteria != nil {
+		for i, score := range in.Criteria.scores() {
+			criteria[i] = score
+		}
+	}
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+		append([]any{id, user, in.StoreID, in.Text, in.Rating, distance, verifiedAt, in.ContentLanguage}, criteria...)...)
 	if e != nil {
 		return uuid.Nil, e
 	}

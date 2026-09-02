@@ -1,0 +1,9 @@
+ALTER TABLE posts
+  DROP COLUMN rating_availability,
+  DROP COLUMN rating_value,
+  DROP COLUMN rating_layout,
+  DROP COLUMN rating_staff_care,
+  DROP COLUMN rating_staff_knowledge,
+  DROP COLUMN rating_checkout,
+  DROP COLUMN rating_returns,
+  DROP COLUMN rating_cleanliness;

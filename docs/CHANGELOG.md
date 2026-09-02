@@ -24,6 +24,26 @@ repeating the value involved.
 
 ---
 
+## A review is eight scores now
+
+- Eight criteria -- product availability, value, layout, staff attention, staff knowledge,
+  checkout speed, returns, cleanliness -- each one to five, all of them required together.
+  Half of them filled in is not a shorter review; it is a different measurement, and
+  averaging it against a complete one would quietly make the two mean the same thing.
+- The store's overall rating is derived from the eight rather than asked for separately. A
+  ninth score that is meant to summarise the other eight is a ninth thing to disagree with.
+- Review text is no longer required. Nothing existing was deleted: every published review
+  keeps its text and photographs in the database, and the web simply stops showing them.
+  Reversible in one line if the decision changes.
+- The eight columns are nullable because every review published before today exists without
+  them and there is no honest value to invent.
+- **The phone app is unchanged and keeps working.** It still posts a paragraph and one star,
+  and a request that carries no criteria is held to the contract it was written against
+  rather than rejected. Its reviews arrive without the eight, which is what the nullable
+  columns are for.
+
+---
+
 ## A search for shops that sell white goods was answering with repairmen
 
 - Twenty-six stores in the catalogue call themselves "servis" or "tamirci" -- "Beyaz Eşya
