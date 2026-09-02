@@ -24,6 +24,25 @@ repeating the value involved.
 
 ---
 
+## A search for shops that sell white goods was answering with repairmen
+
+- Twenty-six stores in the catalogue call themselves "servis" or "tamirci" -- "Beyaz Eşya
+  Servisi", "Aksoy Teknik Servis", "Şanlıurfa Beyaz Eşya Tamircisi". They are repairmen.
+  Nobody visits them to buy a washing machine, and they were coming back under searches for
+  the shops that sell one.
+- Both words are now read the way "tadilat" and "mimarlık" already were: a name that says
+  labour is not a shop. Bare "tamir" is deliberately left out -- a maker often repairs what
+  it makes, and "YIKILMAZ MOBİLYA ... imalatı ve tamir" is a furniture shop with a workshop.
+- What is inside brackets no longer counts. A shop that is also an authorised repair point
+  for the brands it stocks writes that in brackets after its own name -- "Akay Ev Aletleri,
+  Antalya (… Braun Yetkili Servis)" -- while the repairman puts it in the name itself. That
+  is how the brand-authorisation note is written everywhere, so the distinction travels
+  rather than naming any particular shop.
+- Tested against the real names, both the six that must be excluded and the six that must
+  not be.
+
+---
+
 ## Small-appliance searches no longer fall into home accessories
 
 - “Küçük ev aletleri” was missing from the product vocabulary even though the catalogue

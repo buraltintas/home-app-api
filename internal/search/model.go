@@ -813,19 +813,61 @@ var nonHomeTypes = map[string]bool{
 // classified as a decoration store after the rule was written to remove it. Listing the
 // inflections instead would be the same mistake as listing shop names: there is always one
 // more nobody thought of.
+//
+// "Servis" and "tamirci" are the trade's words for repair, and repair is labour. Twenty-six
+// stores in the catalogue carry one of them -- "Beyaz Eşya Servisi", "Aksoy Teknik Servis",
+// "Şanlıurfa Beyaz Eşya Tamircisi" -- and every one is a repairman answering a search for
+// shops that sell white goods. Nobody visits them to buy a washing machine.
+//
+// Bare "tamir" is left out on the same principle that leaves out "montaj": a maker often
+// repairs what it makes, and "YIKILMAZ MOBİLYA ... imalatı ve tamir" is a furniture shop
+// with a workshop, not a repairman. "Tamirci" names the person, and a shop never calls
+// itself one.
 var serviceBusinessStems = []string{
 	"tadilat", "mimar", "müteahhit", "muteahhit",
 	"taahhüt", "taahhut", "restorasyon", "hizmet",
+	"servis", "tamirci",
 }
 
 // namesAService reports whether a store's own name says it sells labour rather than goods.
+//
+// What is inside brackets does not count. A shop that is also an authorised repair point
+// for the brands it stocks says so in brackets after its own name -- "Akay Ev Aletleri,
+// Antalya (Fakir, Stilevs, Arnica, Korkmaz, DeLonghi, Braun Yetkili Servis)" -- and it is a
+// shop. The repairman puts it in the name itself. That is not a habit of one shop or one city:
+// it is how the brand-authorisation note is written, so the rule travels.
 func namesAService(normalized, folded string) bool {
+	normalized = withoutBracketedText(normalized)
+	folded = withoutBracketedText(folded)
 	for _, stem := range serviceBusinessStems {
 		if startsAWord(normalized, folded, stem) {
 			return true
 		}
 	}
 	return false
+}
+
+// withoutBracketedText removes every bracketed run from the text, leaving the name proper.
+// Unclosed brackets take the rest of the string with them, which is the reading that keeps
+// a truncated name from being judged on half a parenthesis.
+func withoutBracketedText(text string) string {
+	var b strings.Builder
+	depth := 0
+	for _, r := range text {
+		switch r {
+		case '(', '[':
+			depth++
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 // startsAWord reports whether the stem begins a word in the text. A letter before it
