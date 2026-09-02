@@ -24,6 +24,37 @@ repeating the value involved.
 
 ---
 
+## Seventy-eight businesses that were never home and living leave the catalogue
+
+- Kebab houses, five-a-side football pitches, hairdressers, spas, a language school, an LPG
+  dealer, a fruit-and-vegetable wholesale market, and the repair services. The catalogue
+  collected them because anything a search turned up was kept.
+- **Why having no category was not enough.** A store is found by its name *or* by its
+  category -- the two are an OR, not an AND. Taking the categories away closes one of the
+  two doors and lowers the ranking; the name still matches. Measured: a search for "ayna"
+  returned eight stores and five of them were hairdressers and a spa, all uncategorised.
+  "Sofra" does the same for kebab houses, because it is a real product word.
+- The verdict is the classifier's, from Google's own types, not a list anybody typed out.
+  Nothing that carries a review, a favourite or a verified visit was touched -- there were
+  none.
+- **Soft-deleted, not destroyed.** `deleted_at` is set; clearing it brings a store back with
+  its photo, rating and history intact. The full list is in
+  `docs/retired-stores-2026-09-02.txt` so the decision can be read and reversed by name.
+
+### What this costs in search
+
+- Seventy-eight store URLs stop being served and leave the sitemap. They were indexable
+  pages with a name, an address and a map, and whatever standing they had goes with them.
+- That is the point of the change rather than a side effect -- a kebab house ranking for
+  home and living queries is the damage, not the benefit -- but it is a real loss of pages
+  and it is stated here so it is not discovered later.
+- One entry is worth a second look before this is treated as settled: "Antalya Yıldızlar
+  Endüstriyel Day. Türk. Mal. Tic." is retired because Google types it `food`. The name
+  says durable consumer goods. If it is a white-goods trader rather than a catering
+  supplier, clearing its `deleted_at` is the whole fix.
+
+---
+
 ## White goods had a category of their own and nothing could ever enter it
 
 - Searching "beyaz eşya" searched the general household bucket: 214 stores that also hold
