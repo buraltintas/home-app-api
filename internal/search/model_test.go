@@ -126,11 +126,11 @@ func TestDeterministicUnderstandsIndirectHomeNeeds(t *testing.T) {
 }
 
 // White goods have their own category rather than sharing the general household bucket with
-// hardware shops and builders' merchants, and the search reaches small appliances too --
-// a dealer who sells fridges sells kettles.
+// hardware shops and builders' merchants. A dealer who sells fridges is classified as
+// selling kettles too, but the reverse category is not added to the shopper's request.
 func TestDeterministicUnderstandsWhiteGoodsAsHomeRetail(t *testing.T) {
 	intent := Deterministic("beyaz eşya")
-	if intent.Scope != ScopeHomeLiving || intent.StoreName != "" || !has(intent.Categories, "major_appliances") || !has(intent.Categories, "small_appliances") || !has(intent.ProductTerms, "home_appliance") {
+	if intent.Scope != ScopeHomeLiving || intent.StoreName != "" || !has(intent.Categories, "major_appliances") || has(intent.Categories, "small_appliances") || !has(intent.ProductTerms, "home_appliance") {
 		t.Fatalf("white goods parsed as %+v", intent)
 	}
 	if has(intent.Categories, "household") {

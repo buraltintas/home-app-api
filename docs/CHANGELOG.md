@@ -6,6 +6,31 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Search no longer mistakes services for the products they handle
+
+- A carpet cleaner contains the word “halı”, and a photography studio can share a retail
+  brand name. Both could therefore inherit a product category and survive name search even
+  when their business is not a shop. Laundry/cleaning provider types, photography types,
+  and the trade-wide phrases “halı yıkama” and “photo/fotoğraf studio” now veto that result.
+- Existing catalogue rows are corrected from provider types and names already stored in
+  the database. No Places request is made, and no store-specific exception was introduced.
+- The catalogue candidate stage now supplies all thirty available result slots and applies
+  distance before category breadth. It previously stopped at twenty and sorted broad
+  multi-category shops behind specialist shops before the final ranker, so nearby catalog
+  stores with an exact category never reached the response at all.
+- Provider text search is treated as a candidate source, not a category verdict. A result
+  outside every requested category is now dropped unless it is an explicit store-name hit
+  or a clearly labelled promoted store. White-goods searches request white goods only;
+  white-goods stores still carry the one-way small-appliance classification, so they remain
+  valid answers when the shopper asks for small appliances without making the reverse true.
+- `storage` is inactive as a browsable category. Its reference row remains so historic
+  search reporting keeps the same dimension and rollback is safe.
+- Deleting a fractional criteria-average review no longer scans its numeric rating into an
+  integer merely to discard it. That mismatch made the delete endpoint fail for ordinary
+  eight-criterion averages such as 4.125.
+
+---
+
 ## The rate limit counted the web server, not the person
 
 - Reported as store pages failing when opened from a results list and working after a

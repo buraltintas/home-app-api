@@ -802,6 +802,10 @@ func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
 		t.Fatalf("deleted comments=%+v err=%v", comments, err)
 	}
 
+	// Criteria averages are fractional; deleting one must not scan its rating into an int.
+	if _, err = db.Exec(t.Context(), `UPDATE posts SET rating=4.125 WHERE id=$1`, postID); err != nil {
+		t.Fatal(err)
+	}
 	if err = socialSvc.DeletePost(t.Context(), other, postID); appCode(err) != "POST_NOT_FOUND" {
 		t.Fatalf("non-owner post delete: %v", err)
 	}

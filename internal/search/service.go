@@ -535,7 +535,10 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// A named store is worth finding wherever it is, so the radius filter is
 		// dropped for name-led intents. Generic queries keep the near-to-far filter.
 		searchRadius := in.RadiusMeters
-		internalLimit := 20
+		// The response can carry thirty stores. Stopping the catalogue at twenty before
+		// Google results are merged made nearby, explicitly categorised stores impossible
+		// to recover later; they never reached the shared ranking stage.
+		internalLimit := 30
 		if intent.StoreName != "" {
 			searchRadius = 0
 			internalLimit = 30
@@ -712,7 +715,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// and living stores, wherever it came from.
 	kept := results[:0]
 	for _, r := range results {
-		if len(r.Categories) > 0 {
+		if len(r.Categories) > 0 && (intent.StoreName != "" || r.Premium || len(intent.Categories) == 0 || categoriesIntersect(r.Categories, intent.Categories)) {
 			kept = append(kept, r)
 		}
 	}
@@ -820,6 +823,17 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		})
 	}
 	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
+}
+
+func categoriesIntersect(storeCategories, requested []string) bool {
+	for _, have := range storeCategories {
+		for _, want := range requested {
+			if have == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mapped is what we already know about a place that exists in our own catalogue: its

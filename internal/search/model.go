@@ -368,6 +368,8 @@ func namesAFoodBusiness(normalized, folded string) bool {
 // this a rule rather than a patch -- nobody has to add the next pitch by name.
 var otherTradeWords = []string{
 	"hali saha", "halı saha",
+	"fotoğraf stüdyo", "fotograf studyo", "fotoğrafçı", "fotografci", "fotoğrafçılık", "fotografcilik",
+	"photo studio", "photography studio", "photographer",
 }
 
 // namesAnotherTrade reports whether the sign names a business in some other line of work.
@@ -426,8 +428,13 @@ func Deterministic(raw string) Intent {
 		for _, term := range concept.terms {
 			if containsNormalized(n, folded, term) {
 				i.Categories = appendUnique(i.Categories, concept.category)
-				for _, category := range concept.extra {
-					i.Categories = appendUnique(i.Categories, category)
+				// Extra categories describe what a store also sells, not what a shopper
+				// requested. A white-goods dealer carries kettles; a kettle retailer is not
+				// therefore a white-goods answer. StoreCategories applies the extras below.
+				if concept.category != "major_appliances" {
+					for _, category := range concept.extra {
+						i.Categories = appendUnique(i.Categories, category)
+					}
 				}
 				i.ProductTerms = appendUnique(i.ProductTerms, concept.product)
 				break
@@ -788,6 +795,8 @@ var foreignTradeTypes = map[string]bool{
 	"pharmacy": true, "drugstore": true, "hospital": true, "medical_clinic": true,
 	"dentist": true, "doctor": true, "veterinary_care": true,
 	"beauty_salon": true, "hair_salon": true, "hair_care": true, "nail_salon": true, "spa": true,
+	"photography_studio": true, "photographer": true,
+	"laundry": true, "dry_cleaning": true, "cleaning_service": true,
 	"school": true, "primary_school": true, "secondary_school": true, "university": true,
 	"educational_institution": true, "child_care_agency": true, "preschool": true,
 	"bank": true, "atm": true, "insurance_agency": true, "real_estate_agency": true,
@@ -811,6 +820,8 @@ var nonHomeTypes = map[string]bool{
 	"food_store": true, "grocery_store": true, "pharmacy": true, "drugstore": true,
 	"hospital": true, "medical_clinic": true, "dentist": true, "doctor": true,
 	"beauty_salon": true, "hair_salon": true, "hair_care": true, "nail_salon": true, "spa": true,
+	"photography_studio": true, "photographer": true,
+	"laundry": true, "dry_cleaning": true, "cleaning_service": true,
 	"school": true, "primary_school": true, "secondary_school": true, "university": true,
 	"educational_institution": true, "child_care_agency": true, "preschool": true,
 	"bank": true, "atm": true, "insurance_agency": true, "real_estate_agency": true,
@@ -865,6 +876,7 @@ var serviceBusinessStems = []string{
 	"tadilat", "mimar", "müteahhit", "muteahhit",
 	"taahhüt", "taahhut", "restorasyon", "hizmet",
 	"servis", "tamirci", "tamir bakım", "tamir bakim", "bakım onarım", "bakim onarim",
+	"halı yıkama", "hali yikama", "carpet cleaning",
 }
 
 // namesAService reports whether a store's own name says it sells labour rather than goods.

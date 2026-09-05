@@ -611,8 +611,7 @@ func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) error {
 	}
 	defer tx.Rollback(ctx)
 	var store uuid.UUID
-	var rating int
-	e = tx.QueryRow(ctx, `UPDATE posts SET deleted_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING store_id,rating`, post, user).Scan(&store, &rating)
+	e = tx.QueryRow(ctx, `UPDATE posts SET deleted_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING store_id`, post, user).Scan(&store)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return httpapi.E(404, "POST_NOT_FOUND", "Post not found or not owned by you")
 	}

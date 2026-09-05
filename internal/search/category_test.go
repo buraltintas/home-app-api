@@ -105,10 +105,46 @@ func TestNonHomeBusinessesAreTurnedAwayAtTheDoor(t *testing.T) {
 		"contractor":      {"general_contractor", "point_of_interest", "service"},
 		"apartments":      {"apartment_complex", "point_of_interest", "service"},
 		"nursery":         {"child_care_agency", "point_of_interest", "service"},
+		"photo studio":    {"photography_studio", "point_of_interest", "establishment"},
 	}
 	for what, types := range away {
 		if IsHomeLivingPlace(types) {
 			t.Errorf("%s katalogda yeri yok, ama kabul edildi: %v", what, types)
+		}
+	}
+}
+
+// A carpet cleaner works on carpets but is not a shop that sells them. The provider type
+// is preferred when available and the trade's own wording covers otherwise sparse Places
+// records; neither rule depends on a particular business name.
+func TestCarpetCleanersAreNotCarpetStores(t *testing.T) {
+	cases := []struct {
+		name  string
+		types []string
+	}{
+		{"Antalya Halı Yıkama Fabrikası", []string{"laundry", "service", "point_of_interest"}},
+		{"Özen Halı Yıkama", []string{"point_of_interest", "establishment"}},
+		{"City Carpet Cleaning", nil},
+	}
+	for _, c := range cases {
+		if IsHomeLivingStore(c.name, c.types) {
+			t.Errorf("IsHomeLivingStore(%q, %v) = true, want false", c.name, c.types)
+		}
+		if got := StoreCategories(c.name, c.types); len(got) != 0 {
+			t.Errorf("StoreCategories(%q, %v) = %v, want none", c.name, c.types, got)
+		}
+	}
+
+	if !IsHomeLivingStore("Anadolu Halı ve Kilim", []string{"carpet_store", "store"}) {
+		t.Error("a carpet retailer was rejected with the cleaning services")
+	}
+}
+
+func TestPhotographyStudiosNeverBecomeHomeStoresFromTheirNames(t *testing.T) {
+	types := []string{"photography_studio", "store", "point_of_interest"}
+	for _, name := range []string{"Karaca Fotoğraf Stüdyosu", "Home Photo Studio", "Dekor Fotoğrafçılık"} {
+		if IsHomeLivingStore(name, types) {
+			t.Errorf("IsHomeLivingStore(%q, photography studio) = true, want false", name)
 		}
 	}
 }
