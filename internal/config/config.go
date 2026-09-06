@@ -172,7 +172,7 @@ func Load() (Config, error) {
 	}
 	// Conservative on purpose. The first version of the gate is not trying to reach the
 	// ceiling the historical data suggests; it is trying not to make search worse.
-	if c.SearchGateMinResults, err = integer("SEARCH_GATE_MIN_RESULTS", 8); err != nil {
+	if c.SearchGateMinResults, err = integer("SEARCH_GATE_MIN_RESULTS", 30); err != nil {
 		return c, err
 	}
 	if c.SearchGateRelevanceSample, err = integer("SEARCH_GATE_RELEVANCE_SAMPLE", 5); err != nil {

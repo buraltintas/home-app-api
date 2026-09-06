@@ -28,7 +28,7 @@ type SufficiencyPolicy struct {
 	// Enabled is the feature flag. While it is false the search behaves exactly as it
 	// does in production today: the provider is asked in parallel, every time.
 	Enabled bool
-	// MinResults: how many local results count as a filled first screen.
+	// MinResults: how many local results count as a filled result page.
 	MinResults int
 	// MinRelevance: how well, from 0 to 1, the top local results must match the request.
 	MinRelevance float64
@@ -52,7 +52,7 @@ type SufficiencyPolicy struct {
 func DefaultSufficiencyPolicy() SufficiencyPolicy {
 	return SufficiencyPolicy{
 		Enabled:              false,
-		MinResults:           8,
+		MinResults:           30,
 		MinRelevance:         0.6,
 		RelevanceSample:      5,
 		MinCoverage:          40,

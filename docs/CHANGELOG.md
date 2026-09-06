@@ -6,6 +6,18 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A partial local result page no longer prevents provider discovery
+
+- The local-first gate considered eight matching stores enough to skip Google even though
+  the response can show thirty. Real searches demonstrated the cost: a carpet search in
+  Izmir stopped at 15 local results after the provider had previously returned 18, and a
+  home-textile search stopped at 22 until a name search happened to import the missing
+  store.
+- A category search now stays eligible for provider discovery until all thirty local
+  candidate slots are filled. This deliberately favours catalogue completeness over the
+  lower call count; the existing relevance, coverage, explicit-name and cache safeguards
+  are unchanged.
+
 ## Search no longer mistakes services for the products they handle
 
 - A carpet cleaner contains the word “halı”, and a photography studio can share a retail

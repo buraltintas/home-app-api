@@ -15,7 +15,7 @@ func policy() SufficiencyPolicy {
 // The whole point of the gate: a city we know well, asked an ordinary question, is
 // answered out of our own catalogue and the provider is never troubled.
 func TestDenseCatalogueAnswersAGenericQueryOnItsOwn(t *testing.T) {
-	d := policy().decide(sufficiency{ResultCount: 14, Relevance: 0.9, Coverage: 300})
+	d := policy().decide(sufficiency{ResultCount: 30, Relevance: 0.9, Coverage: 300})
 	if !d.LocalOnly {
 		t.Fatalf("expected a local-only search, got reasons %v", d.Reasons)
 	}
@@ -60,11 +60,15 @@ func TestManyResultsAreNotEnoughWhenNoneOfThemMatch(t *testing.T) {
 	}
 }
 
-// Half a screen of results is not a screen of results, however good they are.
+// A partial result page is not a full answer, however good the rows are. Production
+// evidence showed the old threshold accepting 15 carpet shops in Izmir and 22 textile
+// shops in Antalya while the provider still knew about additional matching stores.
 func TestTooFewResultsReachTheProvider(t *testing.T) {
-	d := policy().decide(sufficiency{ResultCount: 3, Relevance: 1, Coverage: 500})
-	if !hasReason(d, reasonInsufficientResults) {
-		t.Fatalf("reasons=%v, want %s", d.Reasons, reasonInsufficientResults)
+	for _, resultCount := range []int{3, 15, 22, 29} {
+		d := policy().decide(sufficiency{ResultCount: resultCount, Relevance: 1, Coverage: 500})
+		if !hasReason(d, reasonInsufficientResults) {
+			t.Fatalf("result count %d: reasons=%v, want %s", resultCount, d.Reasons, reasonInsufficientResults)
+		}
 	}
 }
 
