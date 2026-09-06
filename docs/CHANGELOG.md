@@ -15,6 +15,9 @@ repeating the value involved.
 - Out-of-domain search guidance now uses the product-owner-approved concise home-and-living
   message and no longer returns rotating query examples. Clients can offer the canonical
   category list as the recovery path instead.
+- The private profile now includes the next contribution level and the exact number of
+  reviews remaining. The threshold table stays server-owned, so web and mobile cannot
+  silently disagree as levels evolve.
 
 ## A partial local result page no longer prevents provider discovery
 

@@ -246,6 +246,11 @@ Platform statistics are distinct from Google statistics:
 | `google.rating`, `rating_count` | Google provider only; never merged into platform rating. |
 | `google.business_status` | Google provider status. When `CLOSED_TEMPORARILY` or `CLOSED_PERMANENTLY`, show a prominent warning and let the person verify in Google Maps before travelling. Do not infer closure from review age. |
 
+The private `GET /v1/me` profile also returns `next_level` and
+`reviews_to_next_level`. The API owns the contribution thresholds; clients must not copy
+the threshold table. `next_level` is omitted and the remaining count is zero at the
+highest level.
+
 Hybrid search `source` is `internal`, `google`, or `google+platform`. An internal/platform result has `id` and `platform`; a Google-only result omits `id` and has `google`; an enriched result has both. Results with at least one proximity-verified Boşa Gezme! review rank ahead of provider-only results; `platform` and `google` ratings must still be labelled and rendered separately. Before opening a platform detail/favoriting/reviewing a Google-only result, authenticated clients call `/stores/resolve-external`, then use the returned internal ID. [`store-google-only.json`](./frontend-fixtures/store-google-only.json) is intentionally a search response fragment because no Google-only store-detail endpoint exists.
 
 Favoriting a store and liking a post are separate idempotent relationships. Their POST/DELETE routes return 204; viewer booleans come from later reads. Counts change only when the relationship actually changes.
