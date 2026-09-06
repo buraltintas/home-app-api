@@ -216,14 +216,10 @@ func TestStoreNameDropsOnlyAnEdgeLocation(t *testing.T) {
 	}
 }
 
-func TestGuidanceIsLocalizedAndRotatesExamples(t *testing.T) {
-	first := guidanceFor("tr", ScopeUnclear)
-	second := guidanceFor("tr", ScopeUnclear)
-	if first.Code != "HOME_LIVING_ONLY" || first.Message == "" || len(first.Examples) != 2 || len(second.Examples) != 2 {
-		t.Fatalf("invalid guidance: %+v %+v", first, second)
-	}
-	if first.Examples[0] == second.Examples[0] {
-		t.Fatalf("examples did not rotate: %+v %+v", first.Examples, second.Examples)
+func TestGuidanceIsLocalizedWithoutQuerySuggestions(t *testing.T) {
+	guidance := guidanceFor("tr", ScopeUnclear)
+	if guidance.Code != "HOME_LIVING_ONLY" || guidance.Message != "Yalnızca ev ve yaşam ürünleri bulabilirim." || len(guidance.Examples) != 0 {
+		t.Fatalf("invalid guidance: %+v", guidance)
 	}
 }
 

@@ -242,6 +242,7 @@ Platform statistics are distinct from Google statistics:
 | Data | Meaning |
 |---|---|
 | `platform.average_rating`, `rating_count`, `review_count`, `favorite_count`, `post_count` | Boşa Gezme! community only. Rating/review/post counts currently advance together for created reviews. |
+| `criteria_averages` | Store-detail only and omitted until a complete eight-criterion review exists. Contains `review_count` plus `availability`, `value`, `layout`, `staff_care`, `staff_knowledge`, `checkout`, `returns`, and `cleanliness` means. Legacy rating-only reviews are excluded from these means. |
 | `google.rating`, `rating_count` | Google provider only; never merged into platform rating. |
 | `google.business_status` | Google provider status. When `CLOSED_TEMPORARILY` or `CLOSED_PERMANENTLY`, show a prominent warning and let the person verify in Google Maps before travelling. Do not infer closure from review age. |
 

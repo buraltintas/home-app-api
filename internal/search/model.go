@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
 
@@ -1352,18 +1351,15 @@ func rankResults(results []Result, located, nameLed bool) {
 	})
 }
 
-var guidanceRotation atomic.Uint64
-
 type guidanceCopy struct {
-	message  string
-	examples []string
+	message string
 }
 
 var localizedGuidance = map[i18n.Locale]guidanceCopy{
-	i18n.LocaleTR: {"İsteğinizi anlayamadım. Yalnızca ev ürünleri mağazaları bulabilirim.", []string{"Perdelerimi yenilemek istiyorum", "Nevresim takımı almak istiyorum", "Çeyiz alışverişi yapmak istiyorum", "Modern bir avize arıyorum", "Yeni bir yemek takımı lazım", "Salonuma uygun bir halı arıyorum"}},
-	i18n.LocaleEN: {"I couldn't understand that request. I can only find stores for home and living products.", []string{"I want to replace my curtains", "I need a new bedding set", "I'm shopping for home essentials", "I'm looking for a modern chandelier", "I need a new dinnerware set", "I'm looking for a rug for my living room"}},
-	i18n.LocaleDE: {"Ich konnte diese Anfrage nicht verstehen. Ich kann nur Geschäfte für Wohn- und Haushaltsprodukte finden.", []string{"Ich möchte meine Vorhänge erneuern", "Ich brauche neue Bettwäsche", "Ich suche Haushaltswaren für meine Aussteuer", "Ich suche einen modernen Kronleuchter", "Ich brauche ein neues Geschirrset", "Ich suche einen Teppich für mein Wohnzimmer"}},
-	i18n.LocaleRU: {"Не удалось понять запрос. Я могу искать только магазины товаров для дома.", []string{"Я хочу обновить шторы", "Мне нужен новый комплект постельного белья", "Я покупаю товары для дома", "Я ищу современную люстру", "Мне нужен новый столовый сервиз", "Я ищу ковёр для гостиной"}},
+	i18n.LocaleTR: {"Yalnızca ev ve yaşam ürünleri bulabilirim."},
+	i18n.LocaleEN: {"I can only find home and living products."},
+	i18n.LocaleDE: {"Ich kann nur Wohn- und Haushaltsprodukte finden."},
+	i18n.LocaleRU: {"Я могу искать только товары для дома."},
 }
 
 func guidanceFor(locale i18n.Locale, reason string) *Guidance {
@@ -1371,6 +1367,5 @@ func guidanceFor(locale i18n.Locale, reason string) *Guidance {
 	if !ok {
 		c = localizedGuidance[i18n.DefaultLocale]
 	}
-	start := int(guidanceRotation.Add(1)-1) % len(c.examples)
-	return &Guidance{Code: "HOME_LIVING_ONLY", Reason: reason, Message: c.message, Examples: []string{c.examples[start], c.examples[(start+1)%len(c.examples)]}}
+	return &Guidance{Code: "HOME_LIVING_ONLY", Reason: reason, Message: c.message, Examples: []string{}}
 }

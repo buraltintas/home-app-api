@@ -32,6 +32,21 @@ type Stats struct {
 	FavoriteCount int     `json:"favorite_count"`
 	PostCount     int     `json:"post_count"`
 }
+
+// CriteriaAverages keeps the eight first-hand review dimensions separate from the
+// overall community score. Count is the number of complete criteria reviews behind
+// these means; legacy reviews without criteria do not dilute them with zeroes.
+type CriteriaAverages struct {
+	ReviewCount    int     `json:"review_count"`
+	Availability   float64 `json:"availability"`
+	Value          float64 `json:"value"`
+	Layout         float64 `json:"layout"`
+	StaffCare      float64 `json:"staff_care"`
+	StaffKnowledge float64 `json:"staff_knowledge"`
+	Checkout       float64 `json:"checkout"`
+	Returns        float64 `json:"returns"`
+	Cleanliness    float64 `json:"cleanliness"`
+}
 type Item struct {
 	ID        uuid.UUID `json:"id"`
 	Name      string    `json:"name"`
@@ -46,20 +61,21 @@ type Item struct {
 	Phone string `json:"phone,omitempty"`
 	// The store's own website. Shown on the store page so somebody can check stock or
 	// opening hours without leaving for a search engine.
-	Website              string           `json:"website,omitempty"`
-	Latitude             float64          `json:"latitude"`
-	Longitude            float64          `json:"longitude"`
-	DistanceMeters       *float64         `json:"distance_meters,omitempty"`
-	Categories           []string         `json:"categories"`
-	CategoryLabels       []string         `json:"category_labels"`
-	LocalizedDescription string           `json:"localized_description,omitempty"`
-	Platform             Stats            `json:"platform"`
-	IsPremium            bool             `json:"is_premium"`
-	IsCatalogStore       bool             `json:"is_catalog_store"`
-	ViewerFavorited      bool             `json:"viewer_has_favorited"`
-	ViewerHasReviewed    bool             `json:"viewer_has_reviewed"`
-	ExternalSources      []ExternalSource `json:"external_sources,omitempty"`
-	Photo                *Photo           `json:"photo,omitempty"`
+	Website              string            `json:"website,omitempty"`
+	Latitude             float64           `json:"latitude"`
+	Longitude            float64           `json:"longitude"`
+	DistanceMeters       *float64          `json:"distance_meters,omitempty"`
+	Categories           []string          `json:"categories"`
+	CategoryLabels       []string          `json:"category_labels"`
+	LocalizedDescription string            `json:"localized_description,omitempty"`
+	Platform             Stats             `json:"platform"`
+	CriteriaAverages     *CriteriaAverages `json:"criteria_averages,omitempty"`
+	IsPremium            bool              `json:"is_premium"`
+	IsCatalogStore       bool              `json:"is_catalog_store"`
+	ViewerFavorited      bool              `json:"viewer_has_favorited"`
+	ViewerHasReviewed    bool              `json:"viewer_has_reviewed"`
+	ExternalSources      []ExternalSource  `json:"external_sources,omitempty"`
+	Photo                *Photo            `json:"photo,omitempty"`
 }
 
 // Photo is the single effective store image. An administrator's upload wins everywhere;
@@ -107,9 +123,28 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 	if errors.Is(e, pgx.ErrNoRows) {
 		return x, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
+	if e != nil {
+		return x, e
+	}
 	x.DistanceMeters = distance
 	assignPhoto(&x, coverMedia, photoName, photoAttributions)
-	return x, e
+	var criteria CriteriaAverages
+	e = s.db.QueryRow(ctx, `SELECT count(rating_availability)::int,
+ coalesce(avg(rating_availability),0)::float8,coalesce(avg(rating_value),0)::float8,
+ coalesce(avg(rating_layout),0)::float8,coalesce(avg(rating_staff_care),0)::float8,
+ coalesce(avg(rating_staff_knowledge),0)::float8,coalesce(avg(rating_checkout),0)::float8,
+ coalesce(avg(rating_returns),0)::float8,coalesce(avg(rating_cleanliness),0)::float8
+ FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND rating_availability IS NOT NULL`, id).Scan(
+		&criteria.ReviewCount, &criteria.Availability, &criteria.Value, &criteria.Layout,
+		&criteria.StaffCare, &criteria.StaffKnowledge, &criteria.Checkout, &criteria.Returns,
+		&criteria.Cleanliness)
+	if e != nil {
+		return x, e
+	}
+	if criteria.ReviewCount > 0 {
+		x.CriteriaAverages = &criteria
+	}
+	return x, nil
 }
 
 // IndexEntry is the minimum a search engine needs to crawl a store: where it lives,

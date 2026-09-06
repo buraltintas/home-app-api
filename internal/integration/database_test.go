@@ -747,9 +747,14 @@ func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
 	storeID := store(t, db, 41, 29)
 	_, stores, socialSvc, _, _ := services(t, db, googleStub{}, nil)
 	longGermanPost := strings.Repeat("ä", 5000)
-	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Rating: 5, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy()})
+	criteria := social.ReviewCriteria{Availability: 5, Value: 4, Layout: 3, StaffCare: 2, StaffKnowledge: 1, Checkout: 2, Returns: 3, Cleanliness: 4}
+	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Criteria: &criteria, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy()})
 	if err != nil {
 		t.Fatal(err)
+	}
+	detail, err := stores.Get(t.Context(), storeID, &author, nil, nil)
+	if err != nil || detail.CriteriaAverages == nil || detail.CriteriaAverages.ReviewCount != 1 || detail.CriteriaAverages.Availability != 5 || detail.CriteriaAverages.StaffKnowledge != 1 {
+		t.Fatalf("criteria averages=%+v err=%v", detail.CriteriaAverages, err)
 	}
 
 	for i := 0; i < 2; i++ {

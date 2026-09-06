@@ -6,6 +6,16 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Store detail exposes comparable review-criteria averages
+
+- Store detail now returns the mean of each of the eight first-hand review criteria,
+  together with the number of complete criteria reviews behind those means. Legacy
+  reviews without criteria remain part of the overall community score but do not dilute
+  a criterion average with zero.
+- Out-of-domain search guidance now uses the product-owner-approved concise home-and-living
+  message and no longer returns rotating query examples. Clients can offer the canonical
+  category list as the recovery path instead.
+
 ## A partial local result page no longer prevents provider discovery
 
 - The local-first gate considered eight matching stores enough to skip Google even though
