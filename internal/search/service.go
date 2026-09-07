@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/rand/v2"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -605,6 +606,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		if e != nil {
 			return Response{}, e
 		}
+		// A catalogue row is not permission to turn an explicit service request back into
+		// retail. Old imports can retain a stale category until their data migration runs;
+		// the trade-wide wording remains authoritative on the request path as well.
+		named = slices.DeleteFunc(named, func(item storepkg.Item) bool {
+			normalized := normalizeText(item.Name)
+			return namesAService(normalized, foldLatin(normalized))
+		})
 		// A partial or previously unseen store name cannot be recognized by a finite
 		// brand list. Ask the provider for unclear text and let the same generic store
 		// classifier used for every city decide whether the matches sell home goods.

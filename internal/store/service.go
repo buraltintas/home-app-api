@@ -368,7 +368,12 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
  coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
  coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.deleted_at IS NULL AND to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')) @@ `+fn+`('simple',$1)
+ WHERE s.deleted_at IS NULL AND (
+   to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')) @@ `+fn+`('simple',$1)
+   OR (regexp_replace(lower($1),'[^[:alnum:]]','','g')<>''
+      AND regexp_replace(lower(coalesce(s.name,'')||coalesce(s.brand_name,'')),'[^[:alnum:]]','','g')
+          LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%')
+ )
  GROUP BY s.id,ss.store_id
  ORDER BY ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1)) DESC,
  CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END LIMIT $4`, q, lat, lon, limit, i18n.FromContext(ctx), viewer)

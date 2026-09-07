@@ -27,7 +27,7 @@ type Intent struct {
 	NormalizedQuery string      `json:"normalized_query"`
 	StoreName       string      `json:"store_name"`
 	LocationText    string      `json:"location_text"`
-	Categories      []string    `json:"categories" jsonschema:"enum=furniture,enum=home_textile,enum=lighting,enum=decoration,enum=kitchenware,enum=bathroom,enum=carpet,enum=curtain,enum=bedding,enum=tableware,enum=storage,enum=home_accessories,enum=household"`
+	Categories      []string    `json:"categories" jsonschema:"enum=furniture,enum=home_textile,enum=lighting,enum=decoration,enum=kitchenware,enum=bathroom,enum=carpet,enum=curtain,enum=bedding,enum=tableware,enum=home_accessories,enum=household,enum=major_appliances,enum=small_appliances"`
 	ProductTerms    []string    `json:"product_terms"`
 	StyleTerms      []string    `json:"style_terms"`
 	PriceIntent     string      `json:"price_intent" jsonschema:"enum=,enum=budget,enum=midrange,enum=premium"`
@@ -265,7 +265,9 @@ var homeConcepts = []homeConcept{
 	// reason -- they name the goods, not one shop that sells them.
 	{"bedding", "bedding", []string{"yatak", "yastık", "yastik", "baza", "uyku seti", "bedding", "pillow", "mattress", "bettwaren", "kissen", "matratze", "постель", "подушка", "матрас"}, nil},
 	{"tableware", "tableware", []string{"sofra", "tabak", "tableware", "geschirr", "посуда"}, nil},
-	{"storage", "storage", []string{"depolama", "dolap", "storage", "aufbewahrung", "хранение", "шкаф"}, nil},
+	// Storage was retired as a browse category. A cabinet is still a real home product;
+	// warehouse/storage services are rejected below instead of being treated as retail.
+	{"furniture", "cabinet", []string{"dolap", "wardrobe", "schrank", "шкаф"}, nil},
 	// Small appliances are their own catalogue category. Treating the phrase as generic
 	// home goods made a product-led search rank decoration and accessory shops, even though
 	// the provider already distinguishes electronics retailers from home-goods stores.
@@ -410,6 +412,17 @@ func Deterministic(raw string) Intent {
 	n := normalizeText(raw)
 	folded := foldLatin(n)
 	i := Intent{Scope: ScopeUnclear, QueryLanguage: DetectLanguage(raw), NormalizedQuery: n, Categories: []string{}, ProductTerms: []string{}, StyleTerms: []string{}, Attributes: []string{}, SortPreference: "relevance", SemanticTerms: []string{}}
+	if namesAService(n, folded) {
+		i.Scope = ScopeOutOfScope
+		return i
+	}
+	// The retired "Depolama" category confused warehouse services with furniture used
+	// for organising a home. These words name the former; product words such as "dolap"
+	// continue through the ordinary home-product concepts above.
+	if containsAnyFolded(n, folded, "depo", "depolama", "warehouse", "warehousing", "lagerhaus", "склад") {
+		i.Scope = ScopeOutOfScope
+		return i
+	}
 	if containsAnyFolded(n, folded, "çeyiz", "ceyiz", "dowry", "aussteuer", "приданое") {
 		i.Categories = appendUnique(i.Categories, "home_textile")
 		i.Categories = appendUnique(i.Categories, "bedding")
@@ -539,7 +552,22 @@ func nameMatches(resultName, storeName string) bool {
 		return false
 	}
 	normalized := normalizeText(resultName)
-	return containsNormalized(normalized, foldLatin(normalized), storeName)
+	if containsNormalized(normalized, foldLatin(normalized), storeName) {
+		return true
+	}
+	// Apostrophes are decoration in a business name, not identity. Google and a person
+	// may spell the same sign as “Willa’s” and “Willas”; compare the letters and digits
+	// once more so punctuation cannot make the store cease to be its own name.
+	compact := func(value string) string {
+		return strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				return r
+			}
+			return -1
+		}, foldLatin(normalizeText(value)))
+	}
+	needle := compact(storeName)
+	return needle != "" && strings.Contains(compact(resultName), needle)
 }
 
 func containsAnyFolded(normalized, folded string, terms ...string) bool {
@@ -661,7 +689,7 @@ func Validate(i Intent) error {
 	if i.QueryLanguage != "" && !i18n.IsSupported(i.QueryLanguage) {
 		return fmt.Errorf("unsupported query language")
 	}
-	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "storage": true, "home_accessories": true, "household": true}
+	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "home_accessories": true, "household": true, "major_appliances": true, "small_appliances": true}
 	if utf8.RuneCountInString(i.NormalizedQuery) > 500 || utf8.RuneCountInString(i.StoreName) > 160 || utf8.RuneCountInString(i.LocationText) > 120 {
 		return fmt.Errorf("intent text too long")
 	}
@@ -874,7 +902,7 @@ var nonHomeTypes = map[string]bool{
 var serviceBusinessStems = []string{
 	"tadilat", "mimar", "müteahhit", "muteahhit",
 	"taahhüt", "taahhut", "restorasyon", "hizmet",
-	"servis", "tamirci", "tamir bakım", "tamir bakim", "bakım onarım", "bakim onarim",
+	"servis", "tamirci", "tamirhane", "tamir bakım", "tamir bakim", "bakım onarım", "bakim onarim",
 	"halı yıkama", "hali yikama", "carpet cleaning",
 }
 

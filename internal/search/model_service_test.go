@@ -14,6 +14,7 @@ func TestNamesAServiceReadsRepairTrades(t *testing.T) {
 		"Servis Plus Beyaz Eşya Klima Kombi Servisi",
 		"Hurma beyaz eşya teknik servis",
 		"Antalya beyaz eşya ve klima tamir bakım onarım montaj",
+		"Konyaaltı Beyaz Eşya Tamirhanesi",
 	}
 	shops := []string{
 		"Akay Ev Aletleri, Antalya (Fakir, Stilevs, Arnica, Korkmaz, DeLonghi, Veito, Braun Yetkili Servis)",
@@ -34,6 +35,17 @@ func TestNamesAServiceReadsRepairTrades(t *testing.T) {
 		if namesAService(normalized, foldLatin(normalized)) {
 			t.Errorf("%q is a shop, not a service", name)
 		}
+	}
+}
+
+func TestRetiredStorageIntentDoesNotReturnHomeShops(t *testing.T) {
+	for _, query := range []string{"depo", "depolama", "warehouse"} {
+		if intent := Deterministic(query); intent.Scope != ScopeOutOfScope || len(intent.Categories) != 0 {
+			t.Errorf("%q parsed as %+v", query, intent)
+		}
+	}
+	if intent := Deterministic("yatak odası için dolap"); intent.Scope != ScopeHomeLiving || !has(intent.Categories, "furniture") {
+		t.Fatalf("a cabinet stopped being a home product: %+v", intent)
 	}
 }
 

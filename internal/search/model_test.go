@@ -268,6 +268,8 @@ func TestNameMatchesIgnoresCaseAndTurkishDiacritics(t *testing.T) {
 		{"IKEA Bornova", "ikea", true},
 		{"Koçtaş Ankara", "koctas", true},
 		{"Madame Coco Kadıköy", "madame coco", true},
+		{"Willa’s Decor", "Willas", true},
+		{"Willas Decor", "Willa's", true},
 		{"Perde Dünyası", "ikea", false},
 		{"IKEA Bornova", "", false},
 	}

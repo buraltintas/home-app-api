@@ -6,6 +6,19 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Store-name search ignores punctuation and service words keep workshops out
+
+- Store-name matching now treats punctuation as presentation rather than identity, so a
+  person typing `Willas` can find a catalogue/provider name written as `Willa’s` without a
+  hand-maintained brand alias.
+- The trade-wide word `tamirhane` now identifies a repair workshop on import, deterministic
+  intent parsing, and the catalogue-name fallback. A data migration removes stale retail
+  category links from existing workshop rows without making a paid Places request.
+- Warehouse/depot requests no longer pass through the retired `storage` category. Cabinets
+  remain ordinary furniture products; warehousing remains outside this retail product.
+- The structured AI schema now accepts the already-supported major- and small-appliance
+  categories and no longer advertises the retired storage category.
+
 ## Store detail exposes comparable review-criteria averages
 
 - Store detail now returns the mean of each of the eight first-hand review criteria,
