@@ -6,6 +6,27 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Result lists no longer buy or expose store-detail data
+
+- Google Text Search now asks only for the identity, address, coordinates, provider types,
+  business status and photograph needed to classify and render a result. Rating/count,
+  opening hours/timezone, phone and website are absent from both the field mask and the
+  list DTO. Because Places prices a request at its most expensive requested field, this
+  moves store search down one billing tier; the measured traffic model for this change
+  estimated an 8.5% total Places saving before any volume discount.
+- The first read of a Google-backed store detail fetches the complete Place Details record,
+  persists it, and records that even an empty optional answer was fetched. Every later read
+  uses PostgreSQL. A transaction advisory lock serializes the first read across application
+  instances, so concurrent taps do not buy the same detail twice. Existing stored provider
+  data is retained and legacy enriched rows are marked by migration rather than refetched.
+- Cheap search refreshes merge into a stored provider record instead of replacing it, so a
+  later search cannot erase rating/contact/hour data already bought for the detail page.
+  The search-cache key is versioned so a pre-deploy rich response cannot leak those fields
+  back into a list during its remaining six-hour lifetime.
+- Resolving a manually selected discovery location now uses an Essentials-only Place
+  Details mask. Store ratings, contact data, hours and photos were never read by that flow,
+  so buying them there was pure waste.
+
 ## Store-name search ignores punctuation and service words keep workshops out
 
 - Store-name matching now treats punctuation as presentation rather than identity, so a

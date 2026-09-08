@@ -635,6 +635,8 @@ components:
         address: {type: string}
         city: {type: string}
         district: {type: string}
+        phone: {type: string, description: Store-detail contact value when known.}
+        website: {type: string, format: uri, description: Store-detail website when known.}
         latitude: {type: number, minimum: -90, maximum: 90}
         longitude: {type: number, minimum: -180, maximum: 180}
         distance_meters: {type: number, minimum: 0}
@@ -664,9 +666,9 @@ components:
         semantic_terms: {type: array, items: {type: string}}
     SearchResult:
       type: object
-      required: [search_result_impression_id, source, name, address, latitude, longitude, categories]
+      required: [id, search_result_impression_id, source, name, address, latitude, longitude, categories]
       properties:
-        id: {type: string, format: uuid, description: Missing for a google-only result.}
+        id: {type: string, format: uuid, description: Internal ID materialized before the result is returned.}
         search_result_impression_id: {type: string, format: uuid}
         source: {type: string, enum: [internal, google, google+platform]}
         name: {type: string}
@@ -690,12 +692,13 @@ components:
             post_count: {type: integer}
         google:
           type: object
-          required: [provider, place_id, rating, rating_count]
+          required: [provider, place_id]
           properties:
             provider: {const: google}
             place_id: {type: string}
-            rating: {type: number}
-            rating_count: {type: integer}
+            photo_name: {type: string, description: Cheap list-tier Google photo resource name when present.}
+            photo_attributions: {type: array, items: {type: string}}
+            business_status: {type: string}
     SearchResponse:
       type: object
       required: [search_id, intent, results]

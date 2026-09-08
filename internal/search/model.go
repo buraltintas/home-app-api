@@ -52,22 +52,34 @@ type Place struct {
 	PhotoName              string
 	PhotoAttributions      []string
 	BusinessStatus         string
-	// The store's own website, where it has one. Google publishes it; nothing read it.
+	// DetailsFetched distinguishes a full Place Details response from the deliberately
+	// cheaper search/list payload. It is internal provenance, never part of an API DTO.
+	// A successful details response may legitimately contain none of the optional fields;
+	// without this bit the next page view would buy the same empty answer again.
+	DetailsFetched bool
+
+	// The store's own website, where it has one. It is deliberately fetched only when a
+	// person opens the store detail page, then retained in our catalogue.
 	Website string
 
-	// When the store is open, as the provider publishes it. Asked for in the same field
-	// mask that already carries the rating and the website, so it is billed at the tier we
-	// were already paying for -- no separate lookup and no extra request per store.
+	// When the store is open, as the provider publishes it. This belongs to the full detail
+	// payload; asking for it during search would raise the price of every result-list call.
 	Hours *OpeningHours
 
-	// The number Google publishes in national format. It is asked for in the same field
-	// mask that already carries the rating, so it is billed at the tier we were already
-	// paying for -- no separate lookup and no extra request per store.
+	// The number Google publishes in national format. Like website and hours, it is loaded
+	// lazily on the store page and filled into an empty catalogue field only.
 	Phone string
 }
 type PlacesProvider interface {
 	TextSearch(context.Context, string, *float64, *float64, int) ([]Place, error)
 	PlaceDetails(context.Context, string) (Place, error)
+}
+
+// PlaceEssentialsProvider resolves a geographic autocomplete choice without buying the
+// contact, rating or atmosphere fields used by a store detail page. Kept optional so
+// simple test doubles and alternative providers can continue to implement PlacesProvider.
+type PlaceEssentialsProvider interface {
+	PlaceEssentials(context.Context, string) (Place, error)
 }
 
 // photoNamePattern constrains a Google photo resource name. The value is
@@ -157,8 +169,8 @@ func (h *OpeningHours) OpenAt(t time.Time) *bool {
 type External struct {
 	Provider          string        `json:"provider"`
 	PlaceID           string        `json:"place_id"`
-	Rating            float64       `json:"rating"`
-	RatingCount       int           `json:"rating_count"`
+	Rating            float64       `json:"rating,omitempty"`
+	RatingCount       int           `json:"rating_count,omitempty"`
 	PhotoName         string        `json:"photo_name,omitempty"`
 	PhotoAttributions []string      `json:"photo_attributions,omitempty"`
 	BusinessStatus    string        `json:"business_status,omitempty"`
@@ -197,10 +209,6 @@ type Result struct {
 	// promoted one, which reaches the list without going through Google at all -- renders
 	// as a blank tile beside imported results that have a picture.
 	Photo *Photo `json:"photo,omitempty"`
-	// A store's public telephone number. Listing it is what lets someone ask a question
-	// without leaving for Google, and it is the one detail a person wants before making a
-	// trip that a photograph cannot answer.
-	Phone string `json:"phone,omitempty"`
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
@@ -752,7 +760,7 @@ func fromStore(x storepkg.Item, rank int) Result {
 			photo = &Photo{Source: "google", Name: x.Photo.Name, Attributions: x.Photo.Attributions}
 		}
 	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Phone: x.Phone, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

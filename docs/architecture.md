@@ -115,7 +115,17 @@ raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
                                       persist search + impressions -> response
 ```
 
-The provider is asked only when our own catalogue cannot answer the question. A sufficiency gate sits between the local search and the provider call and skips the call only when all four of its conditions hold; every failing condition is recorded, so the reason a call happened is answerable per search. It is controlled by `SEARCH_LOCAL_FIRST_ENABLED` and, while that is off, the two home/living providers run concurrently as they always have. A small configurable sample of local-only searches asks the provider anyway after the response has gone out, purely to measure what the decision cost; that answer is read and never imported, so the catalogue does not learn from a measurement. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above Google-only results; community and Google rating snapshots remain separate. Out-of-scope and unclear requests do not invoke either store provider. A Google-only result is materialized only after the backend refetches provider details; `(provider,external_id)` uniqueness makes this concurrency-safe. Provider retention is configuration-driven and raw Places payloads are not stored.
+The provider is asked only when our own catalogue cannot answer the question. A sufficiency gate sits between the local search and the provider call and skips the call only when all four of its conditions hold; every failing condition is recorded, so the reason a call happened is answerable per search. It is controlled by `SEARCH_LOCAL_FIRST_ENABLED` and, while that is off, the two home/living providers run concurrently as they always have. A small configurable sample of local-only searches asks the provider anyway after the response has gone out, purely to measure what the decision cost; that answer is read and never imported, so the catalogue does not learn from a measurement. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above provider-only results. Out-of-scope and unclear requests do not invoke either store provider.
+
+Text Search is a candidate/list operation and its field mask contains only provider identity,
+address, coordinates, classification, business status and photo. Its result is materialized
+immediately so every visible row has an internal store ID, but a cheap refresh merges into
+the existing `store_external_sources` object and cannot erase detail-tier data. Rating,
+rating count, opening hours/timezone, phone and website are fetched by Place Details only
+when the store page is first opened. `details_fetched_at` records a successful answer even
+when all optional fields were absent; a PostgreSQL advisory transaction lock makes this
+once-only across instances. Existing catalogue/admin contact fields win over provider data.
+Provider retention is configuration-driven and raw Places payloads are not stored.
 
 Search accepts Turkish, English, German and Russian through one pipeline.
 Unicode-aware normalization preserves Cyrillic and performs only targeted accent

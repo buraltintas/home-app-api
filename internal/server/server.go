@@ -510,6 +510,16 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
+	// Search/listing deliberately buys only the cheap Places fields. The first valid
+	// store-page read fills the expensive detail fields once and persists them. Provider
+	// degradation must not take our own page down; serve the catalogue data already held
+	// and let a later read retry the enrichment.
+	if s.search != nil {
+		e = s.search.EnsureGoogleStoreDetails(r.Context(), id)
+	}
+	if e != nil {
+		slog.WarnContext(r.Context(), "store detail provider enrichment unavailable", "store_id", id, "error", e)
+	}
 	x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 	if e != nil {
 		WriteError(w, e, r.Context())

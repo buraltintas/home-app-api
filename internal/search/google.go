@@ -19,6 +19,16 @@ type GooglePlaces struct {
 	client       *http.Client
 }
 
+// A Places request is billed at the tier of its most expensive requested field. Search
+// results need identity, classification, position, status and a visual -- not contact,
+// ratings or hours. Keeping these masks named and tested makes an accidental tier increase
+// visible in review instead of hiding it in a long header literal.
+const (
+	googleSearchFieldMask   = "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.attributions,places.photos,places.primaryType,places.businessStatus"
+	googleDetailFieldMask   = "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus"
+	googleLocationFieldMask = "id,formattedAddress,location,types"
+)
+
 func NewGooglePlaces(key string) *GooglePlaces {
 	return &GooglePlaces{key: key, baseURL: "https://places.googleapis.com/v1", client: &http.Client{Timeout: 4 * time.Second}}
 }
@@ -50,7 +60,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "places.regularOpeningHours,places.utcOffsetMinutes,places.id,places.displayName,places.formattedAddress,places.location,places.rating,places.userRatingCount,places.types,places.attributions,places.photos,places.nationalPhoneNumber,places.primaryType,places.websiteUri,places.businessStatus")
+	req.Header.Set("X-Goog-FieldMask", googleSearchFieldMask)
 	r, e := g.client.Do(req)
 	if e != nil {
 		return nil, e
@@ -67,20 +77,14 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 			} `json:"displayName"`
 			Address      string `json:"formattedAddress"`
 			Location     struct{ Latitude, Longitude float64 }
-			Rating       float64
-			Count        int `json:"userRatingCount"`
 			Types        []string
 			Attributions []struct {
 				Provider    string `json:"provider"`
 				ProviderURI string `json:"providerUri"`
 			}
 			Photos         []googlePhoto `json:"photos"`
-			Phone          string        `json:"nationalPhoneNumber"`
 			PrimaryType    string        `json:"primaryType"`
-			Website        string        `json:"websiteUri"`
 			BusinessStatus string        `json:"businessStatus"`
-			Hours          googleHours   `json:"regularOpeningHours"`
-			UTCOffset      int           `json:"utcOffsetMinutes"`
 		}
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
@@ -88,8 +92,7 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 	}
 	out := make([]Place, 0, len(payload.Places))
 	for _, x := range payload.Places {
-		p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.Address, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.Count, Types: withPrimary(x.PrimaryType, x.Types), Phone: x.Phone, Website: x.Website, BusinessStatus: x.BusinessStatus}
-		p.Hours = openingHours(x.Hours, x.UTCOffset)
+		p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.Address, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Types: withPrimary(x.PrimaryType, x.Types), BusinessStatus: x.BusinessStatus}
 		for _, a := range x.Attributions {
 			p.Attributions = append(p.Attributions, a.Provider+" "+a.ProviderURI)
 		}
@@ -171,7 +174,7 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 	u := g.baseURL + "/places/" + url.PathEscape(id)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus")
+	req.Header.Set("X-Goog-FieldMask", googleDetailFieldMask)
 	r, e := g.client.Do(req)
 	if e != nil {
 		return Place{}, e
@@ -188,21 +191,73 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 		Rating           float64
 		UserRatingCount  int
 		Types            []string
-		Photos           []googlePhoto `json:"photos"`
-		Phone            string        `json:"nationalPhoneNumber"`
-		PrimaryType      string        `json:"primaryType"`
-		Website          string        `json:"websiteUri"`
-		BusinessStatus   string        `json:"businessStatus"`
-		Hours            googleHours   `json:"regularOpeningHours"`
-		UTCOffset        int           `json:"utcOffsetMinutes"`
+		Attributions     []struct {
+			Provider    string `json:"provider"`
+			ProviderURI string `json:"providerUri"`
+		}
+		Photos         []googlePhoto `json:"photos"`
+		Phone          string        `json:"nationalPhoneNumber"`
+		PrimaryType    string        `json:"primaryType"`
+		Website        string        `json:"websiteUri"`
+		BusinessStatus string        `json:"businessStatus"`
+		Hours          googleHours   `json:"regularOpeningHours"`
+		UTCOffset      int           `json:"utcOffsetMinutes"`
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); e != nil {
 		return Place{}, e
 	}
-	p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.UserRatingCount, Types: withPrimary(x.PrimaryType, x.Types), Phone: x.Phone, Website: x.Website, BusinessStatus: x.BusinessStatus}
+	p := Place{PlaceID: x.ID, Name: x.DisplayName.Text, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Rating: x.Rating, RatingCount: x.UserRatingCount, Types: withPrimary(x.PrimaryType, x.Types), Phone: x.Phone, Website: x.Website, BusinessStatus: x.BusinessStatus, DetailsFetched: true}
+	for _, a := range x.Attributions {
+		p.Attributions = append(p.Attributions, a.Provider+" "+a.ProviderURI)
+	}
 	p.Hours = openingHours(x.Hours, x.UTCOffset)
 	p.PhotoName, p.PhotoAttributions = firstPhoto(x.Photos)
 	return p, nil
+}
+
+// PlaceEssentials resolves a location-autocomplete choice at the Essentials tier. A
+// location origin needs a trusted point and provider type, not the store-detail fields.
+func (g *GooglePlaces) PlaceEssentials(ctx context.Context, id string) (Place, error) {
+	started := time.Now()
+	ctx, finish := observability.StartSpan(ctx, "provider.google_places.place_essentials")
+	out, err := g.placeEssentials(ctx, id)
+	finish(err)
+	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
+	return out, err
+}
+
+func (g *GooglePlaces) placeEssentials(ctx context.Context, id string) (Place, error) {
+	if g.key == "" {
+		return Place{}, fmt.Errorf("places not configured")
+	}
+	u := g.baseURL + "/places/" + url.PathEscape(id)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return Place{}, err
+	}
+	req.Header.Set("X-Goog-Api-Key", g.key)
+	req.Header.Set("X-Goog-FieldMask", googleLocationFieldMask)
+	r, err := g.client.Do(req)
+	if err != nil {
+		return Place{}, err
+	}
+	defer r.Body.Close()
+	if r.StatusCode != http.StatusOK {
+		return Place{}, fmt.Errorf("places status %d", r.StatusCode)
+	}
+	var x struct {
+		ID               string
+		FormattedAddress string
+		Location         struct{ Latitude, Longitude float64 }
+		Types            []string
+	}
+	if err = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); err != nil {
+		return Place{}, err
+	}
+	// The formatted address is an honest, human-readable label and is already required by
+	// the location picker response. Requesting displayName solely to duplicate it would
+	// promote this otherwise Essentials-only lookup.
+	return Place{PlaceID: x.ID, Name: x.FormattedAddress, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Types: x.Types}, nil
 }
 
 // PhotoMedia streams a Google place photo. The caller must close the reader.
@@ -252,8 +307,8 @@ func (g *GooglePlaces) photoMedia(ctx context.Context, name string, maxWidth int
 // built for prefixes and takes a region restriction, which is what a person typing a
 // Turkish neighbourhood name into a Turkish product actually needs.
 //
-// It is also cheaper: the store text search carries a field mask with ratings and photos
-// on it, none of which a location lookup ever reads.
+// It is also cheaper: neither autocomplete nor the Essentials lookup used after selection
+// buys store ratings, contacts, hours or photos that a location origin never reads.
 func (g *GooglePlaces) Autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error) {
 	started := time.Now()
 	ctx, finish := observability.StartSpan(ctx, "provider.google_places.autocomplete")

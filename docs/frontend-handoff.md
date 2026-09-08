@@ -235,7 +235,7 @@ Supported types are JPEG, PNG, WebP; default maximum is 10 MiB per file. Finaliz
 
 ## 10. Stores, platform data, and Google
 
-A physical location is the store identity; `brand_name` is only descriptive. The exposed store model contains `id`, localized `name`, `slug`, optional `brand_name`, address/city/district, coordinates, optional distance, canonical categories, localized category labels/description, `platform` stats, viewer favorite/review booleans, and (on detail) optional external sources. Country, phone, website, cover image, and merchant/claim state are not exposed.
+A physical location is the store identity; `brand_name` is only descriptive. The exposed store model contains `id`, localized `name`, `slug`, optional `brand_name`, address/city/district, optional phone/website, coordinates, optional distance, canonical categories, localized category labels/description, `platform` stats, viewer favorite/review booleans, the effective `photo`, and (on detail) optional external sources. Country, raw cover storage state, and merchant/claim state are not exposed.
 
 Platform statistics are distinct from Google statistics:
 
@@ -243,7 +243,7 @@ Platform statistics are distinct from Google statistics:
 |---|---|
 | `platform.average_rating`, `rating_count`, `review_count`, `favorite_count`, `post_count` | Boşa Gezme! community only. Rating/review/post counts currently advance together for created reviews. |
 | `criteria_averages` | Store-detail only and omitted until a complete eight-criterion review exists. Contains `review_count` plus `availability`, `value`, `layout`, `staff_care`, `staff_knowledge`, `checkout`, `returns`, and `cleanliness` means. Legacy rating-only reviews are excluded from these means. |
-| `google.rating`, `rating_count` | Google provider only; never merged into platform rating. |
+| Google attribution `rating`, `rating_count` | Store-detail only; Google provider data, never merged into platform rating. |
 | `google.business_status` | Google provider status. When `CLOSED_TEMPORARILY` or `CLOSED_PERMANENTLY`, show a prominent warning and let the person verify in Google Maps before travelling. Do not infer closure from review age. |
 
 The private `GET /v1/me` profile also returns `next_level` and
@@ -251,7 +251,7 @@ The private `GET /v1/me` profile also returns `next_level` and
 the threshold table. `next_level` is omitted and the remaining count is zero at the
 highest level.
 
-Hybrid search `source` is `internal`, `google`, or `google+platform`. An internal/platform result has `id` and `platform`; a Google-only result omits `id` and has `google`; an enriched result has both. Results with at least one proximity-verified Boşa Gezme! review rank ahead of provider-only results; `platform` and `google` ratings must still be labelled and rendered separately. Before opening a platform detail/favoriting/reviewing a Google-only result, authenticated clients call `/stores/resolve-external`, then use the returned internal ID. [`store-google-only.json`](./frontend-fixtures/store-google-only.json) is intentionally a search response fragment because no Google-only store-detail endpoint exists.
+Hybrid search `source` is `internal`, `google`, or `google+platform`. Every visible provider result is materialized and therefore carries `id`; `platform` is present only when community state existed before this search. The search `google` block is deliberately list-sized: provider/place ID plus optional business status and photo metadata. It never contains Google rating/count, hours, phone or website, even when those values already exist in PostgreSQL. Clients must not reserve empty UI for them. The first `GET /v1/stores/{id}` may synchronously fetch and persist missing full provider details; subsequent reads are catalogue-only. `/stores/resolve-external` remains a compatibility path for a previously stored result without an ID.
 
 Favoriting a store and liking a post are separate idempotent relationships. Their POST/DELETE routes return 204; viewer booleans come from later reads. Counts change only when the relationship actually changes.
 
@@ -292,7 +292,7 @@ Every result always has `search_result_impression_id`, source, name, address, co
 
 For an explicit unrelated request such as a tyre shop, `scope` is `out_of_scope`; greetings, chitchat, and unrecognizable text use `unclear`. Both return HTTP 200 with `results: []` and a localized `guidance` object containing `code: HOME_LIVING_ONLY`, the reason, a message, and exactly two example home searches. Example pairs rotate server-side, so clients must render the returned strings instead of hard-coding them. Internal and Google providers are not called for these requests. See [`search-out-of-scope.json`](./frontend-fixtures/search-out-of-scope.json).
 
-For `home_living`, parsed intent drives internal and Google Places queries concurrently to reduce latency. Indirect requests such as “çeyiz almak istiyorum” and “nevresim takımı lazım” are valid home/living searches, not guidance states.
+For `home_living`, parsed intent drives internal and Google Places queries concurrently to reduce latency. Google Text Search requests only list-tier fields; opening a store is the demand signal for the one-time full detail lookup. Indirect requests such as “çeyiz almak istiyorum” and “nevresim takımı lazım” are valid home/living searches, not guidance states. Resolving a manual discovery-location selection uses an Essentials-only Place Details request because contact, rating, hours and photo data are irrelevant to a search origin.
 
 Home discovery can read three non-mutating public signals without inventing editorial data:
 

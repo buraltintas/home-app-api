@@ -17,6 +17,7 @@
   },
   "results": [
     {
+	  "id": "e7dcc651-a47a-4a76-b82f-9aa3e40bc97b",
       "search_result_impression_id": "c3af9f72-6387-4540-8ca0-e59fdb557538",
       "source": "google",
       "name": "Moda Işık Tasarım",
@@ -27,9 +28,7 @@
       "categories": ["lighting"],
       "google": {
         "provider": "google",
-        "place_id": "ChIJModaIsikExample",
-        "rating": 4.7,
-        "rating_count": 89
+	    "place_id": "ChIJModaIsikExample"
       }
     }
   ]

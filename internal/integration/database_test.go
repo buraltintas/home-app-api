@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,6 +57,21 @@ func (p placesStub) TextSearch(context.Context, string, *float64, *float64, int)
 	return []search.Place{p.place}, nil
 }
 func (p placesStub) PlaceDetails(context.Context, string) (search.Place, error) { return p.place, nil }
+
+type lazyDetailsPlacesStub struct {
+	searchPlace search.Place
+	detailPlace search.Place
+	detailCalls atomic.Int32
+}
+
+func (p *lazyDetailsPlacesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
+	return []search.Place{p.searchPlace}, nil
+}
+
+func (p *lazyDetailsPlacesStub) PlaceDetails(context.Context, string) (search.Place, error) {
+	p.detailCalls.Add(1)
+	return p.detailPlace, nil
+}
 
 type countingPlacesStub struct{ calls int }
 
@@ -551,7 +567,7 @@ func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
 	}
 }
 
-func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
+func TestSearchKeepsGoogleDetailRatingsOutOfLists(t *testing.T) {
 	db := database(t)
 	searcher := user(t, db, "search-enrichment-"+uuid.NewString()+"@example.test")
 	placeID := "enrichment-place-" + uuid.NewString()
@@ -569,7 +585,7 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 			break
 		}
 	}
-	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil || googleOnly.Google.Rating != 4.8 || googleOnly.Google.RatingCount != 321 {
+	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil || googleOnly.Google.Rating != 0 || googleOnly.Google.RatingCount != 0 {
 		t.Fatalf("google-only result=%+v", googleOnly)
 	}
 
@@ -591,12 +607,12 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 			break
 		}
 	}
-	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 4.8 || enriched.Google.RatingCount != 321 || !slices.Contains(enriched.Categories, "furniture") {
+	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 0 || enriched.Google.RatingCount != 0 || !slices.Contains(enriched.Categories, "furniture") {
 		t.Fatalf("enriched result=%+v", enriched)
 	}
 
-	// The detail page reads persisted Google data. An internal-only result must read that
-	// same source too, even when no live provider result is available for this request.
+	// Persisted Google detail data is intentionally not copied back into an internal list
+	// result when no live provider result is available.
 	_, _, _, internalOnly, _ := services(t, db, googleStub{}, nil)
 	third, err := internalOnly.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "furniture"})
 	if err != nil {
@@ -609,12 +625,12 @@ func TestSearchSeparatesGoogleOnlyAndPlatformEnrichedRatings(t *testing.T) {
 			break
 		}
 	}
-	if stored == nil || stored.Google == nil || stored.Google.Rating != 4.8 || stored.Google.RatingCount != 321 || !slices.Contains(stored.Categories, "furniture") {
+	if stored == nil || stored.Google == nil || stored.Google.Rating != 0 || stored.Google.RatingCount != 0 || !slices.Contains(stored.Categories, "furniture") {
 		t.Fatalf("stored Google result=%+v", stored)
 	}
 }
 
-func TestSearchRefreshesMappedStorePhoneAndPhotoForDetail(t *testing.T) {
+func TestCheapSearchRefreshPreservesMappedStoreDetailData(t *testing.T) {
 	db := database(t)
 	searcher := user(t, db, "search-refresh-"+uuid.NewString()+"@example.test")
 	placeID := "refresh-place-" + uuid.NewString()
@@ -636,12 +652,16 @@ func TestSearchRefreshesMappedStorePhoneAndPhotoForDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(t.Context(), `UPDATE stores SET phone=NULL WHERE id=$1`, storeID); err != nil {
+	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution='{"provider":"Google","rating":4.7,"rating_count":59,"phone":"0551 257 52 64"}'::jsonb,refreshed_at=now()-interval '7 days' WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution='{"provider":"Google","rating":4.7,"rating_count":59}'::jsonb,refreshed_at=now()-interval '7 days' WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
-		t.Fatal(err)
-	}
+	// Text Search now carries only fields used in a list. It can refresh the photograph,
+	// but must not erase or expose the detail-tier rating/contact values already held.
+	place.Rating = 0
+	place.RatingCount = 0
+	place.Phone = ""
+	place.Website = ""
+	_, stores, _, searchSvc, _ = services(t, db, googleStub{}, placesStub{place})
 
 	latitude, longitude := 36.8841, 30.7056
 	response, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "perde", Latitude: &latitude, Longitude: &longitude})
@@ -655,7 +675,7 @@ func TestSearchRefreshesMappedStorePhoneAndPhotoForDetail(t *testing.T) {
 			break
 		}
 	}
-	if result == nil || result.Phone != place.Phone || result.Google == nil || result.Google.PhotoName != place.PhotoName {
+	if result == nil || result.Google == nil || result.Google.PhotoName != place.PhotoName || result.Google.Rating != 0 || result.Google.RatingCount != 0 {
 		t.Fatalf("search result=%+v", result)
 	}
 
@@ -663,8 +683,81 @@ func TestSearchRefreshesMappedStorePhoneAndPhotoForDetail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Phone != place.Phone || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != place.PhotoName {
+	if detail.Phone != "0551 257 52 64" || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != place.PhotoName || detail.ExternalSources[0].Attribution["rating_count"] != float64(59) {
 		t.Fatalf("detail phone=%q external_sources=%+v", detail.Phone, detail.ExternalSources)
+	}
+}
+
+func TestGoogleDetailsAreFetchedOnceOnFirstStoreRead(t *testing.T) {
+	db := database(t)
+	searcher := user(t, db, "lazy-details-"+uuid.NewString()+"@example.test")
+	placeID := "lazy-details-place-" + uuid.NewString()
+	cheap := search.Place{
+		PlaceID: placeID, Name: "Lazy Detail Furniture", Address: "Kadıköy, İstanbul, TR",
+		Latitude: 40.99, Longitude: 29.03, Types: []string{"furniture_store"},
+		PhotoName: "places/lazy-detail/photos/search-photo",
+	}
+	full := cheap
+	full.Rating, full.RatingCount = 4.8, 73
+	full.Phone, full.Website = "0212 000 00 00", "https://store.example.test"
+	full.DetailsFetched = true
+	places := &lazyDetailsPlacesStub{searchPlace: cheap, detailPlace: full}
+	_, stores, _, searchSvc, _ := services(t, db, googleStub{}, places)
+
+	response, err := searchSvc.Search(t.Context(), &searcher, nil, search.Request{Query: "furniture Lazy Detail Furniture"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storeID uuid.UUID
+	for i := range response.Results {
+		if response.Results[i].Google != nil && response.Results[i].Google.PlaceID == placeID && response.Results[i].ID != nil {
+			storeID = *response.Results[i].ID
+			if response.Results[i].Google.Rating != 0 || response.Results[i].Google.RatingCount != 0 {
+				t.Fatalf("detail data leaked into search result: %+v", response.Results[i].Google)
+			}
+		}
+	}
+	if storeID == uuid.Nil {
+		t.Fatal("search did not materialize the cheap provider result")
+	}
+
+	const readers = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, readers)
+	for range readers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errs <- searchSvc.EnsureGoogleStoreDetails(context.Background(), storeID)
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err = range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if calls := places.detailCalls.Load(); calls != 1 {
+		t.Fatalf("Place Details calls=%d, want exactly one", calls)
+	}
+	if err = searchSvc.EnsureGoogleStoreDetails(t.Context(), storeID); err != nil {
+		t.Fatal(err)
+	}
+	if calls := places.detailCalls.Load(); calls != 1 {
+		t.Fatalf("cached detail caused another Place Details call: %d", calls)
+	}
+
+	detail, err := stores.Get(t.Context(), storeID, &searcher, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Phone != full.Phone || detail.Website != full.Website || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["rating_count"] != float64(full.RatingCount) {
+		t.Fatalf("detail was not persisted: %+v", detail)
+	}
+	var fetchedAt *time.Time
+	if err = db.QueryRow(t.Context(), `SELECT details_fetched_at FROM store_external_sources WHERE store_id=$1 AND provider='google'`, storeID).Scan(&fetchedAt); err != nil || fetchedAt == nil {
+		t.Fatalf("details_fetched_at=%v err=%v", fetchedAt, err)
 	}
 }
 

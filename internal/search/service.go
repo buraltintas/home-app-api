@@ -54,6 +54,20 @@ func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (u
 	if placeID == "" || len(placeID) > 300 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
+	// Current search results are materialized with cheap fields before being returned. An
+	// older client may still call the compatibility resolver on that result; reuse the row
+	// and the same once-only enrichment path instead of buying Place Details again.
+	var existing uuid.UUID
+	err := s.db.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, placeID).Scan(&existing)
+	if err == nil {
+		if err = s.EnsureGoogleStoreDetails(ctx, existing); err != nil {
+			return uuid.Nil, err
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, err
+	}
 	if s.places == nil {
 		return uuid.Nil, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
 	}
@@ -64,6 +78,7 @@ func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (u
 	if p.PlaceID != placeID || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
 		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
 	}
+	p.DetailsFetched = true
 	ids, err := s.materializePlaces(ctx, []Place{p})
 	if err != nil {
 		return uuid.Nil, err
@@ -73,6 +88,34 @@ func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (u
 		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
 	}
 	return id, nil
+}
+
+// placeAttribution is the provider data we retain. A cheap search payload intentionally
+// lacks detail-only fields; omitting them here lets the update merge preserve detail data
+// already bought on an earlier page view.
+func placeAttribution(p Place) map[string]any {
+	attribution := map[string]any{"provider": "Google", "attributions": p.Attributions}
+	if p.RatingCount > 0 {
+		attribution["rating"] = p.Rating
+		attribution["rating_count"] = p.RatingCount
+	}
+	if p.PhotoName != "" {
+		attribution["photo_name"] = p.PhotoName
+		attribution["photo_attributions"] = p.PhotoAttributions
+	}
+	if p.Phone != "" {
+		attribution["phone"] = p.Phone
+	}
+	if p.BusinessStatus != "" && p.BusinessStatus != "BUSINESS_STATUS_UNSPECIFIED" {
+		attribution["business_status"] = p.BusinessStatus
+	}
+	if p.Hours != nil {
+		attribution["opening_hours"] = p.Hours
+	}
+	if len(p.Types) > 0 {
+		attribution["types"] = p.Types
+	}
+	return attribution
 }
 
 // materializePlaces imports every valid place into stores and returns the store id
@@ -107,42 +150,22 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 			return nil, err
 		}
 		// The store detail page reads its Google block straight out of this jsonb, so
-		// the provider figures are kept here rather than mixed into store_stats, which
-		// holds community data only.
-		attribution := map[string]any{"provider": "Google", "attributions": p.Attributions}
-		if p.RatingCount > 0 {
-			attribution["rating"] = p.Rating
-			attribution["rating_count"] = p.RatingCount
-		}
-		if p.PhotoName != "" {
-			attribution["photo_name"] = p.PhotoName
-			attribution["photo_attributions"] = p.PhotoAttributions
-		}
-		if p.Phone != "" {
-			attribution["phone"] = p.Phone
-		}
-		if p.BusinessStatus != "" && p.BusinessStatus != "BUSINESS_STATUS_UNSPECIFIED" {
-			attribution["business_status"] = p.BusinessStatus
-		}
-		if p.Hours != nil {
-			attribution["opening_hours"] = p.Hours
-		}
-		// Kept because we could not get them back. A store's categories are worked out
-		// once, at import, from these types and its name -- and when the classifier later
-		// learned to read something it could not read before, there was no way to apply
-		// that to the stores already here without asking Google about every one of them
-		// again. Storing what the provider already told us costs nothing and makes
-		// reclassification a local operation.
-		if len(p.Types) > 0 {
-			attribution["types"] = p.Types
-		}
+		// provider figures stay here rather than entering store_stats, which is community
+		// data only. Types are retained because reclassification must remain a local job.
+		attribution := placeAttribution(p)
 		attr, _ := json.Marshal(attribution)
 		var existing uuid.UUID
 		err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, p.PlaceID).Scan(&existing)
 		if err == nil {
-			// Ratings and photos move, and this place was just fetched, so the stored
-			// copy is refreshed rather than left to age indefinitely.
-			if _, err = tx.Exec(ctx, `UPDATE store_external_sources SET attribution=$2,refreshed_at=now() WHERE store_id=$1 AND provider='google'`, existing, attr); err != nil {
+			// Replace the cheap fields with this fresh search answer, but merge rather than
+			// replace the json object: a list request must never erase expensive detail data
+			// that was already bought. A full detail response additionally records the
+			// durable marker that prevents a second paid lookup.
+			if _, err = tx.Exec(ctx, `UPDATE store_external_sources
+SET attribution=(attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb,
+    refreshed_at=now(),
+    details_fetched_at=CASE WHEN $3 THEN now() ELSE details_fetched_at END
+WHERE store_id=$1 AND provider='google'`, existing, attr, p.DetailsFetched); err != nil {
 				return nil, err
 			}
 			// A number we have never held is filled in; one we already hold is left alone,
@@ -191,7 +214,7 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		if _, err = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
 			return nil, err
 		}
-		if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) VALUES($1,'google',$2,$3,now())`, id, p.PlaceID, attr); err != nil {
+		if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at,details_fetched_at) VALUES($1,'google',$2,$3,now(),CASE WHEN $4 THEN now() END)`, id, p.PlaceID, attr, p.DetailsFetched); err != nil {
 			return nil, err
 		}
 		if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreImportedGoogle, IdempotencyKey: "google-store:" + p.PlaceID, StoreID: &id}); err != nil {
@@ -203,6 +226,90 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 		return nil, err
 	}
 	return out, nil
+}
+
+// EnsureGoogleStoreDetails buys the full Places payload once, on the first detail-page
+// read of a store whose search result only carried cheap fields. The transaction-scoped
+// advisory lock is shared by every application instance, so simultaneous taps cannot turn
+// into duplicate provider charges. A successful empty optional payload is still marked as
+// fetched: "Google has none" is an answer worth caching too.
+func (s *Service) EnsureGoogleStoreDetails(ctx context.Context, storeID uuid.UUID) error {
+	if storeID == uuid.Nil {
+		return httpapi.ErrInvalidInput
+	}
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	var placeID string
+	var fetchedAt *time.Time
+	err = tx.QueryRow(ctx, `SELECT external_id,details_fetched_at
+FROM store_external_sources
+WHERE store_id=$1 AND provider='google'`, storeID).Scan(&placeID, &fetchedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if fetchedAt != nil {
+		return tx.Commit(ctx)
+	}
+	if s.places == nil {
+		return httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
+	}
+
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('google-detail:'||$1,0))`, placeID); err != nil {
+		return err
+	}
+	// Another instance may have completed the provider call while this request waited for
+	// the advisory lock. Re-read after acquiring it before spending anything.
+	err = tx.QueryRow(ctx, `SELECT details_fetched_at
+FROM store_external_sources
+WHERE store_id=$1 AND provider='google'`, storeID).Scan(&fetchedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return tx.Commit(ctx)
+	}
+	if err != nil {
+		return err
+	}
+	if fetchedAt != nil {
+		return tx.Commit(ctx)
+	}
+
+	p, err := s.places.PlaceDetails(ctx, placeID)
+	if err != nil {
+		return httpapi.E(502, "PLACES_UNAVAILABLE", "Store provider is temporarily unavailable")
+	}
+	if p.PlaceID != placeID || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
+		return httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
+	}
+	p.DetailsFetched = true
+	attr, err := json.Marshal(placeAttribution(p))
+	if err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE store_external_sources
+SET attribution=(attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb,
+    refreshed_at=now(),details_fetched_at=now()
+WHERE store_id=$1 AND provider='google'`, storeID, attr); err != nil {
+		return err
+	}
+	// Provider contact data only fills an empty catalogue field. An administrator or the
+	// merchant remains the stronger source and is never overwritten by Google.
+	if p.Phone != "" {
+		if _, err = tx.Exec(ctx, `UPDATE stores SET phone=$2 WHERE id=$1 AND coalesce(phone,'')=''`, storeID, p.Phone); err != nil {
+			return err
+		}
+	}
+	if p.Website != "" {
+		if _, err = tx.Exec(ctx, `UPDATE stores SET website=$2 WHERE id=$1 AND coalesce(website,'')=''`, storeID, p.Website); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 // PhotoProvider is implemented by places providers that can stream place photos.
@@ -394,7 +501,13 @@ func (s *Service) ResolveLocationPlace(ctx context.Context, placeID string) (Loc
 	if s.places == nil {
 		return LocationResult{}, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Location provider is not configured")
 	}
-	place, err := s.places.PlaceDetails(ctx, placeID)
+	var place Place
+	var err error
+	if essentials, ok := s.places.(PlaceEssentialsProvider); ok {
+		place, err = essentials.PlaceEssentials(ctx, placeID)
+	} else {
+		place, err = s.places.PlaceDetails(ctx, placeID)
+	}
 	if err != nil {
 		return LocationResult{}, httpapi.E(502, "PLACES_UNAVAILABLE", "Location provider is temporarily unavailable")
 	}
@@ -678,10 +791,9 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// open a detail page, verify a visit, or write a review, and search_results.store_id
 	// stays NULL so history cannot be replayed without calling Google again.
 	//
-	// Materialize mapped places too. The result row below uses the live provider payload,
-	// while the detail page reads the persisted source. Updating only new places made an
-	// existing store show a current phone/photo in search and stale blanks in its detail.
-	// materializePlaces is idempotent and preserves a store-managed phone number.
+	// Materialize mapped places too. The result row below uses the live cheap payload,
+	// while the detail page reads the persisted source. The merge refreshes cheap fields
+	// without erasing detail fields previously bought for an existing store.
 	imported, e := s.materializePlaces(ctx, external)
 	if e != nil {
 		return Response{}, e
@@ -691,12 +803,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			if localIDs[m.Platform.StoreID] {
 				for i := range results {
 					if results[i].ID != nil && *results[i].ID == m.Platform.StoreID {
-						results[i].Google = &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}
-						// Our own record wins: it is the number the store gave us, or one an
-						// admin corrected. The provider only fills a gap.
-						if results[i].Phone == "" {
-							results[i].Phone = p.Phone
-						}
+						results[i].Google = listExternal(p)
 						results[i].Source = "google+platform"
 						results[i].externalPlaceID = p.PlaceID
 					}
@@ -704,12 +811,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Photo: m.Photo, Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Photo: m.Photo, Google: listExternal(p), Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
 			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Phone: p.Phone, Google: &External{Provider: "google", PlaceID: p.PlaceID, Rating: p.Rating, RatingCount: p.RatingCount, PhotoName: p.PhotoName, PhotoAttributions: p.PhotoAttributions, BusinessStatus: p.BusinessStatus}, score: googleScore(p, rank), externalPlaceID: p.PlaceID}
+			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Google: listExternal(p), score: googleScore(p, rank), externalPlaceID: p.PlaceID}
 			if id, ok := imported[p.PlaceID]; ok {
 				storeID := id
 				r.ID = &storeID
@@ -833,6 +940,17 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
 }
 
+// listExternal is intentionally unable to expose detail-tier fields. Keeping this shape
+// at the DTO boundary protects the product decision even if a cached fixture or another
+// provider implementation hands Search a richer Place than Google search now requests.
+func listExternal(p Place) *External {
+	return &External{
+		Provider: "google", PlaceID: p.PlaceID, PhotoName: p.PhotoName,
+		PhotoAttributions: append([]string{}, p.PhotoAttributions...),
+		BusinessStatus:    p.BusinessStatus,
+	}
+}
+
 func categoriesIntersect(storeCategories, requested []string) bool {
 	for _, have := range storeCategories {
 		for _, want := range requested {
@@ -884,9 +1002,9 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	return out, rows.Err()
 }
 
-// Internal results must carry the same stored Google score as their detail page even
-// when Google's live text search did not return that store in this particular request.
-// Live data already attached by the merge above wins; this fills only missing values.
+// Internal results still carry the stored cheap Google identity/status/photo metadata
+// when the live text search did not return that store. Expensive ratings and hours belong
+// only to detail and are intentionally not selected here.
 func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) error {
 	ids := make([]uuid.UUID, 0, len(results))
 	for i := range results {
@@ -897,13 +1015,9 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,
- CASE WHEN jsonb_typeof(attribution->'rating')='number' THEN (attribution->>'rating')::float8 ELSE 0 END,
- CASE WHEN jsonb_typeof(attribution->'rating_count')='number' THEN (attribution->>'rating_count')::int ELSE 0 END,
- coalesce(attribution->>'photo_name',''),
+	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,coalesce(attribution->>'photo_name',''),
 	CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END,
-	coalesce(attribution->>'business_status',''),
-	 CASE WHEN jsonb_typeof(attribution->'opening_hours')='object' THEN attribution->>'opening_hours' ELSE '' END
+	coalesce(attribution->>'business_status','')
 	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
 	if err != nil {
 		return err
@@ -913,19 +1027,10 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	for rows.Next() {
 		var id uuid.UUID
 		var item External
-		var hoursJSON string
-		if err = rows.Scan(&id, &item.PlaceID, &item.Rating, &item.RatingCount, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus, &hoursJSON); err != nil {
+		if err = rows.Scan(&id, &item.PlaceID, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus); err != nil {
 			return err
 		}
 		item.Provider = "google"
-		if hoursJSON != "" {
-			var hours OpeningHours
-			if json.Unmarshal([]byte(hoursJSON), &hours) == nil {
-				// Answered now, never stored. "Open" is true for as long as it is true.
-				hours.OpenNow = hours.OpenAt(s.now())
-				item.Hours = &hours
-			}
-		}
 		stored[id] = &item
 	}
 	if err = rows.Err(); err != nil {
@@ -1223,7 +1328,10 @@ func placesCacheKey(query string, lat, lon *float64, radius int, locale string) 
 		return strconv.FormatFloat(math.Round(*v*100)/100, 'f', 2, 64)
 	}
 	return strings.Join([]string{
-		foldLatin(normalizeText(query)), coarse(lat), coarse(lon),
+		// v2 invalidates the six-hour rows written before list payloads stopped carrying
+		// detail-tier fields. It avoids both displaying them and re-materializing them as
+		// though they were a fresh cheap response after deployment.
+		"v2", foldLatin(normalizeText(query)), coarse(lat), coarse(lon),
 		strconv.Itoa(radius), locale,
 	}, "|")
 }

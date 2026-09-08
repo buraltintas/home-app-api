@@ -17,6 +17,7 @@
   },
   "results": [
     {
+	  "id": "847c9ad4-126e-4b53-a8bb-9f2f80768d27",
       "search_result_impression_id": "b03d5888-bf56-47ec-ac62-fb10d79758ba",
       "source": "google",
       "name": "IKEA Bayrampaşa",
@@ -24,12 +25,10 @@
       "latitude": 41.0476,
       "longitude": 28.8975,
       "distance_meters": 1820.4,
-      "categories": [],
+	  "categories": ["furniture", "home_accessories"],
       "google": {
         "provider": "google",
-        "place_id": "ChIJIkeaBayrampasaExample",
-        "rating": 4.2,
-        "rating_count": 24180
+	    "place_id": "ChIJIkeaBayrampasaExample"
       }
     }
   ]

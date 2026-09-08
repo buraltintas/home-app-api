@@ -37,9 +37,7 @@
       },
       "google": {
         "provider": "google",
-        "place_id": "ChIJLumaKadikoyExample",
-        "rating": 4.3,
-        "rating_count": 214
+	    "place_id": "ChIJLumaKadikoyExample"
       }
     },
     {
@@ -53,9 +51,7 @@
       "categories": ["lighting"],
       "google": {
         "provider": "google",
-        "place_id": "ChIJModaIsikExample",
-        "rating": 4.7,
-        "rating_count": 89
+	    "place_id": "ChIJModaIsikExample"
       }
     }
   ]
