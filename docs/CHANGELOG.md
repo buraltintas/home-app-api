@@ -6,6 +6,14 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Welcome email now matches the current review journey
+
+- The welcome message now describes location-ordered store discovery, proximity
+  verification, eight-criterion reviews, and contribution levels instead of the retired
+  free-text, photo, and favourites journey.
+- Equivalent copy ships in all four supported locales so the email does not describe a
+  different product depending on account language.
+
 ## Explicitly excluded trades can no longer be reintroduced by intent enrichment
 
 - Deterministic out-of-scope terms such as warehouse/storage and repair services now veto

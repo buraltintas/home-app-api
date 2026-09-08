@@ -45,6 +45,23 @@ func TestWelcomeFallsBackToDefaultLocale(t *testing.T) {
 	}
 }
 
+func TestWelcomeCopyMatchesCurrentReviewJourney(t *testing.T) {
+	message, err := RenderWelcome(i18n.LocaleTR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"Mağazaları keşfedin!", "Ziyaretinizi doğrulayın!", "Değerlendirmenizi yapın!", "Seviyenizi yükseltin!"} {
+		if !strings.Contains(message.Text, expected) {
+			t.Fatalf("welcome message is missing current journey step %q", expected)
+		}
+	}
+	for _, retired := range []string{"fotoğraf ekleyin", "Favorilerinizi biriktirin", "Deneyiminizi yazın"} {
+		if strings.Contains(message.Text, retired) {
+			t.Fatalf("welcome message still describes retired step %q", retired)
+		}
+	}
+}
+
 func TestWorkerRendersBothTemplatesAndRejectsUnknownOnes(t *testing.T) {
 	worker := &Worker{from: brand.DefaultEmailFrom}
 	message, err := worker.render(job{Template: "welcome", Recipient: "new@test", Locale: i18n.LocaleEN})
