@@ -167,14 +167,9 @@ func (h *OpeningHours) OpenAt(t time.Time) *bool {
 }
 
 type External struct {
-	Provider          string        `json:"provider"`
-	PlaceID           string        `json:"place_id"`
-	Rating            float64       `json:"rating,omitempty"`
-	RatingCount       int           `json:"rating_count,omitempty"`
-	PhotoName         string        `json:"photo_name,omitempty"`
-	PhotoAttributions []string      `json:"photo_attributions,omitempty"`
-	BusinessStatus    string        `json:"business_status,omitempty"`
-	Hours             *OpeningHours `json:"opening_hours,omitempty"`
+	Provider       string `json:"provider"`
+	PlaceID        string `json:"place_id"`
+	BusinessStatus string `json:"business_status,omitempty"`
 }
 
 // Photo mirrors the stored provider photograph. Attribution travels with it because the
@@ -204,11 +199,6 @@ type Result struct {
 	CategoryLabels []string  `json:"category_labels,omitempty"`
 	Platform       *Platform `json:"platform,omitempty"`
 	Google         *External `json:"google,omitempty"`
-	// Photo is the photograph already on file for this store, used when the live provider
-	// response carries none. Without it a store we hold ourselves -- including every
-	// promoted one, which reaches the list without going through Google at all -- renders
-	// as a blank tile beside imported results that have a picture.
-	Photo *Photo `json:"photo,omitempty"`
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
@@ -751,16 +741,7 @@ func containsAny(s string, terms ...string) bool {
 }
 func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
-	var photo *Photo
-	if x.Photo != nil {
-		switch {
-		case x.Photo.Source == "admin" && x.Photo.MediaID != "":
-			photo = &Photo{Source: "admin", MediaID: x.Photo.MediaID}
-		case x.Photo.Source == "google" && ValidPhotoName(x.Photo.Name):
-			photo = &Photo{Source: "google", Name: x.Photo.Name, Attributions: x.Photo.Attributions}
-		}
-	}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Photo: photo, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

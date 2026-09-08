@@ -25,8 +25,8 @@ import (
 // measurements below and will be moved more than once. A threshold scattered through the
 // search body as a literal cannot be moved by anyone but the person who wrote it.
 type SufficiencyPolicy struct {
-	// Enabled is the feature flag. While it is false the search behaves exactly as it
-	// does in production today: the provider is asked in parallel, every time.
+	// Enabled is an emergency off switch. It defaults on: paying for the same catalogue
+	// answer on every request is never the safe production behaviour.
 	Enabled bool
 	// MinResults: how many local results count as a filled result page.
 	MinResults int
@@ -75,7 +75,7 @@ func (p SufficiencyPolicy) relevanceSample() int {
 // completely different work.
 const (
 	reasonGateDisabled          = "gate_disabled"
-	reasonExplicitStore         = "explicit_store"
+	reasonExplicitStore         = "explicit_store_missing"
 	reasonInsufficientResults   = "insufficient_results"
 	reasonInsufficientRelevance = "insufficient_relevance"
 	reasonInsufficientCoverage  = "insufficient_coverage"
@@ -87,10 +87,11 @@ const coverageUnknown = -1
 
 // sufficiency is what the gate looks at. Nothing in here comes from the provider.
 type sufficiency struct {
-	ResultCount   int
-	Relevance     float64
-	Coverage      int
-	ExplicitStore bool
+	ResultCount        int
+	Relevance          float64
+	Coverage           int
+	ExplicitStore      bool
+	ExplicitStoreFound bool
 }
 
 type gateDecision struct {
@@ -100,19 +101,24 @@ type gateDecision struct {
 
 func (d gateDecision) reason() string { return strings.Join(d.Reasons, ",") }
 
-// decide is the whole rule: enoughResults && goodRelevance && knownCoverage &&
-// !explicitStoreSearch. Every failing condition is reported, not just the first, so the
-// counters say which of them is actually driving the bill.
+// decide is the whole rule. A named store that is already local is sufficient by itself;
+// generic discovery needs enough results, good relevance and known coverage. Every
+// failing generic condition is reported, not just the first, so the counters say which
+// one is actually driving the bill.
 func (p SufficiencyPolicy) decide(in sufficiency) gateDecision {
 	if !p.Enabled {
 		return gateDecision{Reasons: []string{reasonGateDisabled}}
 	}
 	var reasons []string
-	// Somebody who typed a store's name wants that store, not something like it. A
-	// catalogue full of near neighbours is not an answer to "Yataş Ataşehir", and a
-	// gate that counted them would be the one change here that people would notice.
+	// A store name already found in our catalogue is a complete answer even when the
+	// surrounding catalogue is thin. Only a named store missing from our database needs
+	// the provider; result-count and coverage thresholds describe category discovery, not
+	// a direct lookup.
 	if in.ExplicitStore {
-		reasons = append(reasons, reasonExplicitStore)
+		if in.ExplicitStoreFound {
+			return gateDecision{LocalOnly: true}
+		}
+		return gateDecision{Reasons: []string{reasonExplicitStore}}
 	}
 	if in.ResultCount < p.MinResults {
 		reasons = append(reasons, reasonInsufficientResults)

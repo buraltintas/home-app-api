@@ -34,10 +34,17 @@ func TestThinCatalogueStillAsksTheProvider(t *testing.T) {
 	}
 }
 
-// Somebody who types a store's name wants that store. A catalogue full of near
-// neighbours must never stand in for it -- this is the one condition whose absence
-// people would notice immediately.
-func TestANamedStoreAlwaysReachesTheProvider(t *testing.T) {
+// Somebody who types a store's name and gets that store from our own catalogue already
+// has the answer. Buying the same identity again cannot improve the result.
+func TestANamedStoreAlreadyHeldStaysLocal(t *testing.T) {
+	d := policy().decide(sufficiency{ResultCount: 1, Relevance: 1, Coverage: 1, ExplicitStore: true, ExplicitStoreFound: true})
+	if !d.LocalOnly {
+		t.Fatalf("expected a local-only exact store lookup, got reasons %v", d.Reasons)
+	}
+}
+
+// Near neighbours are not an answer when the named store itself is absent.
+func TestAMissingNamedStoreReachesTheProvider(t *testing.T) {
 	d := policy().decide(sufficiency{ResultCount: 30, Relevance: 1, Coverage: 900, ExplicitStore: true})
 	if d.LocalOnly {
 		t.Fatal("expected a provider call for an explicit store search")
@@ -76,9 +83,9 @@ func TestTooFewResultsReachTheProvider(t *testing.T) {
 // often" and "we call the provider too often because the catalogue is thin" lead to
 // completely different work, and the counters have to be able to tell them apart.
 func TestEveryFailingConditionIsCounted(t *testing.T) {
-	d := policy().decide(sufficiency{ResultCount: 1, Relevance: 0, Coverage: 0, ExplicitStore: true})
-	if len(d.Reasons) != 4 {
-		t.Fatalf("reasons=%v, want all four", d.Reasons)
+	d := policy().decide(sufficiency{ResultCount: 1, Relevance: 0, Coverage: 0})
+	if len(d.Reasons) != 3 {
+		t.Fatalf("reasons=%v, want all three generic-search failures", d.Reasons)
 	}
 }
 
@@ -91,12 +98,24 @@ func TestUnknownCoverageFallsBack(t *testing.T) {
 	}
 }
 
-// With the flag off nothing here decides anything: the search behaves as it does in
-// production today, and the recorded reason says so.
-func TestTheFlagOffLeavesTodaysBehaviourAlone(t *testing.T) {
+// With the emergency flag off nothing here decides anything: the legacy always-provider
+// behaviour is restored and the recorded reason says so.
+func TestTheFlagOffRestoresLegacyBehaviour(t *testing.T) {
 	d := DefaultSufficiencyPolicy().decide(sufficiency{ResultCount: 30, Relevance: 1, Coverage: 900})
 	if d.LocalOnly || d.reason() != reasonGateDisabled {
 		t.Fatalf("decision=%+v, want a disabled gate", d)
+	}
+}
+
+func TestLocalStoreNameMatchUsesStoreOrBrandIdentity(t *testing.T) {
+	items := []storepkg.Item{{Name: "Willa’s Home Kadıköy", BrandName: "Willa's Home"}}
+	for _, name := range []string{"Willas Home", "Willa's Home Kadıköy"} {
+		if !localContainsStoreName(items, name) {
+			t.Fatalf("expected %q to match a local store identity", name)
+		}
+	}
+	if localContainsStoreName(items, "Başka Mobilya") {
+		t.Fatal("an unrelated store name matched the local catalogue")
 	}
 }
 

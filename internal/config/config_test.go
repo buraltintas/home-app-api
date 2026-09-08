@@ -32,7 +32,7 @@ func TestLoadSupportsBFFSecretRotationAndDefaultLocale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.BFFSecrets) != 2 || cfg.BFFSecrets[0] != "current" || cfg.BFFSecrets[1] != "previous" || cfg.DefaultLocale != "de" || cfg.EmailFrom != brand.DefaultEmailFrom || cfg.StoreVisitProofTTL.Hours() != 720 || cfg.StoreLocationMaxAccuracyMeters != 1000 || cfg.StoreReviewRadiusMeters != 2000 || cfg.SearchGateMinResults != 30 {
+	if len(cfg.BFFSecrets) != 2 || cfg.BFFSecrets[0] != "current" || cfg.BFFSecrets[1] != "previous" || cfg.DefaultLocale != "de" || cfg.EmailFrom != brand.DefaultEmailFrom || cfg.StoreVisitProofTTL.Hours() != 720 || cfg.StoreLocationMaxAccuracyMeters != 1000 || cfg.StoreReviewRadiusMeters != 2000 || !cfg.SearchLocalFirstEnabled || cfg.SearchShadowRate != 0 || cfg.SearchGateMinResults != 30 {
 		t.Fatalf("config=%+v", cfg)
 	}
 }

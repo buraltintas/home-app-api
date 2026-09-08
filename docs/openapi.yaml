@@ -680,7 +680,6 @@ components:
         distance_meters: {type: number, minimum: 0}
         categories: {type: array, items: {type: string}}
         catalog_store: {type: boolean, description: Present and true for an editorial catalogue store; does not affect ranking.}
-        photo: {$ref: '#/components/schemas/StorePhoto'}
         platform:
           type: object
           required: [store_id, average_rating, review_count, favorite_count, post_count]
@@ -696,8 +695,6 @@ components:
           properties:
             provider: {const: google}
             place_id: {type: string}
-            photo_name: {type: string, description: Cheap list-tier Google photo resource name when present.}
-            photo_attributions: {type: array, items: {type: string}}
             business_status: {type: string}
     SearchResponse:
       type: object

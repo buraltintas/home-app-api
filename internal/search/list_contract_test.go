@@ -17,12 +17,12 @@ func TestSearchListExternalCannotExposeDetailTierFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := string(raw)
-	for _, forbidden := range []string{"rating", "rating_count", "phone", "website", "opening_hours"} {
+	for _, forbidden := range []string{"rating", "rating_count", "phone", "website", "opening_hours", "photo", "photo_name", "photo_attributions"} {
 		if strings.Contains(got, forbidden) {
 			t.Errorf("list DTO exposed %q in %s", forbidden, got)
 		}
 	}
-	for _, required := range []string{"place-1", "photo_name", "business_status"} {
+	for _, required := range []string{"place-1", "business_status"} {
 		if !strings.Contains(got, required) {
 			t.Errorf("list DTO lost %q in %s", required, got)
 		}

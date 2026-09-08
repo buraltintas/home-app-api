@@ -32,6 +32,12 @@ type gatePlaces struct {
 	places []search.Place
 }
 
+type fixedIntentParser struct{ intent search.Intent }
+
+func (p fixedIntentParser) ParseSearchIntent(context.Context, string, search.Context) (search.Intent, error) {
+	return p.intent, nil
+}
+
 func (p *gatePlaces) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
 	p.calls++
 	return p.places, nil
@@ -42,12 +48,16 @@ func (p *gatePlaces) PlaceDetails(context.Context, string) (search.Place, error)
 }
 
 func gateSearchService(t *testing.T, db *pgxpool.Pool, places search.PlacesProvider, policy search.SufficiencyPolicy) *search.Service {
+	return gateSearchServiceWithParser(t, db, nil, places, policy)
+}
+
+func gateSearchServiceWithParser(t *testing.T, db *pgxpool.Pool, parser search.IntentParser, places search.PlacesProvider, policy search.SufficiencyPolicy) *search.Service {
 	t.Helper()
 	report, err := reporting.NewService(db, "Europe/Istanbul", 72*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := search.NewService(db, storepkg.NewService(db, report), nil, places, "", 3, report, 72*time.Hour, 24*time.Hour)
+	svc := search.NewService(db, storepkg.NewService(db, report), parser, places, "", 3, report, 72*time.Hour, 24*time.Hour)
 	svc.UseSufficiencyPolicy(policy)
 	return svc
 }
@@ -140,9 +150,9 @@ func TestGateStillCallsTheProviderWhereTheCatalogueIsThin(t *testing.T) {
 	}
 }
 
-// Somebody who names a store gets the provider asked however full the catalogue is. A
-// wall of similar shops is not an answer to a name.
-func TestGateAlwaysAsksTheProviderForANamedStore(t *testing.T) {
+// A named store missing from our catalogue still reaches the provider. A wall of similar
+// shops is not an answer to that name.
+func TestGateAsksTheProviderForAMissingNamedStore(t *testing.T) {
 	db := database(t)
 	lat, lon := 36.85+float64(uuid.New().ID()%100)/1000, 30.62
 	catalogue(t, db, lat, lon, 60)
@@ -158,6 +168,50 @@ func TestGateAlwaysAsksTheProviderForANamedStore(t *testing.T) {
 	}
 	if _, _, googleUsed := gateRecord(t, db, response.SearchID); !googleUsed {
 		t.Fatal("a named store search must be recorded as having used the provider")
+	}
+}
+
+// A direct store lookup is already answered when that store exists in PostgreSQL. Generic
+// discovery thresholds describe the surrounding catalogue and must not turn a complete
+// name match into another paid call.
+func TestGateKeepsAnExistingNamedStoreLocal(t *testing.T) {
+	db := database(t)
+	id := uuid.New()
+	name := "Yerel Mobilya " + id.String()[:8]
+	if _, err := db.Exec(t.Context(), `INSERT INTO stores(id,name,slug,city,district,address,location) VALUES($1,$2,$3,'Antalya','Muratpaşa','Cadde No:3, Muratpaşa/Antalya, Türkiye',ST_SetSRID(ST_MakePoint(30.70,36.88),4326)::geography)`, id, name, "named-local-"+id.String()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(t.Context(), `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug='furniture' ON CONFLICT DO NOTHING`, id); err != nil {
+		t.Fatal(err)
+	}
+	parser := fixedIntentParser{intent: search.Intent{
+		Scope: search.ScopeHomeLiving, QueryLanguage: i18n.LocaleTR,
+		NormalizedQuery: name, StoreName: name, Categories: []string{"furniture"},
+		ProductTerms: []string{}, StyleTerms: []string{}, Attributes: []string{}, SemanticTerms: []string{},
+	}}
+	places := &gatePlaces{places: []search.Place{newPlace(uuid.NewString(), 36.88, 30.70)}}
+	svc := gateSearchServiceWithParser(t, db, parser, places, gatePolicy())
+
+	response, err := svc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), nil, nil, search.Request{Query: name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if places.calls != 0 {
+		t.Fatalf("provider calls=%d, want none", places.calls)
+	}
+	found := false
+	for _, result := range response.Results {
+		found = found || result.ID != nil && *result.ID == id
+	}
+	if !found {
+		t.Fatalf("local named store missing from results: %+v", response.Results)
+	}
+	localOnly, reason, googleUsed := gateRecord(t, db, response.SearchID)
+	if !localOnly || reason != "" || googleUsed {
+		t.Fatalf("local_only=%t reason=%q google_used=%t", localOnly, reason, googleUsed)
 	}
 }
 
@@ -200,9 +254,9 @@ func TestFallbackStillImportsAndDeduplicates(t *testing.T) {
 	}
 }
 
-// The flag is the way back. With it off the search behaves exactly as production does
-// today: the provider is asked in parallel, whatever the catalogue holds.
-func TestFlagOffRestoresTodaysBehaviour(t *testing.T) {
+// The flag is the way back. With it off the legacy behaviour is restored: the provider
+// is asked in parallel, whatever the catalogue holds.
+func TestFlagOffRestoresLegacyBehaviour(t *testing.T) {
 	db := database(t)
 	lat, lon := 36.85+float64(uuid.New().ID()%100)/1000, 30.64
 	catalogue(t, db, lat, lon, 60)

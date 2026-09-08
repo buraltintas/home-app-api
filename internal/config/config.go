@@ -47,10 +47,9 @@ type Config struct {
 	SearchLocationDecimals                                  int
 	ReportingTimezone                                       string
 	SearchAttributionWindow                                 time.Duration
-	// Local-first search. SearchLocalFirstEnabled is the feature flag: while it is false
-	// the search asks the provider on every request, exactly as it always has. The
-	// thresholds sit beside it so they can be moved from a deployment rather than a
-	// release -- they are meant to move as the shadow measurements come in.
+	// Local-first search. This is enabled by default so a deployment without the optional
+	// tuning variables never pays the provider for an answer already held in PostgreSQL.
+	// The switch remains as an emergency rollback control.
 	SearchLocalFirstEnabled                                                bool
 	SearchGateMinResults, SearchGateMinCoverage                            int
 	SearchGateCoverageRadiusMeters, SearchGateRelevanceSample              int
@@ -167,7 +166,7 @@ func Load() (Config, error) {
 		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
 	}
 	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
-	if c.SearchLocalFirstEnabled, err = boolean("SEARCH_LOCAL_FIRST_ENABLED", false); err != nil {
+	if c.SearchLocalFirstEnabled, err = boolean("SEARCH_LOCAL_FIRST_ENABLED", true); err != nil {
 		return c, err
 	}
 	// Conservative on purpose. The first version of the gate is not trying to reach the
@@ -187,7 +186,7 @@ func Load() (Config, error) {
 	if c.SearchGateMinRelevance, err = number("SEARCH_GATE_MIN_RELEVANCE", 0.6); err != nil {
 		return c, err
 	}
-	if c.SearchShadowRate, err = number("SEARCH_SHADOW_RATE", 0.05); err != nil {
+	if c.SearchShadowRate, err = number("SEARCH_SHADOW_RATE", 0); err != nil {
 		return c, err
 	}
 	if c.SearchGateMinResults < 0 || c.SearchGateRelevanceSample < 1 || c.SearchGateMinCoverage < 0 || c.SearchGateCoverageRadiusMeters < 100 {

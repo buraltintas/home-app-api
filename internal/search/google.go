@@ -20,11 +20,11 @@ type GooglePlaces struct {
 }
 
 // A Places request is billed at the tier of its most expensive requested field. Search
-// results need identity, classification, position, status and a visual -- not contact,
+// results need identity, classification, position and status -- not a photograph, contact,
 // ratings or hours. Keeping these masks named and tested makes an accidental tier increase
 // visible in review instead of hiding it in a long header literal.
 const (
-	googleSearchFieldMask   = "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.attributions,places.photos,places.primaryType,places.businessStatus"
+	googleSearchFieldMask   = "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.attributions,places.primaryType,places.businessStatus"
 	googleDetailFieldMask   = "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus"
 	googleLocationFieldMask = "id,formattedAddress,location,types"
 )
@@ -82,9 +82,8 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 				Provider    string `json:"provider"`
 				ProviderURI string `json:"providerUri"`
 			}
-			Photos         []googlePhoto `json:"photos"`
-			PrimaryType    string        `json:"primaryType"`
-			BusinessStatus string        `json:"businessStatus"`
+			PrimaryType    string `json:"primaryType"`
+			BusinessStatus string `json:"businessStatus"`
 		}
 	}
 	if e = json.NewDecoder(io.LimitReader(r.Body, 2<<20)).Decode(&payload); e != nil {
@@ -96,7 +95,6 @@ func (g *GooglePlaces) textSearch(ctx context.Context, q string, lat, lon *float
 		for _, a := range x.Attributions {
 			p.Attributions = append(p.Attributions, a.Provider+" "+a.ProviderURI)
 		}
-		p.PhotoName, p.PhotoAttributions = firstPhoto(x.Photos)
 		out = append(out, p)
 	}
 	return out, nil
@@ -110,8 +108,8 @@ type googlePhoto struct {
 	} `json:"authorAttributions"`
 }
 
-// firstPhoto returns the leading photo resource name and its required author
-// attributions. Google's terms require the attribution to be displayed with the photo.
+// Google photos are read only by Place Details. Search lists deliberately omit them so a
+// results page cannot fan out into a separately billed photo-media request for every row.
 // The provider's opening hours. The descriptions are already written for a reader in the
 // language the request asked for; the periods are what a machine needs to answer "is it
 // open now", which the descriptions cannot be parsed back into reliably in four languages.

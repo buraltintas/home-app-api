@@ -101,10 +101,10 @@ raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
                                             internal Postgres search
                                                           |
                                               sufficiency gate:
-                                     enough results && relevant results
-                                  && known coverage && no store named outright
+                              named store found OR (enough results
+                                && relevant results && known coverage)
                                           |                               |
-                                    all four hold                    any one fails
+                                     sufficient                      insufficient
                                           |                               |
                                   no provider call                   Google Places
                                           |                               |
@@ -115,17 +115,29 @@ raw query -> deterministic parser -> optional OpenAI scope/intent enrichment
                                       persist search + impressions -> response
 ```
 
-The provider is asked only when our own catalogue cannot answer the question. A sufficiency gate sits between the local search and the provider call and skips the call only when all four of its conditions hold; every failing condition is recorded, so the reason a call happened is answerable per search. It is controlled by `SEARCH_LOCAL_FIRST_ENABLED` and, while that is off, the two home/living providers run concurrently as they always have. A small configurable sample of local-only searches asks the provider anyway after the response has gone out, purely to measure what the decision cost; that answer is read and never imported, so the catalogue does not learn from a measurement. Results with at least one proximity-verified Boşa Gezme! review receive a ranking tier above provider-only results. Out-of-scope and unclear requests do not invoke either store provider.
+The provider is asked only when our own catalogue cannot answer the question. A named store
+already present in PostgreSQL is sufficient by itself; a generic discovery query needs a
+full, relevant result set and known nearby catalogue coverage. Every failing generic
+condition is recorded, so the reason a call happened is answerable per search. Local-first
+is the production default; `SEARCH_LOCAL_FIRST_ENABLED=false` is an emergency rollback.
+Optional shadow comparison is explicitly paid measurement, defaults to zero, never imports
+its answer and must be enabled deliberately for a bounded quality study. Results with at
+least one proximity-verified Boşa Gezme! review receive a ranking tier above provider-only
+results. Out-of-scope requests do not invoke either store provider; an unclear query invokes
+Google only when it names no local catalogue store.
 
 Text Search is a candidate/list operation and its field mask contains only provider identity,
-address, coordinates, classification, business status and photo. Its result is materialized
+address, coordinates, classification and business status. Its result is materialized
 immediately so every visible row has an internal store ID, but a cheap refresh merges into
 the existing `store_external_sources` object and cannot erase detail-tier data. Rating,
 rating count, opening hours/timezone, phone and website are fetched by Place Details only
 when the store page is first opened. `details_fetched_at` records a successful answer even
 when all optional fields were absent; a PostgreSQL advisory transaction lock makes this
 once-only across instances. Existing catalogue/admin contact fields win over provider data.
-Provider retention is configuration-driven and raw Places payloads are not stored.
+Search lists expose no image field and therefore cannot fan out into separately billed
+photo-media calls. Store detail uses administrator-owned cover media when present and falls
+back to its persisted Google photo resource; the media bytes are streamed rather than
+stored. Provider retention is configuration-driven and raw Places payloads are not stored.
 
 Search accepts Turkish, English, German and Russian through one pipeline.
 Unicode-aware normalization preserves Cyrillic and performs only targeted accent

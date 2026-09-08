@@ -162,7 +162,9 @@ func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[st
 			// that was already bought. A full detail response additionally records the
 			// durable marker that prevents a second paid lookup.
 			if _, err = tx.Exec(ctx, `UPDATE store_external_sources
-SET attribution=(attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb,
+SET attribution=CASE WHEN $3
+      THEN (attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb
+      ELSE (attribution - 'attributions' - 'business_status' - 'types') || $2::jsonb END,
     refreshed_at=now(),
     details_fetched_at=CASE WHEN $3 THEN now() ELSE details_fetched_at END
 WHERE store_id=$1 AND provider='google'`, existing, attr, p.DetailsFetched); err != nil {
@@ -689,10 +691,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		}
 		localElapsed = time.Since(localStarted)
 		observed = sufficiency{
-			ResultCount:   len(internal),
-			Relevance:     localRelevance(internal, intent, s.policy.relevanceSample()),
-			Coverage:      coverage,
-			ExplicitStore: intent.StoreName != "",
+			ResultCount:        len(internal),
+			Relevance:          localRelevance(internal, intent, s.policy.relevanceSample()),
+			Coverage:           coverage,
+			ExplicitStore:      intent.StoreName != "",
+			ExplicitStoreFound: localContainsStoreName(internal, intent.StoreName),
 		}
 		decision = s.policy.decide(observed)
 		// The single change to the flow: when what we already hold answers the question,
@@ -731,7 +734,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// classifier used for every city decide whether the matches sell home goods.
 		// Definite out-of-scope requests still never reach the provider unless they match
 		// a store already in our catalogue.
-		if s.places != nil && (len(named) > 0 || intent.Scope == ScopeUnclear) {
+		if s.places != nil && !localContainsStoreName(named, in.Query) && intent.Scope == ScopeUnclear {
 			googleUsed = true
 			var providerErr error
 			if localized, ok := s.places.(LocalizedPlacesProvider); ok {
@@ -811,7 +814,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				continue
 			}
 			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Photo: m.Photo, Google: listExternal(p), Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
+			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Google: listExternal(p), Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
 			localIDs[id] = true
 		} else {
 			// Platform stays nil: a freshly imported store has no community data, and
@@ -945,10 +948,20 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 // provider implementation hands Search a richer Place than Google search now requests.
 func listExternal(p Place) *External {
 	return &External{
-		Provider: "google", PlaceID: p.PlaceID, PhotoName: p.PhotoName,
-		PhotoAttributions: append([]string{}, p.PhotoAttributions...),
-		BusinessStatus:    p.BusinessStatus,
+		Provider: "google", PlaceID: p.PlaceID, BusinessStatus: p.BusinessStatus,
 	}
+}
+
+func localContainsStoreName(items []storepkg.Item, name string) bool {
+	if strings.TrimSpace(name) == "" {
+		return false
+	}
+	for _, item := range items {
+		if nameMatches(item.Name, name) || nameMatches(item.BrandName, name) {
+			return true
+		}
+	}
+	return false
 }
 
 func categoriesIntersect(storeCategories, requested []string) bool {
@@ -1002,9 +1015,9 @@ func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[strin
 	return out, rows.Err()
 }
 
-// Internal results still carry the stored cheap Google identity/status/photo metadata
-// when the live text search did not return that store. Expensive ratings and hours belong
-// only to detail and are intentionally not selected here.
+// Internal results still carry stored Google identity and business status when the live
+// text search did not return that store. Photo metadata is deliberately excluded: showing
+// it on a list would turn every visible image into a separately billed photo-media call.
 func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) error {
 	ids := make([]uuid.UUID, 0, len(results))
 	for i := range results {
@@ -1015,9 +1028,7 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	if len(ids) == 0 {
 		return nil
 	}
-	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,coalesce(attribution->>'photo_name',''),
-	CASE WHEN jsonb_typeof(attribution->'photo_attributions')='array' THEN array(SELECT jsonb_array_elements_text(attribution->'photo_attributions')) ELSE '{}'::text[] END,
-	coalesce(attribution->>'business_status','')
+	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,coalesce(attribution->>'business_status','')
 	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
 	if err != nil {
 		return err
@@ -1027,7 +1038,7 @@ func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) erro
 	for rows.Next() {
 		var id uuid.UUID
 		var item External
-		if err = rows.Scan(&id, &item.PlaceID, &item.PhotoName, &item.PhotoAttributions, &item.BusinessStatus); err != nil {
+		if err = rows.Scan(&id, &item.PlaceID, &item.BusinessStatus); err != nil {
 			return err
 		}
 		item.Provider = "google"

@@ -6,14 +6,34 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Catalogue-first search and detail caching now prevent repeat Places spend
+
+- Local-first search is now the production default rather than an opt-in. A named store
+  already found in PostgreSQL is a complete local answer and does not call Google even
+  when the surrounding catalogue is below the generic result or coverage thresholds.
+  A missing named store and an insufficient generic discovery search still reach Google,
+  preserving catalogue discovery instead of blindly suppressing it.
+- Paid shadow comparisons now default to zero and must be enabled deliberately for a
+  bounded quality study. The six-hour query/location cache continues to collapse
+  identical provider-backed searches.
+- Google Text Search no longer asks for or exposes photograph metadata, and search lists
+  render no thumbnails. Removing that field does not lower Text Search below the Pro SKU
+  because the result name, address and coordinates already require Pro; it prevents the
+  separate Place Photos request that each visible Google thumbnail could otherwise trigger.
+  Store detail keeps the required image priority: administrator-owned media first, then the
+  persisted Google photo reference, then the no-photo state.
+- Store detail continues to fetch a missing Google record once under a cross-instance
+  advisory lock, persist the complete answer and mark even empty optional fields as
+  fetched. Once that marker exists, later detail reads use PostgreSQL and never call Place
+  Details again.
+
 ## Result lists no longer buy or expose store-detail data
 
 - Google Text Search now asks only for the identity, address, coordinates, provider types,
-  business status and photograph needed to classify and render a result. Rating/count,
-  opening hours/timezone, phone and website are absent from both the field mask and the
-  list DTO. Because Places prices a request at its most expensive requested field, this
-  moves store search down one billing tier; the measured traffic model for this change
-  estimated an 8.5% total Places saving before any volume discount.
+  and business status needed to classify and render a result. Rating/count, opening
+  hours/timezone, phone and website are absent from both the field mask and list DTO. This
+  reduces the data collected on result pages; the later list-photo removal above prevents
+  the separately billed media fan-out.
 - The first read of a Google-backed store detail fetches the complete Place Details record,
   persists it, and records that even an empty optional answer was fetched. Every later read
   uses PostgreSQL. A transaction advisory lock serializes the first read across application

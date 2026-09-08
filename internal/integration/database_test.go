@@ -585,7 +585,7 @@ func TestSearchKeepsGoogleDetailRatingsOutOfLists(t *testing.T) {
 			break
 		}
 	}
-	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil || googleOnly.Google.Rating != 0 || googleOnly.Google.RatingCount != 0 {
+	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil {
 		t.Fatalf("google-only result=%+v", googleOnly)
 	}
 
@@ -607,7 +607,7 @@ func TestSearchKeepsGoogleDetailRatingsOutOfLists(t *testing.T) {
 			break
 		}
 	}
-	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || enriched.Google.Rating != 0 || enriched.Google.RatingCount != 0 || !slices.Contains(enriched.Categories, "furniture") {
+	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || !slices.Contains(enriched.Categories, "furniture") {
 		t.Fatalf("enriched result=%+v", enriched)
 	}
 
@@ -625,7 +625,7 @@ func TestSearchKeepsGoogleDetailRatingsOutOfLists(t *testing.T) {
 			break
 		}
 	}
-	if stored == nil || stored.Google == nil || stored.Google.Rating != 0 || stored.Google.RatingCount != 0 || !slices.Contains(stored.Categories, "furniture") {
+	if stored == nil || stored.Google == nil || !slices.Contains(stored.Categories, "furniture") {
 		t.Fatalf("stored Google result=%+v", stored)
 	}
 }
@@ -655,8 +655,11 @@ func TestCheapSearchRefreshPreservesMappedStoreDetailData(t *testing.T) {
 	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution='{"provider":"Google","rating":4.7,"rating_count":59,"phone":"0551 257 52 64"}'::jsonb,refreshed_at=now()-interval '7 days' WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
 		t.Fatal(err)
 	}
-	// Text Search now carries only fields used in a list. It can refresh the photograph,
-	// but must not erase or expose the detail-tier rating/contact values already held.
+	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution=attribution || '{"photo_name":"places/original/photos/kept","photo_attributions":["Original"]}'::jsonb WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
+		t.Fatal(err)
+	}
+	// Text Search carries neither detail fields nor photo metadata. Even a richer test
+	// double must not replace or expose the stored detail photograph on a result list.
 	place.Rating = 0
 	place.RatingCount = 0
 	place.Phone = ""
@@ -675,7 +678,7 @@ func TestCheapSearchRefreshPreservesMappedStoreDetailData(t *testing.T) {
 			break
 		}
 	}
-	if result == nil || result.Google == nil || result.Google.PhotoName != place.PhotoName || result.Google.Rating != 0 || result.Google.RatingCount != 0 {
+	if result == nil || result.Google == nil {
 		t.Fatalf("search result=%+v", result)
 	}
 
@@ -683,7 +686,7 @@ func TestCheapSearchRefreshPreservesMappedStoreDetailData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.Phone != "0551 257 52 64" || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != place.PhotoName || detail.ExternalSources[0].Attribution["rating_count"] != float64(59) {
+	if detail.Phone != "0551 257 52 64" || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != "places/original/photos/kept" || detail.ExternalSources[0].Attribution["rating_count"] != float64(59) {
 		t.Fatalf("detail phone=%q external_sources=%+v", detail.Phone, detail.ExternalSources)
 	}
 }
@@ -712,9 +715,6 @@ func TestGoogleDetailsAreFetchedOnceOnFirstStoreRead(t *testing.T) {
 	for i := range response.Results {
 		if response.Results[i].Google != nil && response.Results[i].Google.PlaceID == placeID && response.Results[i].ID != nil {
 			storeID = *response.Results[i].ID
-			if response.Results[i].Google.Rating != 0 || response.Results[i].Google.RatingCount != 0 {
-				t.Fatalf("detail data leaked into search result: %+v", response.Results[i].Google)
-			}
 		}
 	}
 	if storeID == uuid.Nil {
