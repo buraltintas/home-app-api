@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/burakaltintas/home-app-api/internal/i18n"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/google/uuid"
 )
@@ -217,9 +218,25 @@ func TestStoreNameDropsOnlyAnEdgeLocation(t *testing.T) {
 }
 
 func TestGuidanceIsLocalizedWithoutQuerySuggestions(t *testing.T) {
-	guidance := guidanceFor("tr", ScopeUnclear)
-	if guidance.Code != "HOME_LIVING_ONLY" || guidance.Message != "Yalnızca ev ve yaşam ürünleri bulabilirim." || len(guidance.Examples) != 0 {
-		t.Fatalf("invalid guidance: %+v", guidance)
+	want := map[i18n.Locale]string{
+		i18n.LocaleTR: "Yalnızca ev ve yaşam ürünleri bulabilirim.",
+		i18n.LocaleEN: "I can only find home and living products.",
+		i18n.LocaleDE: "Ich kann nur Wohn- und Haushaltsprodukte finden.",
+		i18n.LocaleRU: "Я могу искать только товары для дома.",
+	}
+	for locale, message := range want {
+		guidance := guidanceFor(locale, ScopeUnclear)
+		if guidance.Code != "HOME_LIVING_ONLY" || guidance.Message != message || len(guidance.Examples) != 0 {
+			t.Fatalf("invalid %s guidance: %+v", locale, guidance)
+		}
+	}
+}
+
+func TestDeterministicOutOfScopeCannotBeReintroducedByModel(t *testing.T) {
+	base := Deterministic("depolama")
+	got := merge(base, Intent{Scope: ScopeHomeLiving, Categories: []string{"furniture"}, ProductTerms: []string{"cabinet"}, QueryLanguage: i18n.LocaleEN})
+	if got.Scope != ScopeOutOfScope || len(got.Categories) != 0 || len(got.ProductTerms) != 0 {
+		t.Fatalf("model reintroduced excluded storage intent: %+v", got)
 	}
 }
 

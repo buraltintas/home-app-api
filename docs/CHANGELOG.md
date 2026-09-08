@@ -6,6 +6,16 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Explicitly excluded trades can no longer be reintroduced by intent enrichment
+
+- Deterministic out-of-scope terms such as warehouse/storage and repair services now veto
+  model enrichment. This prevents a broad interpretation such as home organisation from
+  turning a plainly excluded warehouse query back into a home-store search.
+- Explicit exclusions skip the intent-model request entirely, reducing latency and cost
+  for requests the product already understands; unclear wording still receives the normal
+  language-model interpretation.
+- The home-and-living-only response is covered in all four supported locales.
+
 ## Catalogue-first search and detail caching now prevent repeat Places spend
 
 - Local-first search is now the production default rather than an opt-in. A named store

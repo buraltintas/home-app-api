@@ -604,7 +604,10 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	intent := Deterministic(in.Query)
 	aiUsed := false
 	fallback := ""
-	if s.ai != nil {
+	// Deterministic out-of-scope matches are deliberate vetoes (for example warehouse,
+	// tire shop or a service business). Asking the model to reinterpret them both costs a
+	// request and used to let a broad home-living answer put the excluded trade back.
+	if s.ai != nil && intent.Scope != ScopeOutOfScope {
 		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, requestLocale})
 		invalid := false
 		if e == nil {
@@ -1157,6 +1160,14 @@ func roundedDistance(v *float64) *int {
 	return &n
 }
 func merge(a, b Intent) Intent {
+	// An explicit trade or service exclusion must not be softened by model enrichment.
+	// Unclear wording may still be enriched; a known warehouse or repair query may not.
+	if a.Scope == ScopeOutOfScope {
+		if i18n.IsSupported(b.QueryLanguage) {
+			a.QueryLanguage = b.QueryLanguage
+		}
+		return a
+	}
 	if b.Scope == ScopeHomeLiving || (a.Scope != ScopeHomeLiving && (b.Scope == ScopeOutOfScope || b.Scope == ScopeUnclear)) {
 		a.Scope = b.Scope
 	}
