@@ -721,9 +721,16 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// and was classified out of scope, while GÜNEY ANTALYA HALI ve YATAK SATIŞ
 		// MAĞAZASI sat in our own catalogue the whole time. Nobody should have to type a
 		// store's full registered name to find it.
-		named, e := s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user)
-		if e != nil {
-			return Response{}, e
+		// The rescue is for text we did not understand, not for text we refused. An
+		// explicit veto is a decision -- "halı saha" is a football pitch -- and searching
+		// the catalogue for it anyway found every carpet shop whose sign carries "halı",
+		// which put the refused request straight back on screen as 28 results.
+		var named []storepkg.Item
+		if intent.Scope == ScopeUnclear {
+			var e error
+			if named, e = s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user); e != nil {
+				return Response{}, e
+			}
 		}
 		// A catalogue row is not permission to turn an explicit exclusion back into retail.
 		// Old imports can retain a stale category until their data migration runs; the
