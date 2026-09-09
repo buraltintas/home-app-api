@@ -371,9 +371,24 @@ var otherTradeWords = []string{
 	"photo studio", "photography studio", "photographer",
 }
 
+// storageTradeWords name warehousing, which is a trade of its own and not a shelf in a
+// home. They are the same words the query veto uses, held once so a query and a sign are
+// judged by one vocabulary rather than two that drift apart.
+var storageTradeWords = []string{"depo", "depolama", "warehouse", "warehousing", "lagerhaus", "склад"}
+
 // namesAnotherTrade reports whether the sign names a business in some other line of work.
 func namesAnotherTrade(normalized, folded string) bool {
-	return namesAFoodBusiness(normalized, folded) || namesTradeIn(otherTradeWords, normalized, folded)
+	return namesAFoodBusiness(normalized, folded) || namesTradeIn(otherTradeWords, normalized, folded) || namesTradeIn(storageTradeWords, normalized, folded)
+}
+
+// namesAnExcludedTrade is the whole of what this product refuses, in one place: labour
+// sold as a service, and businesses in another line of work entirely. Anywhere a store may
+// enter the answer -- the provider's results, or our own catalogue matched by name -- it
+// has to pass this same test. It was previously spelled out at the provider's door only,
+// so a warehouse already in the catalogue re-entered through a name search that the query
+// veto had just refused.
+func namesAnExcludedTrade(normalized, folded string) bool {
+	return namesAService(normalized, folded) || namesAnotherTrade(normalized, folded)
 }
 
 func namesTradeIn(words []string, normalized, folded string) bool {
@@ -417,7 +432,7 @@ func Deterministic(raw string) Intent {
 	// The retired "Depolama" category confused warehouse services with furniture used
 	// for organising a home. These words name the former; product words such as "dolap"
 	// continue through the ordinary home-product concepts above.
-	if containsAnyFolded(n, folded, "depo", "depolama", "warehouse", "warehousing", "lagerhaus", "склад") {
+	if containsAnyFolded(n, folded, storageTradeWords...) {
 		i.Scope = ScopeOutOfScope
 		return i
 	}

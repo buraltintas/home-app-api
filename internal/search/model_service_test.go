@@ -62,3 +62,23 @@ func TestAFootballPitchIsNotACarpetShop(t *testing.T) {
 		t.Error("a carpet shop lost its category")
 	}
 }
+
+// A vetoed query used to be answered anyway: the catalogue was still searched by name, and
+// the rows whose signs carry the vetoed word came back. Whatever refuses a query has to
+// refuse the sign that spells it, or the veto only holds until somebody types the word.
+func TestAnExcludedTradeIsRefusedByNameAsWellAsByQuery(t *testing.T) {
+	excluded := []string{"Gürsu Depolama", "Sarısu Depolama Merkezi-1", "Otogar Depolama", "ARENA HALI SAHA", "Aydın Tadilat Dekorasyon"}
+	shops := []string{"Doğuş Mobilya", "Akay Ev Aletleri", "Güney Antalya Halı ve Yatak Satış Mağazası"}
+	for _, name := range excluded {
+		normalized := normalizeText(name)
+		if !namesAnExcludedTrade(normalized, foldLatin(normalized)) {
+			t.Errorf("%q should be excluded by its own sign", name)
+		}
+	}
+	for _, name := range shops {
+		normalized := normalizeText(name)
+		if namesAnExcludedTrade(normalized, foldLatin(normalized)) {
+			t.Errorf("%q is a home-living shop and must survive", name)
+		}
+	}
+}

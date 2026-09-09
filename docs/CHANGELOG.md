@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A vetoed query is no longer answered by the catalogue's own signs
+
+- Searching "depolama" still returned warehouses. The veto worked: the query was classified
+  out of scope and the model was never asked. What answered it was the name-rescue path,
+  which searches our own catalogue before telling somebody we did not understand them, and
+  which filtered its matches through the service-business test only. Warehouses are not
+  service businesses, so every catalogue row whose sign carries the word came straight back.
+- The exclusion vocabulary now lives in one predicate covering services, other trades and
+  warehousing, and both doors into an answer -- the provider's results and a catalogue name
+  match -- are held to it. Two lists that were supposed to say the same thing had drifted;
+  now there is one.
+- The storage words are shared between the query veto and the sign test rather than written
+  out twice, so a word added to one is a word added to both.
+- The warehouses remain in the catalogue and are simply no longer reachable through search.
+  Retiring the rows themselves is a separate, destructive decision and is not taken here.
+
 ## Welcome email now matches the current review journey
 
 - The welcome message now describes location-ordered store discovery, proximity

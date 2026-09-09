@@ -725,12 +725,14 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		if e != nil {
 			return Response{}, e
 		}
-		// A catalogue row is not permission to turn an explicit service request back into
-		// retail. Old imports can retain a stale category until their data migration runs;
-		// the trade-wide wording remains authoritative on the request path as well.
+		// A catalogue row is not permission to turn an explicit exclusion back into retail.
+		// Old imports can retain a stale category until their data migration runs; the
+		// trade-wide wording remains authoritative on the request path as well. The test is
+		// the whole exclusion vocabulary, not the service half of it: "depolama" was vetoed
+		// as a query and then handed back the warehouses that carry the word on their signs.
 		named = slices.DeleteFunc(named, func(item storepkg.Item) bool {
 			normalized := normalizeText(item.Name)
-			return namesAService(normalized, foldLatin(normalized))
+			return namesAnExcludedTrade(normalized, foldLatin(normalized))
 		})
 		// A partial or previously unseen store name cannot be recognized by a finite
 		// brand list. Ask the provider for unclear text and let the same generic store
