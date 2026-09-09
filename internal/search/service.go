@@ -602,6 +602,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	requestLocale := i18n.FromContext(ctx)
 	intent := Deterministic(in.Query)
+	// Whether *we* refused this request, as opposed to the model failing to place it. The
+	// two look identical downstream and must not be treated alike: an explicit veto is a
+	// decision about a trade we do not carry, while "out of scope" from the model is often
+	// just an address it could not read as a request.
+	vetoed := intent.Scope == ScopeOutOfScope
 	aiUsed := false
 	fallback := ""
 	// Deterministic out-of-scope matches are deliberate vetoes (for example warehouse,
@@ -721,12 +726,14 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		// and was classified out of scope, while GÜNEY ANTALYA HALI ve YATAK SATIŞ
 		// MAĞAZASI sat in our own catalogue the whole time. Nobody should have to type a
 		// store's full registered name to find it.
-		// The rescue is for text we did not understand, not for text we refused. An
-		// explicit veto is a decision -- "halı saha" is a football pitch -- and searching
-		// the catalogue for it anyway found every carpet shop whose sign carries "halı",
-		// which put the refused request straight back on screen as 28 results.
+		// The rescue is for text we could not place, not for text we refused. "Güney
+		// Antalya" reads as an address and the model calls it out of scope, while a shop
+		// registered under that name sits in the catalogue -- that case must still be
+		// rescued. "Halı saha" is different: we refused it ourselves, and searching the
+		// catalogue for it anyway found every carpet shop whose sign carries "halı" and put
+		// the refused request back on screen as 28 results.
 		var named []storepkg.Item
-		if intent.Scope == ScopeUnclear {
+		if !vetoed {
 			var e error
 			if named, e = s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user); e != nil {
 				return Response{}, e

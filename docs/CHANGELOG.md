@@ -30,13 +30,16 @@ repeating the value involved.
   query did not select it, so it defaulted to false for every row. Anything counting on it
   -- such as "saved but not yet reviewed" -- was counting the whole list.
 
-## The catalogue rescue is for text we did not understand, not for text we refused
+## The catalogue rescue is for text we could not place, not for text we refused
 
 - Before answering "we did not understand you", the catalogue is searched by name -- that is
   how "güney antalya" finds the shop registered under that name. It was running for refused
   queries too, so "halı saha" was vetoed and then answered anyway with 28 carpet shops whose
-  signs carry "halı". The rescue now runs only for unclear text; an explicit veto is a
-  decision and stays one.
+  signs carry "halı".
+- The two cases look identical downstream and are now told apart at the source: whether *we*
+  vetoed the request, or the model merely failed to read it as one. Only our own veto stops
+  the rescue. Distinguishing them by the final scope alone is what broke "güney antalya" in
+  a first attempt at this -- the model calls that address out of scope too.
 
 ## A query naming another trade is refused, as a sign naming one already was
 
