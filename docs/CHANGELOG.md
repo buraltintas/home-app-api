@@ -6,6 +6,16 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A Google sign-in now brings its account picture, and a review carries its eight scores
+
+- The Google ID token has always contained the account picture and it was thrown away, so
+  every profile square held an initial. It now fills an empty avatar on sign-in, and only an
+  empty one: a picture chosen here belongs to the person who chose it. Only https URLs are
+  accepted.
+- Reviews returned for a store or a profile now include the eight criterion scores they were
+  built from, so a reader can see what a four out of five was made of. Reviews written before
+  the criteria existed carry nothing rather than a row of zeros.
+
 ## Search history belongs to whoever searched, account or not
 
 - Reading and clearing search history required a signed-in account. Browsing is anonymous by

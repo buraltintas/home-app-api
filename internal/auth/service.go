@@ -240,6 +240,14 @@ func (s *Service) googleIdentity(ctx context.Context, g GoogleIdentity, norm str
 	if e != nil {
 		return TokenPair{}, e
 	}
+	// Somebody signing in with Google already has a picture they use for exactly this.
+	// Only an empty avatar is filled: a picture chosen here belongs to the person who
+	// chose it and is never overwritten by the identity provider.
+	if g.Picture != "" {
+		if _, e = tx.Exec(ctx, `UPDATE user_profiles SET avatar_url=$2,updated_at=now() WHERE user_id=$1 AND coalesce(avatar_url,'')=''`, user, g.Picture); e != nil {
+			return TokenPair{}, e
+		}
+	}
 	pair, e := s.createSession(ctx, tx, user, client)
 	if e != nil {
 		return TokenPair{}, e

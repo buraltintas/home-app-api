@@ -129,6 +129,22 @@ type Post struct {
 	ViewerLiked       bool            `json:"viewer_has_liked"`
 	ViewerFollows     bool            `json:"viewer_follows_author"`
 	ViewerFavorited   bool            `json:"viewer_has_favorited_store"`
+	// The eight scores this review is made of. Absent on reviews written before criteria
+	// existed, which is why it is a pointer: an older review has no zeros to show, it has
+	// nothing to show.
+	Criteria *CriteriaScores `json:"criteria,omitempty"`
+}
+
+// CriteriaScores is one review's eight answers, in the order the review form asks them.
+type CriteriaScores struct {
+	Availability   int `json:"availability"`
+	Value          int `json:"value"`
+	Layout         int `json:"layout"`
+	StaffCare      int `json:"staff_care"`
+	StaffKnowledge int `json:"staff_knowledge"`
+	Checkout       int `json:"checkout"`
+	Returns        int `json:"returns"`
+	Cleanliness    int `json:"cleanliness"`
 }
 
 type FeedContext struct {
@@ -454,7 +470,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e
@@ -464,16 +480,29 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	for rows.Next() {
 		var p Post
 		var storePhotoJSON []byte
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media); e != nil {
+		var c [8]*int16
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &c[0], &c[1], &c[2], &c[3], &c[4], &c[5], &c[6], &c[7]); e != nil {
 			return nil, e
 		}
 		if p.StorePhoto, e = decodeStorePhoto(storePhotoJSON); e != nil {
 			return nil, e
 		}
+		p.Criteria = criteriaFrom(c)
 		p.AuthorLevel = userpkg.Level(p.AuthorReviewCount)
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// A review either answered all eight questions or predates them. A partial set is not a
+// breakdown worth showing, so it is treated as none at all rather than reported as zeros.
+func criteriaFrom(c [8]*int16) *CriteriaScores {
+	for _, v := range c {
+		if v == nil {
+			return nil
+		}
+	}
+	return &CriteriaScores{int(*c[0]), int(*c[1]), int(*c[2]), int(*c[3]), int(*c[4]), int(*c[5]), int(*c[6]), int(*c[7])}
 }
 
 func decodeStorePhoto(raw []byte) (*storepkg.Photo, error) {
