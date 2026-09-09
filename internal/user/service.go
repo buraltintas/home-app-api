@@ -297,14 +297,40 @@ type SearchHistoryResult struct {
 	Source         string    `json:"source"`
 }
 
+// SearchOwner says whose history is being read. Browsing this product is anonymous by
+// design and a visitor's searches are recorded against their session, so a visitor session
+// owns its own history exactly as an account owns its own. Reading it required a signed-in
+// account, which meant every anonymous visitor was told they had never searched anything.
+type SearchOwner struct {
+	User    *uuid.UUID
+	Visitor *uuid.UUID
+}
+
+// A signed-in account is the owner whenever there is one; the visitor session identifies
+// nobody once it does, and mixing the two would hand one person another's history.
+func (o SearchOwner) keys() (*uuid.UUID, *uuid.UUID) {
+	if o.User != nil {
+		return o.User, nil
+	}
+	return nil, o.Visitor
+}
+
 func (s *Service) Searches(ctx context.Context, user uuid.UUID, limit int) ([]SearchHistory, error) {
+	return s.SearchesFor(ctx, SearchOwner{User: &user}, limit)
+}
+
+func (s *Service) SearchesFor(ctx context.Context, owner SearchOwner, limit int) ([]SearchHistory, error) {
+	user, visitor := owner.keys()
+	if user == nil && visitor == nil {
+		return []SearchHistory{}, nil
+	}
 	if limit < 1 || limit > 100 {
 		limit = 30
 	}
 	// Searching the same thing twice is normal behaviour, not two pieces of history.
 	// Every search is still recorded for attribution; the list shows the latest of each
 	// distinct query so the same words never stack up three times in a row.
-	rows, e := s.db.Query(ctx, `SELECT id,raw_query,parsed_intent,created_at,total_result_count FROM (SELECT DISTINCT ON (lower(coalesce(nullif(normalized_query,''),raw_query))) id,raw_query,parsed_intent,created_at,total_result_count FROM searches WHERE user_id=$1 AND status='completed' ORDER BY lower(coalesce(nullif(normalized_query,''),raw_query)),created_at DESC) recent ORDER BY created_at DESC LIMIT $2`, user, limit)
+	rows, e := s.db.Query(ctx, `SELECT id,raw_query,parsed_intent,created_at,total_result_count FROM (SELECT DISTINCT ON (lower(coalesce(nullif(normalized_query,''),raw_query))) id,raw_query,parsed_intent,created_at,total_result_count FROM searches WHERE (($1::uuid IS NOT NULL AND user_id=$1::uuid) OR ($1::uuid IS NULL AND visitor_session_id=$3::uuid)) AND status='completed' ORDER BY lower(coalesce(nullif(normalized_query,''),raw_query)),created_at DESC) recent ORDER BY created_at DESC LIMIT $2`, user, limit, visitor)
 	if e != nil {
 		return nil, e
 	}
@@ -348,8 +374,16 @@ func (s *Service) Searches(ctx context.Context, user uuid.UUID, limit int) ([]Se
 	return out, resultRows.Err()
 }
 func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.UUID) error {
+	return s.DeleteSearchesFor(ctx, SearchOwner{User: &user}, id)
+}
+
+func (s *Service) DeleteSearchesFor(ctx context.Context, owner SearchOwner, id *uuid.UUID) error {
+	user, visitor := owner.keys()
+	if user == nil && visitor == nil {
+		return nil
+	}
 	if id == nil {
-		_, e := s.db.Exec(ctx, `DELETE FROM searches WHERE user_id=$1`, user)
+		_, e := s.db.Exec(ctx, `DELETE FROM searches WHERE ($1::uuid IS NOT NULL AND user_id=$1::uuid) OR ($1::uuid IS NULL AND visitor_session_id=$2::uuid)`, user, visitor)
 		if e == nil {
 			e = s.report.RebuildSnapshot(ctx)
 		}
@@ -357,7 +391,8 @@ func (s *Service) DeleteSearches(ctx context.Context, user uuid.UUID, id *uuid.U
 	}
 	// The list collapses repeats, so removing an entry has to remove every search that
 	// produced it. Otherwise deleting one makes an older identical row reappear.
-	tag, e := s.db.Exec(ctx, `DELETE FROM searches WHERE user_id=$2 AND lower(coalesce(nullif(normalized_query,''),raw_query))=(SELECT lower(coalesce(nullif(normalized_query,''),raw_query)) FROM searches WHERE id=$1 AND user_id=$2)`, *id, user)
+	owned := `(($2::uuid IS NOT NULL AND user_id=$2::uuid) OR ($2::uuid IS NULL AND visitor_session_id=$3::uuid))`
+	tag, e := s.db.Exec(ctx, `DELETE FROM searches WHERE `+owned+` AND lower(coalesce(nullif(normalized_query,''),raw_query))=(SELECT lower(coalesce(nullif(normalized_query,''),raw_query)) FROM searches WHERE id=$1 AND `+owned+`)`, *id, user, visitor)
 	if e == nil && tag.RowsAffected() == 0 {
 		return httpapi.E(404, "SEARCH_NOT_FOUND", "Search not found")
 	}

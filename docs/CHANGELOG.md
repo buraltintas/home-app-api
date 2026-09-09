@@ -6,6 +6,20 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Search history belongs to whoever searched, account or not
+
+- Reading and clearing search history required a signed-in account. Browsing is anonymous by
+  design and every search is already recorded against the visitor's session, so an anonymous
+  visitor was told they had never searched anything. A visitor session now owns its own
+  history exactly as an account owns its own; a signed-in account is always the owner when
+  there is one, so the two can never be mixed.
+
+## The favourites list never said whether the viewer had reviewed a store
+
+- The flag exists on the store DTO and the detail query fills it in, but the favourites
+  query did not select it, so it defaulted to false for every row. Anything counting on it
+  -- such as "saved but not yet reviewed" -- was counting the whole list.
+
 ## A vetoed query is no longer answered by the catalogue's own signs
 
 - Searching "depolama" still returned warehouses. The veto worked: the query was classified

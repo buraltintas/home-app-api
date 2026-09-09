@@ -120,6 +120,12 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
 		r.Get("/search/highlights", s.searchHighlights)
 		r.Get("/search/popular-cities", s.searchPopularCities)
+		// Search history belongs to whoever did the searching. Browsing is anonymous by
+		// design, so these sit outside the signed-in group: a visitor reads and clears the
+		// history of their own session, and an account reads and clears its own.
+		r.Get("/me/searches", s.mySearches)
+		r.Delete("/me/searches", s.deleteMySearches)
+		r.Delete("/me/searches/{id}", s.deleteMySearch)
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
@@ -178,9 +184,6 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/favorites", s.myFavorites)
 			r.Get("/me/messages", s.myMessages)
-			r.Get("/me/searches", s.mySearches)
-			r.Delete("/me/searches", s.deleteMySearches)
-			r.Delete("/me/searches/{id}", s.deleteMySearch)
 			r.With(writeLimit.Middleware).Post("/posts", s.createPost)
 			r.With(writeLimit.Middleware).Post("/stores/{id}/visit-verifications", s.verifyStoreVisit)
 			r.With(writeLimit.Middleware).Post("/media/uploads", s.createMediaUpload)
@@ -752,9 +755,21 @@ func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, 200, map[string]any{"items": x})
 }
+// searchOwner reads the history's owner off the request: the signed-in account when there
+// is one, otherwise the visitor session the searches were recorded against.
+func searchOwner(r *http.Request) userpkg.SearchOwner {
+	if p, ok := appmw.PrincipalFrom(r.Context()); ok && p.UserID != uuid.Nil {
+		id := p.UserID
+		return userpkg.SearchOwner{User: &id}
+	}
+	if v, ok := appmw.VisitorID(r); ok {
+		return userpkg.SearchOwner{Visitor: &v}
+	}
+	return userpkg.SearchOwner{}
+}
+
 func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
-	p, _ := appmw.PrincipalFrom(r.Context())
-	x, e := s.users.Searches(r.Context(), p.UserID, queryInt(r, "limit", 30))
+	x, e := s.users.SearchesFor(r.Context(), searchOwner(r), queryInt(r, "limit", 30))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -762,18 +777,16 @@ func (s *Server) mySearches(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"items": x})
 }
 func (s *Server) deleteMySearches(w http.ResponseWriter, r *http.Request) {
-	p, _ := appmw.PrincipalFrom(r.Context())
-	if e := s.users.DeleteSearches(r.Context(), p.UserID, nil); e != nil {
+	if e := s.users.DeleteSearchesFor(r.Context(), searchOwner(r), nil); e != nil {
 		WriteError(w, e, r.Context())
 		return
 	}
 	w.WriteHeader(204)
 }
 func (s *Server) deleteMySearch(w http.ResponseWriter, r *http.Request) {
-	p, _ := appmw.PrincipalFrom(r.Context())
 	id, e := parseID(r)
 	if e == nil {
-		e = s.users.DeleteSearches(r.Context(), p.UserID, &id)
+		e = s.users.DeleteSearchesFor(r.Context(), searchOwner(r), &id)
 	}
 	if e != nil {
 		WriteError(w, e, r.Context())

@@ -457,7 +457,8 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
  coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce(s.cover_media_id::text,''),
  coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),''),
- coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),f.created_at
+ coalesce((SELECT array(SELECT jsonb_array_elements_text(x.attribution->'photo_attributions')) FROM store_external_sources x WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_attributions' AND x.refreshed_at > now()-interval '30 days' LIMIT 1),'{}'),
+ EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$1 AND p.deleted_at IS NULL),f.created_at
  FROM favorites f JOIN stores s ON s.id=f.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE f.user_id=$1 GROUP BY s.id,ss.store_id,f.created_at ORDER BY f.created_at DESC LIMIT $2`, viewer, limit, i18n.FromContext(ctx))
 	if e != nil {
@@ -470,7 +471,7 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 		var coverMedia, photoName string
 		var photoAttributions []string
 		var savedAt time.Time
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ExternalSources, &coverMedia, &photoName, &photoAttributions, &savedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ExternalSources, &coverMedia, &photoName, &photoAttributions, &x.ViewerHasReviewed, &savedAt); e != nil {
 			return nil, e
 		}
 		x.ViewerFavorited = true
