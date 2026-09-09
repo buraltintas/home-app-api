@@ -82,3 +82,20 @@ func TestAnExcludedTradeIsRefusedByNameAsWellAsByQuery(t *testing.T) {
 		}
 	}
 }
+
+// A query naming another trade is refused for the same reason a sign naming one is. The
+// food words are deliberately not applied here: "yemek masası" is a dining table.
+func TestAQueryNamingAnotherTradeIsOutOfScope(t *testing.T) {
+	for _, query := range []string{"halı saha", "hali saha", "fotoğrafçı", "fotoğraf stüdyo"} {
+		if intent := Deterministic(query); intent.Scope != ScopeOutOfScope || len(intent.Categories) != 0 {
+			t.Errorf("%q parsed as %+v", query, intent)
+		}
+	}
+	// These must never be vetoed. Some are recognised as home requests outright and some
+	// are left unclear for the model to read, but none of them is a refusal.
+	for _, query := range []string{"yemek masası", "kahvaltı takımı", "halı", "fotoğraf çerçevesi"} {
+		if intent := Deterministic(query); intent.Scope == ScopeOutOfScope {
+			t.Errorf("%q is a home request and was refused: %+v", query, intent)
+		}
+	}
+}

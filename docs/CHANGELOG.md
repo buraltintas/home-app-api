@@ -30,6 +30,16 @@ repeating the value involved.
   query did not select it, so it defaulted to false for every row. Anything counting on it
   -- such as "saved but not yet reviewed" -- was counting the whole list.
 
+## A query naming another trade is refused, as a sign naming one already was
+
+- "Halı saha" was read as a carpet search because it contains the word for carpet -- the same
+  mistake the sign test had already learned about the compound, made again on the request
+  side. The other-trade words now veto a query as well as a shop name.
+- The food words are deliberately not applied to queries. "Yemek masası" is a dining table
+  and "kahvaltı takımı" is a breakfast set; both begin with a word that names a food
+  business. A sign that begins "Yemek" is a restaurant; a sentence that begins "yemek" is
+  usually about furniture.
+
 ## A vetoed query is no longer answered by the catalogue's own signs
 
 - Searching "depolama" still returned warehouses. The veto worked: the query was classified

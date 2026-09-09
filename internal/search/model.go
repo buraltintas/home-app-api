@@ -436,6 +436,18 @@ func Deterministic(raw string) Intent {
 		i.Scope = ScopeOutOfScope
 		return i
 	}
+	// The same words that disqualify a sign disqualify a request. "Halı saha" was read as a
+	// carpet search because it contains the word for carpet, exactly as the pitches in the
+	// catalogue were read as carpet shops before the sign test learned the compound.
+	//
+	// Only this list, deliberately. The food words cannot be applied to a query: "yemek
+	// masası" is a dining table and "kahvaltı takımı" is a breakfast set, and both begin
+	// with a word that names a food business. A sign that begins "Yemek" is a restaurant;
+	// a sentence that begins "yemek" is usually about furniture.
+	if namesTradeIn(otherTradeWords, n, folded) {
+		i.Scope = ScopeOutOfScope
+		return i
+	}
 	if containsAnyFolded(n, folded, "çeyiz", "ceyiz", "dowry", "aussteuer", "приданое") {
 		i.Categories = appendUnique(i.Categories, "home_textile")
 		i.Categories = appendUnique(i.Categories, "bedding")
