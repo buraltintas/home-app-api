@@ -1,0 +1,303 @@
+# The brand registry.
+#
+# This file is the list of Turkish home and living chains whose own published store lists
+# this catalogue is built from. It is data, not code: adding a chain is a block here plus
+# one look at its store locator, never a new Go file.
+#
+# tier decides import order, and order is part of deduplication -- the largest chains are
+# imported first so that smaller ones and independents match onto rows that are already
+# settled rather than creating twins beside them.
+#
+#   tier 1  national chains, hundreds of shops
+#   tier 2  national but smaller, or a single strong category
+#   tier 3  regional chains and large independents
+#
+# locator: none  means the store list has not been mapped yet. Such a brand is still
+# registered -- its name and website are useful on their own, and it is how the work that
+# remains stays visible instead of living in somebody's head.
+#
+# categories must be slugs from store_categories: bedding, carpet, curtain, decoration,
+# furniture, garden, home_accessories, home_textile, household, kitchenware, lighting,
+# major_appliances, small_appliances, tableware, bathroom.
+
+brands:
+  - slug: english-home
+    name: English Home
+    website: https://www.englishhome.com
+    tier: 1
+    categories: [home_textile, decoration, kitchenware, tableware, home_accessories, bedding]
+    store_count_estimate: 600
+    locator:
+      kind: json
+      # The page a customer sees calls this endpoint; robots.txt allows it and forbids the
+      # per-store pages beside it, which this fetcher therefore never asks for.
+      url: https://www.englishhome.com/api/Store/GetStoriesLite?CountryID=1&CityID=null&PageNo=1&PageSize=2000
+      list: magazalar
+      id: id
+      name: tanim
+      address: adres
+      city: il
+      district: ilce
+      phone: telefon
+      latitude: latitude
+      longitude: longitude
+      # Branch names are published as internal codes -- "ANK ACITY AVM" -- so the chain's
+      # own name goes in front of them or no one would recognise the shop.
+      name_prefix: English Home
+
+  - slug: madame-coco
+    name: Madame Coco
+    website: https://www.madamecoco.com
+    tier: 1
+    categories: [home_textile, decoration, kitchenware, tableware, home_accessories]
+    store_count_estimate: 450
+    locator: {kind: none}
+
+  - slug: karaca-home
+    name: Karaca Home
+    website: https://www.karaca.com
+    tier: 1
+    categories: [home_textile, bedding, kitchenware, tableware]
+    store_count_estimate: 300
+    locator: {kind: none}
+
+  - slug: bellona
+    name: Bellona
+    website: https://www.bellona.com.tr
+    tier: 1
+    categories: [furniture, bedding, home_textile]
+    store_count_estimate: 700
+    locator: {kind: none}
+
+  - slug: istikbal
+    name: İstikbal
+    website: https://www.istikbal.com.tr
+    tier: 1
+    categories: [furniture, bedding, home_textile]
+    store_count_estimate: 800
+    locator: {kind: none}
+
+  - slug: mondi
+    name: Mondi
+    website: https://www.mondi.com.tr
+    tier: 1
+    categories: [furniture, bedding]
+    store_count_estimate: 250
+    locator: {kind: none}
+
+  - slug: dogtas
+    name: Doğtaş
+    website: https://www.dogtas.com
+    tier: 1
+    categories: [furniture, bedding]
+    store_count_estimate: 300
+    locator: {kind: none}
+
+  - slug: kelebek-mobilya
+    name: Kelebek Mobilya
+    website: https://www.kelebek.com
+    tier: 1
+    categories: [furniture, bedding]
+    store_count_estimate: 200
+    locator: {kind: none}
+
+  - slug: cilek
+    name: Çilek
+    website: https://www.cilek.com
+    tier: 1
+    categories: [furniture, bedding]
+    store_count_estimate: 250
+    locator: {kind: none}
+
+  - slug: yatas-bedding
+    name: Yataş Bedding
+    website: https://www.yatasbedding.com.tr
+    tier: 1
+    categories: [bedding, home_textile, furniture]
+    store_count_estimate: 600
+    locator: {kind: none}
+
+  - slug: ikea
+    name: IKEA
+    website: https://www.ikea.com.tr
+    tier: 1
+    categories: [furniture, decoration, kitchenware, home_textile, lighting, storage]
+    store_count_estimate: 12
+    locator: {kind: none}
+
+  - slug: koctas
+    name: Koçtaş
+    website: https://www.koctas.com.tr
+    tier: 1
+    categories: [household, garden, bathroom, lighting, kitchenware]
+    store_count_estimate: 60
+    locator: {kind: none}
+
+  - slug: tepe-home
+    name: Tepe Home
+    website: https://www.tepehome.com
+    tier: 1
+    categories: [furniture, decoration, home_textile, home_accessories]
+    store_count_estimate: 40
+    locator: {kind: none}
+
+  - slug: ozdilek-home
+    name: Özdilek Home
+    website: https://www.ozdilekteknoloji.com
+    tier: 1
+    categories: [home_textile, bedding, decoration, tableware]
+    store_count_estimate: 120
+    locator: {kind: none}
+
+  - slug: mudo-concept
+    name: Mudo Concept
+    website: https://www.mudo.com.tr
+    tier: 1
+    categories: [decoration, home_accessories, home_textile, tableware]
+    store_count_estimate: 60
+    locator: {kind: none}
+
+  - slug: linens
+    name: Linens
+    website: https://www.linens.com.tr
+    tier: 1
+    categories: [home_textile, bedding, decoration]
+    store_count_estimate: 100
+    locator: {kind: none}
+
+  - slug: tac
+    name: Taç
+    website: https://www.tacshop.com
+    tier: 1
+    categories: [home_textile, bedding, curtain]
+    store_count_estimate: 200
+    locator: {kind: none}
+
+  - slug: deco-home
+    name: Deco Home
+    website: https://www.decohome.com.tr
+    tier: 1
+    categories: [home_textile, bedding, decoration]
+    store_count_estimate: 80
+    locator: {kind: none}
+
+  - slug: vivense
+    name: Vivense
+    website: https://www.vivense.com
+    tier: 1
+    categories: [furniture, decoration, home_textile]
+    store_count_estimate: 20
+    locator: {kind: none}
+
+  - slug: boyner-ev
+    name: Boyner Ev
+    website: https://www.boyner.com.tr
+    tier: 1
+    categories: [home_textile, decoration, tableware, home_accessories]
+    store_count_estimate: 100
+    locator: {kind: none}
+
+  - slug: chakra
+    name: Chakra
+    website: https://www.chakra.com.tr
+    tier: 2
+    categories: [home_textile, decoration, home_accessories]
+    locator: {kind: none}
+
+  - slug: pasabahce
+    name: Paşabahçe
+    website: https://www.pasabahcemagazalari.com
+    tier: 2
+    categories: [tableware, kitchenware, decoration]
+    locator: {kind: none}
+
+  - slug: zara-home
+    name: Zara Home
+    website: https://www.zarahome.com
+    tier: 2
+    categories: [home_textile, decoration, tableware, home_accessories]
+    locator: {kind: none}
+
+  - slug: enza-home
+    name: Enza Home
+    website: https://www.enzahome.com
+    tier: 2
+    categories: [furniture, bedding]
+    locator: {kind: none}
+
+  - slug: alfemo
+    name: Alfemo
+    website: https://www.alfemo.com.tr
+    tier: 2
+    categories: [furniture, bedding]
+    locator: {kind: none}
+
+  - slug: weltew
+    name: Weltew Home
+    website: https://www.weltewhome.com
+    tier: 2
+    categories: [furniture, bedding]
+    locator: {kind: none}
+
+  - slug: nurus
+    name: Nurus
+    website: https://www.nurus.com
+    tier: 2
+    categories: [furniture]
+    locator: {kind: none}
+
+  - slug: merinos
+    name: Merinos Halı
+    website: https://www.merinos.com.tr
+    tier: 2
+    categories: [carpet, home_textile]
+    locator: {kind: none}
+
+  - slug: ipek-hali
+    name: İpek Halı
+    website: https://www.ipekhali.com.tr
+    tier: 2
+    categories: [carpet]
+    locator: {kind: none}
+
+  - slug: dinarsu
+    name: Dinarsu
+    website: https://www.dinarsu.com.tr
+    tier: 2
+    categories: [carpet]
+    locator: {kind: none}
+
+  - slug: padisah-hali
+    name: Padişah Halı
+    website: https://www.padisahhali.com
+    tier: 2
+    categories: [carpet]
+    locator: {kind: none}
+
+  - slug: neva-home
+    name: Neva Home
+    website: https://www.nevahome.com
+    tier: 2
+    categories: [home_textile, bedding]
+    locator: {kind: none}
+
+  - slug: pierre-cardin-home
+    name: Pierre Cardin Home
+    website: https://www.pierrecardinhome.com.tr
+    tier: 2
+    categories: [home_textile, bedding, decoration]
+    locator: {kind: none}
+
+  - slug: emsan
+    name: Emsan
+    website: https://www.emsan.com.tr
+    tier: 2
+    categories: [kitchenware, tableware, small_appliances]
+    locator: {kind: none}
+
+  - slug: korkmaz
+    name: Korkmaz
+    website: https://www.korkmaz.com.tr
+    tier: 2
+    categories: [kitchenware, tableware, small_appliances]
+    locator: {kind: none}

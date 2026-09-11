@@ -1,0 +1,14 @@
+DROP TABLE IF EXISTS product_terms;
+DROP TABLE IF EXISTS store_attributes;
+DROP TABLE IF EXISTS store_attribute_keys;
+DROP TABLE IF EXISTS store_carried_brands;
+DROP TABLE IF EXISTS store_import_records;
+DROP TABLE IF EXISTS store_import_runs;
+DROP INDEX IF EXISTS stores_compact_name_gin_idx;
+DROP INDEX IF EXISTS stores_unverified_idx;
+DROP INDEX IF EXISTS stores_brand_idx;
+ALTER TABLE stores DROP COLUMN IF EXISTS compact_name;
+ALTER TABLE stores DROP COLUMN IF EXISTS data_verified_at;
+ALTER TABLE stores DROP COLUMN IF EXISTS source_kind;
+ALTER TABLE stores DROP COLUMN IF EXISTS brand_id;
+DROP TABLE IF EXISTS brands;

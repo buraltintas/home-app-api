@@ -1,4 +1,4 @@
-.PHONY: run worker migrate migrate-up migrate-down seed seed-locations build-locations rebuild-admin-metrics privacy-maintenance test test-race vet lint build integration-test provider-smoke smoke-test
+.PHONY: run worker migrate migrate-up migrate-down seed seed-locations build-locations catalog catalog-registry normalize-legacy rebuild-admin-metrics privacy-maintenance test test-race vet lint build integration-test provider-smoke smoke-test
 
 run:
 	go run ./cmd/api
@@ -22,6 +22,15 @@ seed-locations:
 
 build-locations:
 	go run ./cmd/build-locations
+
+catalog-registry:
+	go run ./cmd/catalog -registry
+
+catalog:
+	go run ./cmd/catalog $(ARGS)
+
+normalize-legacy:
+	go run ./cmd/normalize-legacy $(ARGS)
 
 rebuild-admin-metrics:
 	go run ./cmd/admin-metrics rebuild

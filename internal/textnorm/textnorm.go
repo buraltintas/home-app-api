@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -54,4 +56,54 @@ func Key(raw string) string {
 		}
 	}
 	return b.String()
+}
+
+var (
+	turkishTitle = cases.Title(language.Turkish)
+	plainTitle   = cases.Title(language.English)
+)
+
+// turkishLetters are the letters whose casing rules differ from everybody else's. A name
+// containing one of them is written in Turkish; a name containing none of them may not be.
+const turkishLetters = "çÇğĞıİöÖşŞüÜ"
+
+// TitlePlace cases a place name. Every name in the administrative dataset is Turkish by
+// construction, so Turkish rules apply unconditionally: "ADIYAMAN" is "Adıyaman", and the
+// ordinary rules would give "Adiyaman", which is a different word. Nothing here is ever an
+// acronym -- "BOLU" and "KARS" are provinces.
+func TitlePlace(raw string) string {
+	return turkishTitle.String(strings.TrimSpace(raw))
+}
+
+// Title cases a shop's sign, where the language is not known in advance.
+//
+// A Turkish catalogue is full of English words: chains publish branch codes like
+// "ANK ACITY AVM" beside names like "BALIKESİR MAĞAZASI". Turkish rules give the second one
+// right and turn the first into "Acıty"; the ordinary rules swap the mistakes over. So the
+// name is read first: if any letter in it is one only Turkish uses, the whole name is cased
+// as Turkish, and otherwise as plain Latin.
+//
+// Word by word would seem better and is worse, which is why this was measured rather than
+// argued. Across the shouted names in the live catalogue, 49 words are ones the two rules
+// disagree about -- words holding an ASCII "I" and no Turkish letter. Forty-three of them
+// are Turkish written without its diacritics (HALI, TASARIM, YAPI, KONYAALTI, AYDINLATMA)
+// and want the dotless ı; six are English (COLLECTION, BOUTIQUE, SIEMENS) and do not.
+// Casing the whole name by the language it announces gets the forty-three right. The six
+// keep a wrong letter, and that is the better trade, not an oversight.
+//
+// Two things are left exactly as they are. A name that is not shouting was styled by its
+// owner -- "English Home" is not ours to restyle. And a short all-capital name is an
+// acronym: IKEA is not Ikea.
+func Title(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name == "" || name != strings.ToUpper(name) {
+		return name
+	}
+	if len([]rune(name)) <= 4 && !strings.ContainsRune(name, ' ') {
+		return name
+	}
+	if strings.ContainsAny(name, turkishLetters) {
+		return turkishTitle.String(name)
+	}
+	return plainTitle.String(name)
 }

@@ -34,8 +34,6 @@ import (
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/textnorm"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 const (
@@ -195,11 +193,9 @@ func loadNeighbourhoods(source string) []rawRow {
 }
 
 func assemble(provinces []province, rows []rawRow) []record {
-	// Turkish casing, not Go's default: the registry publishes "BALIKESİR", and lowering
-	// its dotless I with the ordinary rules produces "Balikesir" -- a different word.
-	// cases.Title(Turkish) lowers the tail itself, so the input is handed over untouched.
-	titler := cases.Title(language.Turkish)
-	title := func(raw string) string { return titler.String(strings.TrimSpace(raw)) }
+	// Place names are Turkish by construction, so they take the unconditional Turkish
+	// rule rather than the one the catalogue uses to guess at a shop's language.
+	title := textnorm.TitlePlace
 
 	provincePopulation := map[string]int{}
 	provinceCoords := map[string][2]float64{}

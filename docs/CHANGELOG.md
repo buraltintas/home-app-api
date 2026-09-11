@@ -6,6 +6,56 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The catalogue starts being ours: brands, imports, and a matcher that will not make twins
+
+Second step of removing Google Places. The chains publish their own store lists; this reads
+them, and every decision it makes about a row is written down.
+
+- `brands` is a registry, loaded from a committed file (`internal/catalog/data/brands.yaml`)
+  into a table. Thirty-five Turkish home and living chains are listed with their categories
+  and tier; one of them, English Home, has its locator mapped. Adding a chain is a block in
+  that file, not a Go file: most locators are a JSON endpoint the brand's own page already
+  calls, so a config-driven adapter covers them.
+- Fetching obeys `robots.txt` per host, one request a second, identifying itself as
+  `BosaGezmeBot`. This is applied as a rule rather than checked by hand: English Home's file
+  allows the list endpoint this reads and forbids the per-store pages beside it, and that is
+  the kind of distinction twenty adapters would each get wrong once.
+- Every run is recorded in `store_import_runs` / `store_import_records`: what was fetched,
+  what was decided for each row, and why. Dry run is the default, and the dry run is the
+  point -- the matcher's verdicts are what a person reads before anything is written.
+- **First English Home import: 305 shops, 13 of them merged onto rows we already held.**
+  No duplicates: 305 published ids, 305 stores, one to one. The four same-brand pairs left
+  standing within 150 m of each other are adjacent shopping centres the brand lists
+  separately.
+- The matcher needed three rules that a similarity threshold alone does not give, and each
+  came from a row it got wrong first:
+  - **Containment.** "englishhome" inside "englishhomeantlaracad" scores 0.42 by trigram and
+    is obviously the same shop 57 m away. One name holding the other counts as identity when
+    it stands beside proximity.
+  - **The brand is the authority on its own shops.** "Ayvalık 1" and "Ayvalık 2" are 229 m
+    apart and share four fifths of their name; no threshold separates them. A candidate
+    already carrying a different id from the same list is a different shop, full stop.
+  - **One store per run.** A row already matched by an earlier row cannot be matched again,
+    or two branches either side of one vague old row collapse into a single shop.
+- A published coordinate that contradicts the published place is replaced by that place's
+  centre. English Home puts its Çeşme shop in Trabzon, 1,119 km away, and its Ünye shop in
+  Bodrum. A shop at the wrong end of the country is worse than one with no point: it answers
+  searches near a city it is not in. Measured against the province and not the district,
+  because a large district legitimately reaches 50 km beyond its own middle -- the tighter
+  test moved four correct shops for every two wrong ones.
+- `cmd/normalize-legacy` folds the names of everything already in the catalogue before any
+  of this runs. Rows imported from a provider carry that provider's spelling, and until they
+  are folded the matcher is comparing against text it cannot read -- it would have created a
+  second copy of every chain store we already hold. 1,057 rows, 153 names retitled.
+- Turkish casing is decided by the name, not by the field: a name carrying ç, ğ, ı, İ, ö, ş
+  or ü is cased as Turkish and any other as plain Latin. Word by word looks better and is
+  worse -- across the live catalogue, 43 of the 49 words the two rules disagree about are
+  Turkish written without diacritics (HALI, TASARIM, KONYAALTI) and want the dotless ı.
+- Also created, with no interface yet, because search will be built on them and adding them
+  later costs far more: `store_carried_brands` (which brands a shop sells -- the question
+  "a shop in Antalya carrying Yataş" cannot be answered from a shop's own name),
+  `store_attributes`, and `product_terms`.
+
 ## The location picker is ours: Turkey's own places, no provider behind them
 
 First step of removing Google Places from this product entirely. Choosing *where* to search
