@@ -174,10 +174,15 @@ func writeManifest(dir string) error {
 	logos := map[string]string{}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || name == manifestName {
+		if entry.IsDir() || name == manifestName || strings.HasPrefix(name, "_") {
 			continue
 		}
 		slug := strings.TrimSuffix(name, filepath.Ext(name))
+		// Two files for one brand is an ambiguity, not a choice to make quietly by sort
+		// order -- which is how a banner nearly became English Home's mark.
+		if had, ok := logos[slug]; ok {
+			return fmt.Errorf("%s has two marks on disk (%s and %s); delete the wrong one", slug, had, name)
+		}
 		logos[slug] = name
 	}
 	body, e := json.MarshalIndent(logos, "", "  ")
@@ -199,7 +204,7 @@ func save(ctx context.Context, fetcher *catalog.Fetcher, website, base string) (
 	// Home is one, and İstikbal and Taç turned out to be others; between them the collector
 	// reported "no usable mark" for sites whose mark was right there in the markup.
 	if svg := mastheadSVG(html); svg != "" {
-		if e = os.WriteFile(base+".svg", []byte(svg), 0o644); e != nil {
+		if e = writeMark(base, ".svg", []byte(svg)); e != nil {
 			return "", e
 		}
 		return fmt.Sprintf("%-6s %5d KB  inline in the page", ".svg", len(svg)/1024), nil
@@ -258,7 +263,7 @@ func save(ctx context.Context, fetcher *catalog.Fetcher, website, base string) (
 				continue
 			}
 		}
-		if e = os.WriteFile(base+extension, body, 0o644); e != nil {
+		if e = writeMark(base, extension, body); e != nil {
 			return "", e
 		}
 		return fmt.Sprintf("%-6s %5d KB  %s", extension, len(body)/1024, target), nil
@@ -399,4 +404,19 @@ func firstGroup(match []string) string {
 		}
 	}
 	return ""
+}
+
+// writeMark writes one brand's mark and removes any other it had.
+//
+// A brand with two files on disk is a brand whose mark depends on which one the manifest
+// happens to sort last. English Home had a hand-placed svg and a banner this tool wrote
+// later; the right one survived by luck, and the wrong one was still there to be found.
+// One brand, one file.
+func writeMark(base, extension string, body []byte) error {
+	for _, other := range []string{".png", ".jpg", ".webp", ".svg", ".ico"} {
+		if other != extension {
+			_ = os.Remove(base + other)
+		}
+	}
+	return os.WriteFile(base+extension, body, 0o644)
 }
