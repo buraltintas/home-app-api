@@ -188,3 +188,51 @@ func confident(intent Intent) bool {
 	}
 	return intent.Scope == ScopeHomeLiving && (intent.StoreName != "" || len(intent.Categories) > 0)
 }
+
+// learn records what the model understood, so the catalogue answers it next time.
+//
+// Only the model's own product words are kept, and only against a single category: a query
+// the model placed in two categories at once has not told us which of them the word belongs
+// to, and a guess written into a shared table is worse than no entry. Locations, chain
+// names and anything the query says about price or style are left alone -- those are not
+// product vocabulary and would poison the term list for everybody.
+//
+// Failures are ignored on purpose. This is a side effect of answering somebody's search;
+// it must never be the reason their search fails.
+func (l *lexicon) learn(ctx context.Context, intent Intent) {
+	if l == nil || l.db == nil || intent.Scope != ScopeHomeLiving || len(intent.Categories) != 1 {
+		return
+	}
+	category := intent.Categories[0]
+	l.mu.RLock()
+	brands := l.brands
+	l.mu.RUnlock()
+	for _, raw := range intent.ProductTerms {
+		term := textnorm.Key(raw)
+		if !learnable(term, brands) {
+			continue
+		}
+		_, _ = l.db.Exec(ctx, `INSERT INTO product_terms(term,locale,category_slug,source) VALUES($1,$2,$3,'learned') ON CONFLICT DO NOTHING`,
+			term, string(intent.QueryLanguage), category)
+	}
+	// The next refresh picks these up; forcing one here would put a query on the path of
+	// every search that reaches the model.
+}
+
+// learnable decides whether a word the model produced belongs in the shared term list.
+//
+// The bar is deliberately high: this table is consulted for every future search by every
+// visitor, so a wrong entry is a wrong answer repeated indefinitely, while a refused one
+// costs only one more model call the next time somebody uses that word.
+func learnable(term string, brands map[string]string) bool {
+	// One or two characters is not a word, and a sentence is not a term. Both appear in
+	// model output often enough to be worth refusing.
+	if len([]rune(term)) < 3 || len(strings.Fields(term)) > 3 {
+		return false
+	}
+	// A chain's name is not a product word. "english home" recorded as one would place
+	// every future mention of that chain into whatever category one search happened to
+	// carry.
+	_, isBrand := brands[compact(term)]
+	return !isBrand
+}

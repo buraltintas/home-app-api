@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"github.com/burakaltintas/home-app-api/internal/textnorm"
 	"testing"
 	"time"
 )
@@ -108,5 +109,27 @@ func TestLexiconNeverOverturnsARefusal(t *testing.T) {
 	got := loaded().enrich(context.Background(), Deterministic(query), query)
 	if got.Scope != ScopeOutOfScope {
 		t.Fatalf("refusal overturned: %+v", got)
+	}
+}
+
+// What the model says is not written into the shared list unconditionally: one wrong entry
+// is a wrong answer repeated for every visitor from then on, while a refused one costs a
+// single extra model call.
+func TestOnlyRealProductWordsAreLearned(t *testing.T) {
+	brands := map[string]string{"englishhome": "English Home", "dogtas": "Doğtaş"}
+	for term, want := range map[string]bool{
+		"gardırop":                    true,
+		"ankastre fırın":              true,
+		"tv ünitesi":                  true,
+		"çekyat":                      true,
+		"ev":                          false, // too short to mean anything on its own
+		"a":                           false,
+		"english home":                false, // a chain, not a product
+		"doğtaş":                      false,
+		"evime uygun bir yatak odası": false, // a sentence, not a term
+	} {
+		if got := learnable(textnorm.Key(term), brands); got != want {
+			t.Errorf("learnable(%q) = %v, want %v", term, got, want)
+		}
 	}
 }

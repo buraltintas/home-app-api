@@ -210,6 +210,12 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 				intent.StoreName = ""
 			}
 			aiUsed = true
+			// Asked once, known thereafter. This is the only way the product vocabulary can
+			// keep up with what people actually type: a maintained list understood 68 of
+			// 108 ordinary Turkish words for things these shops sell, and whatever nobody
+			// thinks to add fails quietly. Writing the model's answer back means the first
+			// person to search "ankastre" waits for it and nobody after them does.
+			s.lex.learn(ctx, intent)
 		} else {
 			// Every silent degradation here reaches the user as "we did not understand
 			// you", so the reason has to survive in the logs. The query is the user's

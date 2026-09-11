@@ -6,6 +6,34 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The product vocabulary learns instead of being maintained
+
+Measured against 108 ordinary Turkish words for things these shops sell -- written down by
+asking "what would somebody type", not by reading the seed list -- the catalogue understood
+68 and missed 40: çekyat, ayakkabılık, supla, parke, ankastre, fayans, and so on. Every one
+of those reaches the model, waits about three seconds, and the next person to type the same
+word waits again. A list maintained by hand fails exactly this way, and fails silently:
+whatever nobody thinks to add is simply not understood.
+
+Deriving the vocabulary from the catalogue was tried and does not work, for a reason worth
+recording so nobody tries it again: our stores are chain branches now, and "English Home -
+Mersin Yenişehir Forum AVM" contains no product word. Across every store name, only eight
+words cleared a sixty-percent concentration threshold, and two of those were appliance
+brands rather than products.
+
+So the model teaches it, once per word. When the model does place a query, its own product
+terms are written back to `product_terms` with `source='learned'`, and every later search
+using that word is answered from our own table without a call. The first person to search
+"ankastre" waits for it; nobody after them does.
+
+The bar for writing an entry is deliberately high, because this table answers every future
+search for every visitor: a wrong entry is a wrong answer repeated indefinitely, while a
+refused one costs one more model call. Only the model's own product terms are kept, only
+when it chose exactly one category -- two categories means it has not said which one the
+word belongs to -- and never a chain's name, a word under three characters, or anything long
+enough to be a sentence.
+
+
 ## Four ways a brand search failed, found by running one
 
 Someone searching for a chain they can see from the window should get the branch nearest
