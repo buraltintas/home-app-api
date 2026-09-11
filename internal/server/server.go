@@ -17,6 +17,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/feedback"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
+	locationpkg "github.com/burakaltintas/home-app-api/internal/location"
 	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/observability"
@@ -38,6 +39,7 @@ type Server struct {
 	stores   *storepkg.Service
 	social   *social.Service
 	search   *searchpkg.Service
+	places   *locationpkg.Service
 	users    *userpkg.Service
 	media    *media.Service
 	admin    *adminpkg.Service
@@ -53,8 +55,8 @@ type RuntimeConfig struct {
 	StoreReviewRadiusMeters float64
 }
 
-func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, u, m, ad, rp, fb, hashKey}
+func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, lo *locationpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
+	return &Server{db, a, st, so, se, lo, u, m, ad, rp, fb, hashKey}
 }
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
@@ -444,7 +446,7 @@ func (s *Server) searchLocations(w http.ResponseWriter, r *http.Request) {
 	if latErr != nil || lonErr != nil || (lat == nil) != (lon == nil) {
 		lat, lon = nil, nil
 	}
-	items, e := s.search.ResolveLocations(r.Context(), r.URL.Query().Get("q"), limit, lat, lon)
+	items, e := s.places.Search(r.Context(), r.URL.Query().Get("q"), limit, lat, lon)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -456,7 +458,7 @@ func (s *Server) searchLocations(w http.ResponseWriter, r *http.Request) {
 // from carries no coordinates, and it should not: the point someone is searched around is
 // fetched by us from the provider rather than submitted by the browser.
 func (s *Server) resolveLocation(w http.ResponseWriter, r *http.Request) {
-	location, e := s.search.ResolveLocationPlace(r.Context(), r.URL.Query().Get("place_id"))
+	location, e := s.places.Resolve(r.Context(), r.URL.Query().Get("place_id"))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -706,7 +708,7 @@ func (s *Server) updateDiscoveryLocation(w http.ResponseWriter, r *http.Request)
 			WriteError(w, ErrInvalidInput, r.Context())
 			return
 		}
-		location, err := s.search.ResolveLocationPlace(r.Context(), request.PlaceID)
+		location, err := s.places.Resolve(r.Context(), request.PlaceID)
 		if err != nil {
 			WriteError(w, err, r.Context())
 			return
@@ -755,6 +757,7 @@ func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, 200, map[string]any{"items": x})
 }
+
 // searchOwner reads the history's owner off the request: the signed-in account when there
 // is one, otherwise the visitor session the searches were recorded against.
 func searchOwner(r *http.Request) userpkg.SearchOwner {

@@ -113,8 +113,8 @@ paths:
   /v1/locations/search:
     get:
       tags: [Discovery]
-      summary: Resolve manually entered city, district, or neighborhood text
-      description: Accepts human-readable location text and returns geographic Google Places candidates only. UI must show name/address, never coordinate input fields; returned coordinates are transport-only discovery context and never visit verification evidence.
+      summary: Resolve manually entered city, district, or neighbourhood text
+      description: Accepts human-readable location text and returns Turkish administrative places (province, district, neighbourhood) from this service's own table. No third-party provider is involved. UI must show name/address, never coordinate input fields; returned coordinates are transport-only discovery context and never visit verification evidence.
       parameters:
         - {name: q, in: query, required: true, schema: {type: string, minLength: 2, maxLength: 120}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 10, default: 5}}

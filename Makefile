@@ -1,4 +1,4 @@
-.PHONY: run worker migrate migrate-up migrate-down seed rebuild-admin-metrics privacy-maintenance test test-race vet lint build integration-test provider-smoke smoke-test
+.PHONY: run worker migrate migrate-up migrate-down seed seed-locations build-locations rebuild-admin-metrics privacy-maintenance test test-race vet lint build integration-test provider-smoke smoke-test
 
 run:
 	go run ./cmd/api
@@ -16,6 +16,12 @@ migrate-down:
 
 seed:
 	go run ./cmd/seed
+
+seed-locations:
+	go run ./cmd/seed-locations
+
+build-locations:
+	go run ./cmd/build-locations
 
 rebuild-admin-metrics:
 	go run ./cmd/admin-metrics rebuild

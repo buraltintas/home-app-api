@@ -12,8 +12,8 @@ import (
 
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
+	"github.com/burakaltintas/home-app-api/internal/textnorm"
 	"github.com/google/uuid"
-	"golang.org/x/text/unicode/norm"
 	"time"
 )
 
@@ -75,13 +75,6 @@ type PlacesProvider interface {
 	PlaceDetails(context.Context, string) (Place, error)
 }
 
-// PlaceEssentialsProvider resolves a geographic autocomplete choice without buying the
-// contact, rating or atmosphere fields used by a store detail page. Kept optional so
-// simple test doubles and alternative providers can continue to implement PlacesProvider.
-type PlaceEssentialsProvider interface {
-	PlaceEssentials(context.Context, string) (Place, error)
-}
-
 // photoNamePattern constrains a Google photo resource name. The value is
 // interpolated into a provider URL, so anything outside this shape is rejected.
 // The character class is what prevents escaping that URL; the length only has to
@@ -99,12 +92,6 @@ type LocationResult struct {
 	Longitude    float64  `json:"longitude"`
 	Types        []string `json:"types"`
 	Attributions []string `json:"attributions"`
-}
-
-// A provider that can answer partial input. Kept separate from PlacesProvider so the
-// test doubles for store search do not have to grow a method they never exercise.
-type AutocompleteProvider interface {
-	Autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error)
 }
 
 type LocalizedPlacesProvider interface {
@@ -550,19 +537,11 @@ func DetectLanguage(raw string) i18n.Locale {
 	return i18n.LocaleEN
 }
 
-func normalizeText(raw string) string {
-	return norm.NFC.String(strings.ToLower(strings.TrimSpace(raw)))
-}
+// Both foldings now live in internal/textnorm, because the location index and the
+// catalogue importer have to fold a Turkish name exactly the way search does.
+func normalizeText(raw string) string { return textnorm.Normalize(raw) }
 
-func foldLatin(raw string) string {
-	raw = strings.NewReplacer("ı", "i", "ß", "ss").Replace(raw)
-	return strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Mn, r) {
-			return -1
-		}
-		return r
-	}, norm.NFD.String(raw))
-}
+func foldLatin(raw string) string { return textnorm.Fold(raw) }
 
 func containsNormalized(normalized, folded, term string) bool {
 	term = normalizeText(term)

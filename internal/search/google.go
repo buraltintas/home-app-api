@@ -24,9 +24,8 @@ type GooglePlaces struct {
 // ratings or hours. Keeping these masks named and tested makes an accidental tier increase
 // visible in review instead of hiding it in a long header literal.
 const (
-	googleSearchFieldMask   = "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.attributions,places.primaryType,places.businessStatus"
-	googleDetailFieldMask   = "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus"
-	googleLocationFieldMask = "id,formattedAddress,location,types"
+	googleSearchFieldMask = "places.id,places.displayName,places.formattedAddress,places.location,places.types,places.attributions,places.primaryType,places.businessStatus"
+	googleDetailFieldMask = "regularOpeningHours,utcOffsetMinutes,id,displayName,formattedAddress,location,rating,userRatingCount,types,attributions,photos,nationalPhoneNumber,primaryType,websiteUri,businessStatus"
 )
 
 func NewGooglePlaces(key string) *GooglePlaces {
@@ -213,52 +212,6 @@ func (g *GooglePlaces) placeDetails(ctx context.Context, id string) (Place, erro
 	return p, nil
 }
 
-// PlaceEssentials resolves a location-autocomplete choice at the Essentials tier. A
-// location origin needs a trusted point and provider type, not the store-detail fields.
-func (g *GooglePlaces) PlaceEssentials(ctx context.Context, id string) (Place, error) {
-	started := time.Now()
-	ctx, finish := observability.StartSpan(ctx, "provider.google_places.place_essentials")
-	out, err := g.placeEssentials(ctx, id)
-	finish(err)
-	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
-	return out, err
-}
-
-func (g *GooglePlaces) placeEssentials(ctx context.Context, id string) (Place, error) {
-	if g.key == "" {
-		return Place{}, fmt.Errorf("places not configured")
-	}
-	u := g.baseURL + "/places/" + url.PathEscape(id)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return Place{}, err
-	}
-	req.Header.Set("X-Goog-Api-Key", g.key)
-	req.Header.Set("X-Goog-FieldMask", googleLocationFieldMask)
-	r, err := g.client.Do(req)
-	if err != nil {
-		return Place{}, err
-	}
-	defer r.Body.Close()
-	if r.StatusCode != http.StatusOK {
-		return Place{}, fmt.Errorf("places status %d", r.StatusCode)
-	}
-	var x struct {
-		ID               string
-		FormattedAddress string
-		Location         struct{ Latitude, Longitude float64 }
-		Types            []string
-	}
-	if err = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&x); err != nil {
-		return Place{}, err
-	}
-	// The formatted address is an honest, human-readable label and is already required by
-	// the location picker response. Requesting displayName solely to duplicate it would
-	// promote this otherwise Essentials-only lookup.
-	return Place{PlaceID: x.ID, Name: x.FormattedAddress, Address: x.FormattedAddress, Latitude: x.Location.Latitude, Longitude: x.Location.Longitude, Types: x.Types}, nil
-}
-
-// PhotoMedia streams a Google place photo. The caller must close the reader.
 func (g *GooglePlaces) PhotoMedia(ctx context.Context, name string, maxWidth int) (io.ReadCloser, string, error) {
 	started := time.Now()
 	ctx, finish := observability.StartSpan(ctx, "provider.google_places.photo_media")
@@ -298,105 +251,6 @@ func (g *GooglePlaces) photoMedia(ctx context.Context, name string, maxWidth int
 	return r.Body, r.Header.Get("Content-Type"), nil
 }
 
-// Autocomplete answers partial input. It is a different Places endpoint from the text
-// search used for stores, and the difference is the whole point: text search matches whole
-// tokens against a corpus, so "unca" finds nothing while "Uncalı" finds the district, and
-// with no country restriction "Bos" happily returns a village in Belgium. Autocomplete is
-// built for prefixes and takes a region restriction, which is what a person typing a
-// Turkish neighbourhood name into a Turkish product actually needs.
-//
-// It is also cheaper: neither autocomplete nor the Essentials lookup used after selection
-// buys store ratings, contacts, hours or photos that a location origin never reads.
-func (g *GooglePlaces) Autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error) {
-	started := time.Now()
-	ctx, finish := observability.StartSpan(ctx, "provider.google_places.autocomplete")
-	out, err := g.autocomplete(ctx, input, locale, lat, lon)
-	finish(err)
-	observability.Provider("google_places", observability.Outcome(err), time.Since(started))
-	return out, err
-}
-
-func (g *GooglePlaces) autocomplete(ctx context.Context, input string, locale i18n.Locale, lat, lon *float64) ([]Place, error) {
-	if g.key == "" {
-		return nil, nil
-	}
-	body := map[string]any{
-		"input":        input,
-		"languageCode": string(locale),
-		// The product operates in Turkey. Offering a Belgian village to somebody typing a
-		// district name is not a near miss, it is a wrong answer that costs a tap.
-		"includedRegionCodes": []string{"tr"},
-		// No type restriction is sent. Both obvious ways of writing one were wrong: the
-		// "(regions)" collection omits neighbourhoods, and naming types by hand misses
-		// whichever level a given place happens to use -- Uncalı, an ordinary Antalya
-		// mahalle, is an administrative_area_level_4. Filtering happens on our side
-		// instead, where the full list of acceptable kinds already lives.
-	}
-	// Ranking without a bias is ranking by fame: someone in Antalya typing "bostanl" was
-	// offered the Bostanlı in Afyonkarahisar. Where the caller knows roughly where the
-	// person is, say so, and the nearby answer comes first.
-	if lat != nil && lon != nil {
-		body["locationBias"] = map[string]any{"circle": map[string]any{
-			"center": map[string]float64{"latitude": *lat, "longitude": *lon},
-			"radius": 50000.0,
-		}}
-	}
-	b, _ := json.Marshal(body)
-	req, e := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/places:autocomplete", bytes.NewReader(b))
-	if e != nil {
-		return nil, e
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Goog-Api-Key", g.key)
-	r, e := g.client.Do(req)
-	if e != nil {
-		return nil, e
-	}
-	defer r.Body.Close()
-	if r.StatusCode < 200 || r.StatusCode >= 300 {
-		return nil, fmt.Errorf("places autocomplete status %d", r.StatusCode)
-	}
-	var payload struct {
-		Suggestions []struct {
-			PlacePrediction struct {
-				PlaceID          string   `json:"placeId"`
-				Types            []string `json:"types"`
-				Text             struct{ Text string }
-				StructuredFormat struct {
-					MainText      struct{ Text string }
-					SecondaryText struct{ Text string }
-				} `json:"structuredFormat"`
-			} `json:"placePrediction"`
-		} `json:"suggestions"`
-	}
-	if e = json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&payload); e != nil {
-		return nil, e
-	}
-	out := make([]Place, 0, len(payload.Suggestions))
-	for _, s := range payload.Suggestions {
-		p := s.PlacePrediction
-		if p.PlaceID == "" {
-			continue
-		}
-		name := p.StructuredFormat.MainText.Text
-		if name == "" {
-			name = p.Text.Text
-		}
-		address := p.StructuredFormat.SecondaryText.Text
-		if address == "" {
-			address = p.Text.Text
-		}
-		// A prediction carries no coordinates. Callers resolve the one the person picks,
-		// which is one lookup per choice instead of one per keystroke.
-		out = append(out, Place{PlaceID: p.PlaceID, Name: name, Address: address, Types: p.Types})
-	}
-	return out, nil
-}
-
-// withPrimary puts Google's primaryType at the front of the type list. Google returns a
-// dozen types for a store and most of them are noise -- "store", "establishment",
-// "point_of_interest" -- while primaryType is its single best answer for what the place
-// actually is. Ordering matters because the classifier reads the list in order.
 func withPrimary(primary string, types []string) []string {
 	if primary == "" {
 		return types

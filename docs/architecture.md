@@ -186,7 +186,7 @@ locale/search information follows existing deletion and retention boundaries.
 | Method/path | User auth | Limit class |
 |---|---|---|
 | `GET /v1/feed` | optional | browse |
-| `GET /v1/locations/search` | optional | search/provider |
+| `GET /v1/locations/search` | optional | location (own table) |
 | `POST /v1/search` | optional | search/AI |
 | `GET /v1/stores/search`, `/nearby`, `/:id`, `/:id/posts` | optional | browse/search |
 | `POST /v1/stores/:id/visit-verifications` | required | write/location |

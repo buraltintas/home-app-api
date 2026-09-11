@@ -1,24 +1,24 @@
 {
   "items": [
     {
-      "provider": "google",
-      "place_id": "ChIJP5iLHkQGykARF0F0T1k_4mE",
+      "provider": "bosagezme",
+      "place_id": "ilce:34-445",
       "name": "Kadıköy",
-      "address": "Kadıköy/İstanbul, Türkiye",
-      "latitude": 40.9917,
-      "longitude": 29.0277,
-      "types": ["administrative_area_level_2", "political"],
-      "attributions": ["Google"]
+      "address": "İstanbul",
+      "latitude": 40.98771,
+      "longitude": 29.049944,
+      "types": ["administrative_area_level_2", "locality"],
+      "attributions": []
     },
     {
-      "provider": "google",
-      "place_id": "ChIJModaNeighborhoodExample",
-      "name": "Moda",
-      "address": "Caferağa, Kadıköy/İstanbul, Türkiye",
-      "latitude": 40.9819,
-      "longitude": 29.0251,
-      "types": ["neighborhood", "political"],
-      "attributions": ["Google"]
+      "provider": "bosagezme",
+      "place_id": "mah:34-42714",
+      "name": "Caferağa",
+      "address": "Kadıköy, İstanbul",
+      "latitude": 40.98247,
+      "longitude": 29.026901,
+      "types": ["neighborhood", "sublocality"],
+      "attributions": []
     }
   ]
 }

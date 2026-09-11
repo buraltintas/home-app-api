@@ -6,6 +6,40 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The location picker is ours: Turkey's own places, no provider behind them
+
+First step of removing Google Places from this product entirely. Choosing *where* to search
+was the part of that nobody had counted: `/v1/locations/search` was Places Autocomplete,
+`/v1/locations/resolve` was Place Details, and a search cannot run without the coordinates
+resolve returns. Removing Google without replacing this would not have thinned the product,
+it would have stopped it.
+
+- New table `tr_locations`: 81 provinces, 973 districts and 69,262 neighbourhoods, each with
+  a point. The data ships inside the binary (about a megabyte, gzipped) and is loaded by
+  `make seed-locations`. Nothing is fetched at request time and no key is involved, so this
+  part of the product can no longer be unavailable or cost anything.
+- Both endpoints keep their shape. `provider` is now `bosagezme` and `place_id` carries our
+  own row id; `attributions` is empty because there is nobody left to credit. A prediction
+  still carries no coordinates the client may choose — the browser returns an id and the
+  point is read here, which was a property of the old picker worth keeping.
+- Names are stored folded as well as printed, so an index answers `unca` for `Uncalı` and
+  `kadikoy` for `Kadıköy`. The two foldings moved to `internal/textnorm`, because the
+  catalogue importer that follows has to fold a Turkish name exactly the way search does,
+  and a second implementation that disagreed by one character would make one place into two.
+- Ordering is the design: a name starting with what was typed beats one merely containing
+  it, a province beats a district beats a neighbourhood, and where the visitor is standing
+  breaks the remaining ties — there are several hundred neighbourhoods called some form of
+  "Cumhuriyet". Two-letter queries are answered from the front of names only, or "an" would
+  sort every place in Turkey containing those letters.
+- The generated dataset is not trusted point by point. A district's position is the *median*
+  of its neighbourhoods, so one mistyped coordinate cannot move it, and a neighbourhood more
+  than 80 km from that median is dropped rather than published — about 3% of the published
+  rows. Turkish casing is applied with Turkish rules; lowercasing `BALIKESİR` the ordinary
+  way produces `Balikesir`, which is a different word.
+- Removed with it: `PlaceEssentials` and `Autocomplete` from the Places client, the
+  `AutocompleteProvider` and `PlaceEssentialsProvider` interfaces, and the location-anchor
+  filtering that existed only to tell a provider's shops from its administrative areas.
+
 ## A Google sign-in now brings its account picture, and a review carries its eight scores
 
 - The Google ID token has always contained the account picture and it was thrown away, so
