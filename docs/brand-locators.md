@@ -32,6 +32,8 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 | Enza Home | 60 | same list as Yataş Bedding, other code |
 | Özdilek Home | 155 | rendered as markup, no coordinates published |
 | IKEA | 10 | rendered as markup, points in data attributes |
+| Chakra | 84 | rendered as markup, point on its own map button |
+| Emsan | 18 | Karaca's group, Karaca's platform, same mapping |
 
 **Look for the shared one first.** Three mappings covered seven brands: Bellona, İstikbal
 and Mondi are all Erciyes Holding; Doğtaş and Kelebek share a dealer panel; Linens and Taç
@@ -44,7 +46,11 @@ a third-party host before assuming the chain runs its own endpoint.
 scripts, or sits at a path the probe does not guess. These need a person to watch the
 network panel once.
 
-Chakra · Alfemo · Nurus · Merinos · Dinarsu · Emsan · Korkmaz
+**Tier 2, still to do.** Alfemo and Korkmaz render nothing server-side and their pages did
+not call a store endpoint while being watched; Dinarsu builds its list from three script
+arrays keyed by city; Merinos, Nurus and Pierre Cardin Home answer 404 at every path tried,
+so their locators have moved. İpek Halı, Neva Home and Weltew time out. Zara Home answers
+403 to us.
 
 **Tier 1, each for its own reason.** These are the ones left, and none of them is "could
 not find it":

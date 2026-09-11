@@ -393,7 +393,20 @@ brands:
     website: https://www.chakra.com.tr
     tier: 2
     categories: [home_textile, decoration, home_accessories]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Chakra carries each shop's point on the button that opens it in a map, and its town
+      # and province in a block under the address.
+      url: https://www.chakra.com.tr/magazalar
+      row: '(?s)<div id="[0-9]+" class="stores__list-stores js-stores-item">(.*?)data-latitude="[0-9.]+"'
+      id: 'title="([^"]+)"'
+      name: 'title="([^"]+)"'
+      address: '(?s)<div class="stores__address">\s*([^<]+)'
+      district: '(?s)<div class="stores__city">\s*([^<]+?)\s*/'
+      city: '(?s)/\s*([^<]+?)\s*</div>'
+      phone: '(?s)js-stores-phone">\s*([^<]+)'
+      latitude: 'daddr=([0-9.]+),'
+      longitude: 'daddr=[0-9.]+,([0-9.]+)'
 
   - slug: pasabahce
     name: Paşabahçe
@@ -497,7 +510,20 @@ brands:
     website: https://www.emsan.com.tr
     tier: 2
     categories: [kitchenware, tableware, small_appliances]
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Emsan is Karaca's group and runs the same platform, so the same mapping reads it:
+      # one JSON object per shop in its own hidden div.
+      url: https://www.emsan.com.tr/magazalarimiz
+      extract: 'class="store-find-change-map\d+">(\{.*?\})</div>'
+      id: store_id
+      name: name
+      address: address
+      city: city
+      district: state
+      phone: phone
+      latitude: lat
+      longitude: lng
 
   - slug: korkmaz
     name: Korkmaz

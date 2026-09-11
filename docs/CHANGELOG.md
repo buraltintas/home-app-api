@@ -6,6 +6,21 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Two of tier two: Chakra and Emsan
+
+5,133 stores across sixteen chains.
+
+Emsan cost nothing at all: it is Karaca's group and runs Karaca's platform, so the mapping
+already written read it unchanged. That is the third time this has happened -- Bellona with
+İstikbal and Mondi, Doğtaş with Kelebek, Linens with Taç -- and it is worth saying plainly:
+before writing a new locator, look at the page's scripts for a third-party host or a
+familiar shape. Half the brands in this catalogue arrived on somebody else's mapping.
+
+Chakra publishes each shop's point on the button that opens it in a map, which is a common
+enough shape to be worth remembering: a chain with no coordinates in its markup often has
+them in a maps link.
+
+
 ## Tier one, as far as it goes: IKEA and Özdilek in, four out with reasons
 
 Fifteen of the twenty largest chains are now in the catalogue -- 5,048 stores -- and the
