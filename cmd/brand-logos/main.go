@@ -303,6 +303,13 @@ func mastheadSVG(html string) string {
 		if len(match) < minInlineSVG || len(match) > maxInlineSVG {
 			continue
 		}
+		// The author says which drawings are furniture. A social icon is marked
+		// aria-hidden or carries "icon" in its class, and Çilek's Facebook glyph was
+		// collected as its brand mark because its viewBox is 14222 square -- large numbers
+		// in a coordinate system say nothing about what the thing is.
+		if markedAsIcon.MatchString(match) {
+			continue
+		}
 		// The drawing's own declared size is what separates a mark from an arrow. Byte
 		// length does not: the first pass of this took a 17-pixel chevron from five
 		// different chains because their markup happened to weigh a kilobyte.
@@ -361,7 +368,10 @@ var (
 	svgHeight = regexp.MustCompile(`(?i)<svg[^>]*\bheight=["']?([0-9.]+)`)
 )
 
-var inlineSVG = regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`)
+var (
+	inlineSVG    = regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`)
+	markedAsIcon = regexp.MustCompile(`(?is)^<svg[^>]*(?:aria-hidden=["']?true|class=["'][^"']*\bicon\b|role=["']?presentation)`)
+)
 
 const (
 	mastheadBytes = 120 << 10
