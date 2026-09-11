@@ -25,7 +25,7 @@ type Config struct {
 	OTPEmailRequestLimit, OTPIPRequestLimit                 int
 	OTPVisitorRequestLimit                                  int
 	AppReviewEmail, AppReviewCode                           string
-	GoogleClientID, GooglePlacesAPIKey                      string
+	GoogleClientID                                          string
 	OpenAIAPIKey, OpenAIModel                               string
 	OpenAITimeout                                           time.Duration
 	EmailProvider, EmailFrom                                string
@@ -50,10 +50,6 @@ type Config struct {
 	// Local-first search. This is enabled by default so a deployment without the optional
 	// tuning variables never pays the provider for an answer already held in PostgreSQL.
 	// The switch remains as an emergency rollback control.
-	SearchLocalFirstEnabled                                                bool
-	SearchGateMinResults, SearchGateMinCoverage                            int
-	SearchGateCoverageRadiusMeters, SearchGateRelevanceSample              int
-	SearchGateMinRelevance, SearchShadowRate                               float64
 	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
 	MetricsToken                                                           string
 	AdminEmails                                                            []string
@@ -72,8 +68,8 @@ func Load() (Config, error) {
 		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")), BFFSecrets: split(os.Getenv("BFF_SECRETS")),
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
 		AppReviewEmail: os.Getenv("APP_REVIEW_EMAIL"), AppReviewCode: os.Getenv("APP_REVIEW_CODE"),
-		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"), GooglePlacesAPIKey: os.Getenv("GOOGLE_PLACES_API_KEY"),
-		OpenAIAPIKey: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
+		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),
+		OpenAIAPIKey:   strings.TrimSpace(os.Getenv("OPENAI_API_KEY")), OpenAIModel: env("OPENAI_MODEL", "gpt-4o-mini"),
 		EmailProvider: env("EMAIL_PROVIDER", "development"), EmailFrom: env("EMAIL_FROM", brand.DefaultEmailFrom),
 		// Where product feedback is sent. Defaults to the address on the site so a deployment
 		// that sets nothing still delivers it rather than silently keeping it in the panel.
@@ -166,40 +162,10 @@ func Load() (Config, error) {
 		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
 	}
 	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
-	if c.SearchLocalFirstEnabled, err = boolean("SEARCH_LOCAL_FIRST_ENABLED", true); err != nil {
-		return c, err
-	}
 	// Conservative on purpose. The first version of the gate is not trying to reach the
 	// ceiling the historical data suggests; it is trying not to make search worse.
-	if c.SearchGateMinResults, err = integer("SEARCH_GATE_MIN_RESULTS", 30); err != nil {
-		return c, err
-	}
-	if c.SearchGateRelevanceSample, err = integer("SEARCH_GATE_RELEVANCE_SAMPLE", 5); err != nil {
-		return c, err
-	}
-	if c.SearchGateMinCoverage, err = integer("SEARCH_GATE_MIN_COVERAGE", 40); err != nil {
-		return c, err
-	}
-	if c.SearchGateCoverageRadiusMeters, err = integer("SEARCH_GATE_COVERAGE_RADIUS_METERS", 15000); err != nil {
-		return c, err
-	}
-	if c.SearchGateMinRelevance, err = number("SEARCH_GATE_MIN_RELEVANCE", 0.6); err != nil {
-		return c, err
-	}
-	if c.SearchShadowRate, err = number("SEARCH_SHADOW_RATE", 0); err != nil {
-		return c, err
-	}
-	if c.SearchGateMinResults < 0 || c.SearchGateRelevanceSample < 1 || c.SearchGateMinCoverage < 0 || c.SearchGateCoverageRadiusMeters < 100 {
-		return c, errors.New("search gate thresholds must be positive")
-	}
-	if c.SearchGateMinRelevance < 0 || c.SearchGateMinRelevance > 1 {
-		return c, errors.New("SEARCH_GATE_MIN_RELEVANCE must be between 0 and 1")
-	}
 	// A shadow call costs what a real one costs. Sampling everything would spend the
 	// whole saving on proving it, so the rate is capped well below that.
-	if c.SearchShadowRate < 0 || c.SearchShadowRate > 0.5 {
-		return c, errors.New("SEARCH_SHADOW_RATE must be between 0 and 0.5")
-	}
 	if c.SearchRetentionDays, err = integer("SEARCH_RETENTION_DAYS", 365); err != nil {
 		return c, err
 	}

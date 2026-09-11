@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -110,14 +109,12 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		// the search limiter meant eight arrived and twelve were rejected -- which is what
 		// the broken thumbnails were. A search is an AI call plus a provider round trip; a
 		// photo is proxied bytes, and the two do not belong on the same allowance.
-		photoLimit := appmw.NewLimiter(300, 60)
 		writeLimit := appmw.NewLimiter(20, 6)
 		socialLimit := appmw.NewLimiter(60, 15)
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
 		r.With(searchLimit.Middleware).Get("/locations/search", s.searchLocations)
 		r.With(searchLimit.Middleware).Get("/locations/resolve", s.resolveLocation)
-		r.With(photoLimit.Middleware).Get("/places/photo", s.placePhoto)
 		r.Get("/categories", s.storeCategories)
 		r.With(searchLimit.Middleware).Get("/search/suggestions", s.searchSuggestions)
 		r.Get("/search/highlights", s.searchHighlights)
@@ -133,7 +130,6 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
 		r.Get("/stores/{id}/posts", s.postsByStore)
-		r.With(appmw.RequireAuth, writeLimit.Middleware).Post("/stores/resolve-external", s.resolveExternalStore)
 		r.Get("/posts/{id}", s.postDetail)
 		r.Get("/posts/{id}/comments", s.comments)
 		r.Get("/users/{id}", s.userPublic)
@@ -216,33 +212,6 @@ func (s *Server) publicMedia(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	WriteError(w, e, r.Context())
-}
-
-// placePhoto streams a Google place photo. The photo name is validated against a
-// strict pattern before it reaches a provider URL, and bytes are never persisted.
-func (s *Server) placePhoto(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-	if !searchpkg.ValidPhotoName(name) {
-		WriteError(w, ErrInvalidInput, r.Context())
-		return
-	}
-	width, _ := strconv.Atoi(r.URL.Query().Get("max_width"))
-	if width == 0 {
-		width = 520
-	}
-	body, contentType, e := s.search.PlacePhoto(r.Context(), name, width)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
-	defer body.Close()
-	if contentType == "" {
-		contentType = "image/jpeg"
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Cache-Control", "public, max-age=3600")
-	w.WriteHeader(200)
-	_, _ = io.Copy(w, io.LimitReader(body, 8<<20))
 }
 
 func (s *Server) createMediaUpload(w http.ResponseWriter, r *http.Request) {
@@ -515,16 +484,6 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
-	// Search/listing deliberately buys only the cheap Places fields. The first valid
-	// store-page read fills the expensive detail fields once and persists them. Provider
-	// degradation must not take our own page down; serve the catalogue data already held
-	// and let a later read retry the enrichment.
-	if s.search != nil {
-		e = s.search.EnsureGoogleStoreDetails(r.Context(), id)
-	}
-	if e != nil {
-		slog.WarnContext(r.Context(), "store detail provider enrichment unavailable", "store_id", id, "error", e)
-	}
 	x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 	if e != nil {
 		WriteError(w, e, r.Context())
@@ -612,26 +571,6 @@ func (s *Server) searchStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, x)
-}
-func (s *Server) resolveExternalStore(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Provider string `json:"provider"`
-		PlaceID  string `json:"place_id"`
-	}
-	if e := Decode(w, r, &in, 16<<10); e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
-	if in.Provider != "google" {
-		WriteError(w, ErrInvalidInput, r.Context())
-		return
-	}
-	id, e := s.search.MaterializeGoogleStore(r.Context(), in.PlaceID)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
-	JSON(w, 200, map[string]any{"id": id})
 }
 func (s *Server) interaction(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)

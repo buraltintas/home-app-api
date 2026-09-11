@@ -242,7 +242,7 @@ func TestDeterministicOutOfScopeCannotBeReintroducedByModel(t *testing.T) {
 
 func TestPhysicallyReviewedPlatformStoreRanksBeforeGoogleOnly(t *testing.T) {
 	community := platformScore(Platform{AverageRating: 1, ReviewCount: 1}, 19)
-	google := googleScore(Place{Rating: 5, RatingCount: 100000}, 0)
+	google := googleScore(providerFixture{Rating: 5, RatingCount: 100000}, 0)
 	if community <= google {
 		t.Fatalf("community score=%f google score=%f", community, google)
 	}
@@ -255,28 +255,6 @@ func TestPhysicallyReviewedPlatformStoreRanksBeforeGoogleOnly(t *testing.T) {
 // Bostanlı came back as six branches of one chain out of six results, because we had added
 // "bedding" and half that chain's name is Bedding. The rule it was written for was real
 // until it was measured.
-func TestPlacesQuerySendsOnlyWhatThePersonSaid(t *testing.T) {
-	got := placesQuery(Intent{ProductTerms: []string{"bedding_set"}, SemanticTerms: []string{"home dowry shopping"}, Categories: []string{"bedding"}}, "Çeyiz almak istiyorum")
-	if got != "Çeyiz almak istiyorum" {
-		t.Fatalf("query should be the person's own words, got %q", got)
-	}
-	for _, leaked := range []string{"bedding", "home dowry shopping"} {
-		if strings.Contains(got, leaked) {
-			t.Fatalf("internal key %q reached the provider: %q", leaked, got)
-		}
-	}
-	// Where a place was named, it still travels -- that is the person's own word too.
-	if got := placesQuery(Intent{LocationText: "Bostanlı", Categories: []string{"bedding"}}, "yatak"); got != "yatak Bostanlı" {
-		t.Fatalf("location should travel with the query, got %q", got)
-	}
-	if long := placesQuery(Intent{ProductTerms: []string{"furniture"}}, strings.Repeat("ö", 500)); len([]rune(long)) > 500 {
-		t.Fatalf("places query too long: %d", len([]rune(long)))
-	}
-	if got := placesQuery(Intent{StoreName: "Yeğenler Elektrik", LocationText: "Antalya", Categories: []string{"lighting"}}, "Yeğenler Elektrik Antalya"); got != "Yeğenler Elektrik Antalya" {
-		t.Fatalf("named places query=%q", got)
-	}
-}
-
 func TestNameMatchesIgnoresCaseAndTurkishDiacritics(t *testing.T) {
 	cases := []struct {
 		result, storeName string

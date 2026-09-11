@@ -46,9 +46,7 @@ func (s *Service) MonthlyHighlights(ctx context.Context) (MonthlyStoreHighlights
 	base := `
 WITH review_stats AS (
   SELECT s.id, s.name, s.city, coalesce(s.district, '') AS district,
-         coalesce((SELECT x.attribution->>'photo_name' FROM store_external_sources x
-                   WHERE x.store_id=s.id AND x.provider='google' AND x.attribution ? 'photo_name'
-                   LIMIT 1), '') AS photo_name,
+         coalesce((SELECT b.slug FROM brands b WHERE b.id=s.brand_id), '') AS brand_slug,
          coalesce((SELECT m.id::text FROM post_media pm
                    JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
                    WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready'
@@ -62,9 +60,9 @@ WITH review_stats AS (
   FROM stores s
   LEFT JOIN posts p ON p.store_id = s.id
   WHERE s.deleted_at IS NULL
-  GROUP BY s.id, s.name, s.city, s.district, photo_name, own_media
+  GROUP BY s.id, s.name, s.city, s.district, brand_slug, own_media
 )
-SELECT id, name, city, district, photo_name, own_media, current_rating, review_count, recent_review_count,
+SELECT id, name, city, district, brand_slug, own_media, current_rating, review_count, recent_review_count,
        coalesce(current_rating - prior_rating, 0) AS rating_increase
 FROM review_stats
 WHERE review_count >= $2 AND recent_review_count > 0 `
@@ -98,13 +96,13 @@ type rowScanner interface {
 
 func scanHighlight(row rowScanner) (*StoreHighlight, error) {
 	var item StoreHighlight
-	var photoName, ownMedia string
+	var brandSlug, ownMedia string
 	if err := row.Scan(
 		&item.ID,
 		&item.Name,
 		&item.City,
 		&item.District,
-		&photoName,
+		&brandSlug,
 		&ownMedia,
 		&item.AverageRating,
 		&item.ReviewCount,
@@ -117,11 +115,11 @@ func scanHighlight(row rowScanner) (*StoreHighlight, error) {
 		return nil, err
 	}
 	// Same order the result list uses: somebody who went there and took a picture beats
-	// the provider's frame.
+	// the chain's mark, which beats nothing.
 	if ownMedia != "" {
 		item.Photo = &Photo{Source: "community", MediaID: ownMedia}
-	} else if ValidPhotoName(photoName) {
-		item.Photo = &Photo{Source: "google", Name: photoName}
+	} else if brandSlug != "" {
+		item.Photo = &Photo{Source: "brand", BrandSlug: brandSlug}
 	}
 	return &item, nil
 }

@@ -162,10 +162,9 @@ type External struct {
 // Photo mirrors the stored provider photograph. Attribution travels with it because the
 // provider terms require the credit to be displayed wherever the photograph is.
 type Photo struct {
-	Source       string   `json:"source"`
-	MediaID      string   `json:"media_id,omitempty"`
-	Name         string   `json:"name,omitempty"`
-	Attributions []string `json:"attributions,omitempty"`
+	Source    string `json:"source"`
+	MediaID   string `json:"media_id,omitempty"`
+	BrandSlug string `json:"brand_slug,omitempty"`
 }
 type Result struct {
 	ID             *uuid.UUID `json:"id,omitempty"`
@@ -1170,20 +1169,6 @@ func StoreCategories(name string, types []string) []string {
 		}
 	}
 	return out
-}
-
-func googleScore(p Place, relevanceRank int) float64 {
-	return 100 + p.Rating*4 + math.Log1p(float64(p.RatingCount))*2 - float64(relevanceRank)
-}
-
-// A store we already carry must never rank below the same store seen only through
-// Google. Before this, a mapped store with no community reviews scored 80 while an
-// identical Google-only result scored well past 100, so knowing a place pushed it down.
-func mergedScore(p Platform, g Place, relevanceRank int) float64 {
-	if p.ReviewCount > 0 {
-		return platformScore(p, relevanceRank)
-	}
-	return googleScore(g, relevanceRank)
 }
 
 // cityKey reduces a formatted Turkish address to something two results can be compared

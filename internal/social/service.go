@@ -101,14 +101,16 @@ type VisitVerification struct {
 	ExpiresAt      time.Time `json:"expires_at"`
 }
 type Post struct {
-	ID                  uuid.UUID `json:"id"`
-	UserID              uuid.UUID `json:"user_id"`
-	StoreID             uuid.UUID `json:"store_id"`
-	Text                string    `json:"text"`
-	ContentLanguage     string    `json:"content_language,omitempty"`
-	Rating              int       `json:"rating"`
-	VisitVerified       bool      `json:"visit_verified"`
-	DistanceMeters      float64   `json:"distance_meters"`
+	ID              uuid.UUID `json:"id"`
+	UserID          uuid.UUID `json:"user_id"`
+	StoreID         uuid.UUID `json:"store_id"`
+	Text            string    `json:"text"`
+	ContentLanguage string    `json:"content_language,omitempty"`
+	Rating          int       `json:"rating"`
+	VisitVerified   bool      `json:"visit_verified"`
+	// Nullable: a review written without a location has no distance, and zero would claim
+	// its writer stood in the shop.
+	DistanceMeters      *float64  `json:"distance_meters,omitempty"`
 	StoreDistanceMeters *float64  `json:"store_distance_meters,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	Username            string    `json:"-"`
@@ -189,7 +191,10 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	} else if textLength < 3 || in.Rating < 1 || in.Rating > 5 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
-	if in.StoreID == uuid.Nil || textLength > 5000 || (!hasProof && !storepkg.ValidCoordinates(in.Latitude, in.Longitude)) || len(in.MediaIDs) > 10 {
+	// Coordinates are no longer required to write a review, only to earn the badge. They
+	// still have to be coordinates when they are sent.
+	located := !hasProof && (in.Latitude != 0 || in.Longitude != 0)
+	if in.StoreID == uuid.Nil || textLength > 5000 || (located && !storepkg.ValidCoordinates(in.Latitude, in.Longitude)) || len(in.MediaIDs) > 10 {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	if hasProof && (in.Latitude != 0 || in.Longitude != 0 || in.AccuracyMeters != nil) {
@@ -198,8 +203,10 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	if hasProof && *in.VisitVerificationID == uuid.Nil {
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
-	if !hasProof && (in.AccuracyMeters == nil || *in.AccuracyMeters <= 0 || *in.AccuracyMeters > s.cfg.MaxLocationAccuracyMeters) {
-		return uuid.Nil, httpapi.ErrInvalidInput
+	// A reading too vague to place somebody cannot earn the badge, but it is not a reason
+	// to refuse the review; it is simply not proof.
+	if located && in.AccuracyMeters != nil && (*in.AccuracyMeters <= 0 || *in.AccuracyMeters > s.cfg.MaxLocationAccuracyMeters) {
+		located = false
 	}
 	seenMedia := make(map[uuid.UUID]struct{}, len(in.MediaIDs))
 	if in.ContentLanguage != nil {
@@ -233,8 +240,16 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return uuid.Nil, httpapi.E(422, "VISIT_VERIFICATION_INVALID", "Visit verification is invalid, expired, or already used")
 		}
-	} else {
+	} else if located {
 		e = tx.QueryRow(ctx, `SELECT ST_Distance(location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),now() FROM stores WHERE id=$3 AND deleted_at IS NULL FOR UPDATE`, in.Latitude, in.Longitude, in.StoreID).Scan(&distance, &verifiedAt)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
+		}
+	} else {
+		// No location at all: the review is welcome and the distance is unknown, which is
+		// a different thing from zero.
+		var exists bool
+		e = tx.QueryRow(ctx, `SELECT true FROM stores WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`, in.StoreID).Scan(&exists)
 		if errors.Is(e, pgx.ErrNoRows) {
 			return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 		}
@@ -246,16 +261,18 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 	if !hasProof && in.AccuracyMeters != nil {
 		effectiveDistance += *in.AccuracyMeters
 	}
-	if effectiveDistance > s.cfg.ReviewRadiusMeters {
-		// Release the store row lock before recording the rejected attempt. The
-		// reporting event uses a separate transaction whose foreign-key check
-		// otherwise waits on this transaction's FOR UPDATE lock indefinitely.
-		if e = tx.Rollback(ctx); e != nil {
-			return uuid.Nil, e
-		}
-		_, _ = s.report.Record(ctx, reporting.Event{Type: reporting.PostLocationRejected, IdempotencyKey: "post-location-rejected:" + uuid.NewString(), UserID: &user, StoreID: &in.StoreID, Metadata: map[string]any{"distance_meters": distance, "effective_distance_meters": effectiveDistance, "allowed_radius_meters": s.cfg.ReviewRadiusMeters}})
-		return uuid.Nil, httpapi.E(422, "STORE_VISIT_NOT_VERIFIED", "You need to be near this store to review it.")
+	var recordedDistance any
+	if hasProof || located {
+		recordedDistance = distance
 	}
+	// Distance no longer decides whether a review may be written; it decides whether the
+	// review carries the badge that says somebody was actually there.
+	//
+	// Requiring proof made the badge meaningful and the review rare: the only people who
+	// could write one were standing in the shop with the site open. A directory of empty
+	// stores proves nothing either. So everyone may write, the verified ones are marked and
+	// sorted first, and the claim the badge makes is exactly as strong as it ever was.
+	verified := (hasProof || located) && effectiveDistance <= s.cfg.ReviewRadiusMeters
 	id := uuid.New()
 	// nil rather than zero for a review that carries no criteria: the columns are nullable
 	// because "not asked" is not a score, and a zero would fail the check constraint anyway.
@@ -265,8 +282,8 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 			criteria[i] = score
 		}
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,verification_distance_meters,verified_at,content_language,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-		append([]any{id, user, in.StoreID, in.Text, in.Rating, distance, verifiedAt, in.ContentLanguage}, criteria...)...)
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,visit_verified,verification_distance_meters,verified_at,content_language,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+		append([]any{id, user, in.StoreID, in.Text, in.Rating, verified, recordedDistance, verifiedAt, in.ContentLanguage}, criteria...)...)
 	if e != nil {
 		return uuid.Nil, e
 	}
@@ -434,7 +451,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) (Post, error) {
 	var p Post
 	var storePhotoJSON []byte
-	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media)
+	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
@@ -470,7 +487,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if limit < 1 || limit > 50 {
 		limit = 20
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e

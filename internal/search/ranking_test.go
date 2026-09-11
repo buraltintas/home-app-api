@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"testing"
 
@@ -12,6 +13,26 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// The scores these fixtures carry were produced by the provider-scoring functions this
+// product no longer has, now that results come only from our own catalogue. They are kept
+// exactly as they were, because what these tests check is the ordering rankResults
+// produces, not how any particular score was arrived at.
+type providerFixture struct {
+	Rating      float64
+	RatingCount int
+}
+
+func googleScore(p providerFixture, relevanceRank int) float64 {
+	return 100 + p.Rating*4 + math.Log1p(float64(p.RatingCount))*2 - float64(relevanceRank)
+}
+
+func mergedScore(p Platform, g providerFixture, relevanceRank int) float64 {
+	if p.ReviewCount > 0 {
+		return platformScore(p, relevanceRank)
+	}
+	return googleScore(g, relevanceRank)
+}
 
 func meters(v float64) *float64 { return &v }
 
@@ -29,10 +50,10 @@ func names(results []Result) []string {
 // climb over something down the road.
 func TestNearbyStoresOutrankFarBetterRatedOnes(t *testing.T) {
 	results := []Result{
-		{Name: "Cotton Box", Address: "Hacıeyüplü, 20050 Denizli Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(169400), score: googleScore(Place{Rating: 5, RatingCount: 49}, 2)},
-		{Name: "Denizli Tekstil Dünyası", Address: "Saraylar, 20100 Denizli Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(163000), score: googleScore(Place{Rating: 5, RatingCount: 28}, 3)},
-		{Name: "Yataş Bedding Aspendos", Address: "Kızıltoprak, 07230 Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(13900), Platform: &Platform{}, score: mergedScore(Platform{}, Place{Rating: 4, RatingCount: 141}, 5)},
-		{Name: "Moda Yorgan House", Address: "Fevzi Çakmak, 07210 Kepez/Antalya, Türkiye", DistanceMeters: meters(9000), score: googleScore(Place{Rating: 4, RatingCount: 4}, 0)},
+		{Name: "Cotton Box", Address: "Hacıeyüplü, 20050 Denizli Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(169400), score: googleScore(providerFixture{Rating: 5, RatingCount: 49}, 2)},
+		{Name: "Denizli Tekstil Dünyası", Address: "Saraylar, 20100 Denizli Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(163000), score: googleScore(providerFixture{Rating: 5, RatingCount: 28}, 3)},
+		{Name: "Yataş Bedding Aspendos", Address: "Kızıltoprak, 07230 Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(13900), Platform: &Platform{}, score: mergedScore(Platform{}, providerFixture{Rating: 4, RatingCount: 141}, 5)},
+		{Name: "Moda Yorgan House", Address: "Fevzi Çakmak, 07210 Kepez/Antalya, Türkiye", DistanceMeters: meters(9000), score: googleScore(providerFixture{Rating: 4, RatingCount: 4}, 0)},
 	}
 	rankResults(results, true, false)
 	for _, far := range []string{"Cotton Box", "Denizli Tekstil Dünyası"} {
@@ -51,7 +72,7 @@ func TestNearbyStoresOutrankFarBetterRatedOnes(t *testing.T) {
 // shop four hundred metres away. Both stores here are now inside the same kilometre.
 func TestReviewedStoresNearbyComeFirst(t *testing.T) {
 	results := []Result{
-		{Name: "Closest Unknown", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(900), score: googleScore(Place{Rating: 5, RatingCount: 900}, 0)},
+		{Name: "Closest Unknown", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(900), score: googleScore(providerFixture{Rating: 5, RatingCount: 900}, 0)},
 		{Name: "Reviewed Antalya", Address: "Muratpaşa/Antalya, Türkiye", DistanceMeters: meters(400), Platform: &Platform{ReviewCount: 6, AverageRating: 4.2}, score: platformScore(Platform{ReviewCount: 6, AverageRating: 4.2}, 4)},
 		{Name: "Reviewed Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(160000), Platform: &Platform{ReviewCount: 40, AverageRating: 5}, score: platformScore(Platform{ReviewCount: 40, AverageRating: 5}, 1)},
 	}
@@ -67,7 +88,7 @@ func TestReviewedStoresNearbyComeFirst(t *testing.T) {
 // Knowing a store must never cost it position against the same store seen only through
 // Google, which is what the old flat 80 point floor did.
 func TestKnownStoreWithoutReviewsKeepsItsGoogleStanding(t *testing.T) {
-	place := Place{Rating: 4, RatingCount: 141}
+	place := providerFixture{Rating: 4, RatingCount: 141}
 	if mergedScore(Platform{}, place, 5) != googleScore(place, 5) {
 		t.Fatal("a mapped store without community reviews lost its Google standing")
 	}
@@ -131,11 +152,11 @@ func TestStoreSlugFoldsTurkishLettersInsteadOfDroppingThem(t *testing.T) {
 func TestCityResultsReadNearestFirst(t *testing.T) {
 	antalya := "Muratpaşa/Antalya, Türkiye"
 	results := []Result{
-		{Name: "Evdek", Address: antalya, DistanceMeters: meters(11400), score: googleScore(Place{Rating: 4.8, RatingCount: 50}, 0)},
-		{Name: "Yataş", Address: antalya, DistanceMeters: meters(13900), score: googleScore(Place{Rating: 4, RatingCount: 141}, 1)},
-		{Name: "El-DE", Address: antalya, DistanceMeters: meters(8400), score: googleScore(Place{Rating: 4.2, RatingCount: 25}, 2)},
-		{Name: "Kültür", Address: antalya, DistanceMeters: meters(7400), score: googleScore(Place{Rating: 4.5, RatingCount: 10}, 3)},
-		{Name: "Bebemsi", Address: antalya, DistanceMeters: meters(8300), score: googleScore(Place{Rating: 4.6, RatingCount: 102}, 4)},
+		{Name: "Evdek", Address: antalya, DistanceMeters: meters(11400), score: googleScore(providerFixture{Rating: 4.8, RatingCount: 50}, 0)},
+		{Name: "Yataş", Address: antalya, DistanceMeters: meters(13900), score: googleScore(providerFixture{Rating: 4, RatingCount: 141}, 1)},
+		{Name: "El-DE", Address: antalya, DistanceMeters: meters(8400), score: googleScore(providerFixture{Rating: 4.2, RatingCount: 25}, 2)},
+		{Name: "Kültür", Address: antalya, DistanceMeters: meters(7400), score: googleScore(providerFixture{Rating: 4.5, RatingCount: 10}, 3)},
+		{Name: "Bebemsi", Address: antalya, DistanceMeters: meters(8300), score: googleScore(providerFixture{Rating: 4.6, RatingCount: 102}, 4)},
 	}
 	rankResults(results, true, false)
 	want := []string{"Kültür", "Bebemsi", "El-DE", "Evdek", "Yataş"}
@@ -221,8 +242,8 @@ func TestPremiumStoresLeadTheSearchersOwnCity(t *testing.T) {
 	antalya := "Muratpaşa/Antalya, Türkiye"
 	results := []Result{
 		{Name: "Reviewed", Address: antalya, DistanceMeters: meters(200), Platform: &Platform{ReviewCount: 9, AverageRating: 4.8}, score: platformScore(Platform{ReviewCount: 9, AverageRating: 4.8}, 0)},
-		{Name: "Closest", Address: antalya, DistanceMeters: meters(300), score: googleScore(Place{Rating: 5, RatingCount: 400}, 0)},
-		{Name: "Premium", Address: antalya, DistanceMeters: meters(12000), Premium: true, score: googleScore(Place{Rating: 3.9, RatingCount: 12}, 6)},
+		{Name: "Closest", Address: antalya, DistanceMeters: meters(300), score: googleScore(providerFixture{Rating: 5, RatingCount: 400}, 0)},
+		{Name: "Premium", Address: antalya, DistanceMeters: meters(12000), Premium: true, score: googleScore(providerFixture{Rating: 3.9, RatingCount: 12}, 6)},
 	}
 	rankResults(results, true, false)
 	if results[0].Name != "Premium" {
@@ -247,8 +268,8 @@ func TestNearbyPremiumDoesNotDependOnFormattedCityLabel(t *testing.T) {
 // Premium is not a way to buy your way into another province's results.
 func TestPremiumDoesNotTravelToAnotherCity(t *testing.T) {
 	results := []Result{
-		{Name: "Local", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(4000), score: googleScore(Place{Rating: 4, RatingCount: 20}, 1)},
-		{Name: "Premium Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(165000), Premium: true, score: googleScore(Place{Rating: 5, RatingCount: 300}, 0)},
+		{Name: "Local", Address: "Kepez/Antalya, Türkiye", DistanceMeters: meters(4000), score: googleScore(providerFixture{Rating: 4, RatingCount: 20}, 1)},
+		{Name: "Premium Denizli", Address: "Merkezefendi/Denizli, Türkiye", DistanceMeters: meters(165000), Premium: true, score: googleScore(providerFixture{Rating: 5, RatingCount: 300}, 0)},
 	}
 	rankResults(results, true, false)
 	if results[0].Name != "Local" {
@@ -277,7 +298,7 @@ func TestPremiumSurvivesTheLocalHorizon(t *testing.T) {
 func TestPromotedStoreLeadsEvenWhenFurtherAway(t *testing.T) {
 	antalya := "Muratpaşa/Antalya, Türkiye"
 	results := []Result{
-		{Name: "Organic 5km", Address: antalya, DistanceMeters: meters(5900), score: googleScore(Place{Rating: 5, RatingCount: 104}, 0)},
+		{Name: "Organic 5km", Address: antalya, DistanceMeters: meters(5900), score: googleScore(providerFixture{Rating: 5, RatingCount: 104}, 0)},
 		{Name: "Promoted 15km", Address: antalya, DistanceMeters: meters(15500), Premium: true, score: platformScore(Platform{}, 9)},
 	}
 	rankResults(results, true, false)

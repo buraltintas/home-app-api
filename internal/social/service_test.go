@@ -20,10 +20,15 @@ func TestCreatePostRejectsDuplicateMediaBeforeDatabaseWrite(t *testing.T) {
 	}
 }
 
-func TestCreatePostRequiresMobileHorizontalAccuracy(t *testing.T) {
+func TestCreatePostAcceptsCoordinatesThatCannotProveAVisit(t *testing.T) {
+	// Being near the shop earns the badge; it is no longer the price of writing at all.
+	// A reading with no stated accuracy cannot prove anything, and that is a reason to
+	// withhold the badge rather than to refuse the review -- so this gets past validation
+	// and fails later, on the nil database this fixture has instead of one.
+	defer func() { _ = recover() }()
 	_, err := (&Service{cfg: Config{MaxLocationAccuracyMeters: 100}}).CreatePost(context.Background(), uuid.New(), CreatePost{StoreID: uuid.New(), Text: "Geçerli yorum", Rating: 5, Latitude: 41, Longitude: 29})
-	if err == nil {
-		t.Fatal("current location without horizontal accuracy accepted")
+	if err == httpapi.ErrInvalidInput {
+		t.Fatal("a location that cannot prove a visit should not refuse the review")
 	}
 }
 

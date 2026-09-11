@@ -4,14 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"math"
-	"math/rand/v2"
 	"os"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -24,315 +20,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/sync/errgroup"
 )
 
 type Service struct {
 	db                *pgxpool.Pool
 	stores            *storepkg.Service
 	ai                IntentParser
-	places            PlacesProvider
 	model             string
 	locationDecimals  int
 	report            *reporting.Service
 	attributionWindow time.Duration
 	visitorTTL        time.Duration
 	now               func() time.Time
-	policy            SufficiencyPolicy
-	// sample draws the shadow measurement lottery. A field rather than a direct call to
-	// the random number generator so a test can decide the outcome.
-	sample func() float64
-}
-
-// UseSufficiencyPolicy installs the local-first search policy. Nothing calls the gate
-// until this is given a policy with Enabled set, so a service built without it behaves
-// exactly as it did before the gate existed.
-func (s *Service) UseSufficiencyPolicy(p SufficiencyPolicy) { s.policy = p }
-
-func (s *Service) MaterializeGoogleStore(ctx context.Context, placeID string) (uuid.UUID, error) {
-	placeID = strings.TrimSpace(placeID)
-	if placeID == "" || len(placeID) > 300 {
-		return uuid.Nil, httpapi.ErrInvalidInput
-	}
-	// Current search results are materialized with cheap fields before being returned. An
-	// older client may still call the compatibility resolver on that result; reuse the row
-	// and the same once-only enrichment path instead of buying Place Details again.
-	var existing uuid.UUID
-	err := s.db.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, placeID).Scan(&existing)
-	if err == nil {
-		if err = s.EnsureGoogleStoreDetails(ctx, existing); err != nil {
-			return uuid.Nil, err
-		}
-		return existing, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return uuid.Nil, err
-	}
-	if s.places == nil {
-		return uuid.Nil, httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
-	}
-	p, err := s.places.PlaceDetails(ctx, placeID)
-	if err != nil {
-		return uuid.Nil, httpapi.E(502, "PLACES_UNAVAILABLE", "Store provider is temporarily unavailable")
-	}
-	if p.PlaceID != placeID || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
-		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
-	}
-	p.DetailsFetched = true
-	ids, err := s.materializePlaces(ctx, []Place{p})
-	if err != nil {
-		return uuid.Nil, err
-	}
-	id, ok := ids[placeID]
-	if !ok {
-		return uuid.Nil, httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
-	}
-	return id, nil
-}
-
-// placeAttribution is the provider data we retain. A cheap search payload intentionally
-// lacks detail-only fields; omitting them here lets the update merge preserve detail data
-// already bought on an earlier page view.
-func placeAttribution(p Place) map[string]any {
-	attribution := map[string]any{"provider": "Google", "attributions": p.Attributions}
-	if p.RatingCount > 0 {
-		attribution["rating"] = p.Rating
-		attribution["rating_count"] = p.RatingCount
-	}
-	if p.PhotoName != "" {
-		attribution["photo_name"] = p.PhotoName
-		attribution["photo_attributions"] = p.PhotoAttributions
-	}
-	if p.Phone != "" {
-		attribution["phone"] = p.Phone
-	}
-	if p.BusinessStatus != "" && p.BusinessStatus != "BUSINESS_STATUS_UNSPECIFIED" {
-		attribution["business_status"] = p.BusinessStatus
-	}
-	if p.Hours != nil {
-		attribution["opening_hours"] = p.Hours
-	}
-	if len(p.Types) > 0 {
-		attribution["types"] = p.Types
-	}
-	return attribution
-}
-
-// materializePlaces imports every valid place into stores and returns the store id
-// for each place id. Import is idempotent: a place that already has a
-// store_external_sources row resolves to the existing store.
-func (s *Service) materializePlaces(ctx context.Context, places []Place) (map[string]uuid.UUID, error) {
-	out := map[string]uuid.UUID{}
-	pending := make([]Place, 0, len(places))
-	seen := map[string]bool{}
-	for _, p := range places {
-		id := strings.TrimSpace(p.PlaceID)
-		if id == "" || len(id) > 300 || seen[id] || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
-			continue
-		}
-		p.PlaceID = id
-		seen[id] = true
-		pending = append(pending, p)
-	}
-	if len(pending) == 0 {
-		return out, nil
-	}
-	// Deterministic lock order keeps concurrent searches over overlapping result
-	// sets from deadlocking on pg_advisory_xact_lock.
-	sort.Slice(pending, func(i, j int) bool { return pending[i].PlaceID < pending[j].PlaceID })
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(ctx)
-	for _, p := range pending {
-		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('google:'||$1,0))`, p.PlaceID); err != nil {
-			return nil, err
-		}
-		// The store detail page reads its Google block straight out of this jsonb, so
-		// provider figures stay here rather than entering store_stats, which is community
-		// data only. Types are retained because reclassification must remain a local job.
-		attribution := placeAttribution(p)
-		attr, _ := json.Marshal(attribution)
-		var existing uuid.UUID
-		err = tx.QueryRow(ctx, `SELECT store_id FROM store_external_sources WHERE provider='google' AND external_id=$1`, p.PlaceID).Scan(&existing)
-		if err == nil {
-			// Replace the cheap fields with this fresh search answer, but merge rather than
-			// replace the json object: a list request must never erase expensive detail data
-			// that was already bought. A full detail response additionally records the
-			// durable marker that prevents a second paid lookup.
-			if _, err = tx.Exec(ctx, `UPDATE store_external_sources
-SET attribution=CASE WHEN $3
-      THEN (attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb
-      ELSE (attribution - 'attributions' - 'business_status' - 'types') || $2::jsonb END,
-    refreshed_at=now(),
-    details_fetched_at=CASE WHEN $3 THEN now() ELSE details_fetched_at END
-WHERE store_id=$1 AND provider='google'`, existing, attr, p.DetailsFetched); err != nil {
-				return nil, err
-			}
-			// A number we have never held is filled in; one we already hold is left alone,
-			// because a store that told us its own number directly knows it better than
-			// the directory does.
-			if p.Phone != "" {
-				if _, err = tx.Exec(ctx, `UPDATE stores SET phone=$2 WHERE id=$1 AND coalesce(phone,'')=''`, existing, p.Phone); err != nil {
-					return nil, err
-				}
-			}
-			if p.Website != "" {
-				if _, err = tx.Exec(ctx, `UPDATE stores SET website=$2 WHERE id=$1 AND coalesce(website,'')=''`, existing, p.Website); err != nil {
-					return nil, err
-				}
-			}
-			out[p.PlaceID] = existing
-			continue
-		}
-		if err != pgx.ErrNoRows {
-			return nil, err
-		}
-		// A place that classifies into none of our categories is not a store for this
-		// product. The classifier already says so -- it returns nothing for a service, a
-		// workshop, a bakery -- and until now that verdict was ignored at exactly the
-		// moment it mattered: the row was written anyway, with no categories, and stayed
-		// in the catalogue. That is how a search for a bed brand came back with a bakery
-		// whose name merely resembled it. Provider matching is fuzzy by design; deciding
-		// what belongs here is ours to do, and this is where we do it.
-		categories := StoreCategories(p.Name, p.Types)
-		if len(categories) == 0 {
-			continue
-		}
-		id := uuid.New()
-		slug := storeSlug(p.Name, id)
-		if _, err = tx.Exec(ctx, `INSERT INTO stores(id,name,slug,address,city,district,location,phone,website) VALUES($1,$2,$3,$4,$5,$10,ST_SetSRID(ST_MakePoint($7,$6),4326)::geography,nullif($8,''),nullif($9,''))`, id, p.Name, slug, p.Address, cityFromAddress(p.Address), p.Latitude, p.Longitude, p.Phone, p.Website, districtFromAddress(p.Address)); err != nil {
-			return nil, err
-		}
-		// A store now carries the categories it actually sells, worked out from its own
-		// Google types and its own name. Before this an imported store had none at all, and
-		// the categories shown beside a result came from the search that found it.
-		{
-			if _, err = tx.Exec(ctx, `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug=ANY($2) AND active ON CONFLICT DO NOTHING`, id, categories); err != nil {
-				return nil, err
-			}
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); err != nil {
-			return nil, err
-		}
-		if _, err = tx.Exec(ctx, `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at,details_fetched_at) VALUES($1,'google',$2,$3,now(),CASE WHEN $4 THEN now() END)`, id, p.PlaceID, attr, p.DetailsFetched); err != nil {
-			return nil, err
-		}
-		if _, err = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.StoreImportedGoogle, IdempotencyKey: "google-store:" + p.PlaceID, StoreID: &id}); err != nil {
-			return nil, err
-		}
-		out[p.PlaceID] = id
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// EnsureGoogleStoreDetails buys the full Places payload once, on the first detail-page
-// read of a store whose search result only carried cheap fields. The transaction-scoped
-// advisory lock is shared by every application instance, so simultaneous taps cannot turn
-// into duplicate provider charges. A successful empty optional payload is still marked as
-// fetched: "Google has none" is an answer worth caching too.
-func (s *Service) EnsureGoogleStoreDetails(ctx context.Context, storeID uuid.UUID) error {
-	if storeID == uuid.Nil {
-		return httpapi.ErrInvalidInput
-	}
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	var placeID string
-	var fetchedAt *time.Time
-	err = tx.QueryRow(ctx, `SELECT external_id,details_fetched_at
-FROM store_external_sources
-WHERE store_id=$1 AND provider='google'`, storeID).Scan(&placeID, &fetchedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return tx.Commit(ctx)
-	}
-	if err != nil {
-		return err
-	}
-	if fetchedAt != nil {
-		return tx.Commit(ctx)
-	}
-	if s.places == nil {
-		return httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
-	}
-
-	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('google-detail:'||$1,0))`, placeID); err != nil {
-		return err
-	}
-	// Another instance may have completed the provider call while this request waited for
-	// the advisory lock. Re-read after acquiring it before spending anything.
-	err = tx.QueryRow(ctx, `SELECT details_fetched_at
-FROM store_external_sources
-WHERE store_id=$1 AND provider='google'`, storeID).Scan(&fetchedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return tx.Commit(ctx)
-	}
-	if err != nil {
-		return err
-	}
-	if fetchedAt != nil {
-		return tx.Commit(ctx)
-	}
-
-	p, err := s.places.PlaceDetails(ctx, placeID)
-	if err != nil {
-		return httpapi.E(502, "PLACES_UNAVAILABLE", "Store provider is temporarily unavailable")
-	}
-	if p.PlaceID != placeID || strings.TrimSpace(p.Name) == "" || !storepkg.ValidCoordinates(p.Latitude, p.Longitude) {
-		return httpapi.E(422, "INVALID_EXTERNAL_STORE", "The external store could not be verified")
-	}
-	p.DetailsFetched = true
-	attr, err := json.Marshal(placeAttribution(p))
-	if err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `UPDATE store_external_sources
-SET attribution=(attribution - 'attributions' - 'photo_name' - 'photo_attributions' - 'business_status' - 'types') || $2::jsonb,
-    refreshed_at=now(),details_fetched_at=now()
-WHERE store_id=$1 AND provider='google'`, storeID, attr); err != nil {
-		return err
-	}
-	// Provider contact data only fills an empty catalogue field. An administrator or the
-	// merchant remains the stronger source and is never overwritten by Google.
-	if p.Phone != "" {
-		if _, err = tx.Exec(ctx, `UPDATE stores SET phone=$2 WHERE id=$1 AND coalesce(phone,'')=''`, storeID, p.Phone); err != nil {
-			return err
-		}
-	}
-	if p.Website != "" {
-		if _, err = tx.Exec(ctx, `UPDATE stores SET website=$2 WHERE id=$1 AND coalesce(website,'')=''`, storeID, p.Website); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
-}
-
-// PhotoProvider is implemented by places providers that can stream place photos.
-type PhotoProvider interface {
-	PhotoMedia(ctx context.Context, name string, maxWidth int) (io.ReadCloser, string, error)
-}
-
-// PlacePhoto streams a provider photo by resource name. The caller must close the reader.
-func (s *Service) PlacePhoto(ctx context.Context, name string, maxWidth int) (io.ReadCloser, string, error) {
-	if !ValidPhotoName(name) {
-		return nil, "", httpapi.ErrInvalidInput
-	}
-	provider, ok := s.places.(PhotoProvider)
-	if !ok || s.places == nil {
-		return nil, "", httpapi.E(503, "PLACES_NOT_CONFIGURED", "Store provider is not configured")
-	}
-	body, contentType, err := provider.PhotoMedia(ctx, name, maxWidth)
-	if err != nil {
-		return nil, "", httpapi.E(502, "PLACES_UNAVAILABLE", "Store provider is temporarily unavailable")
-	}
-	return body, contentType, nil
 }
 
 // Turkish letters are folded to their Latin base rather than dropped. Without this,
@@ -434,8 +133,8 @@ func clamp(v string) string {
 	return v
 }
 
-func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, places PlacesProvider, model string, decimals int, report *reporting.Service, attribution, visitorTTL time.Duration) *Service {
-	return &Service{db: db, stores: stores, ai: ai, places: places, model: model, locationDecimals: decimals, report: report, attributionWindow: attribution, visitorTTL: visitorTTL, now: time.Now, sample: rand.Float64}
+func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, model string, decimals int, report *reporting.Service, attribution, visitorTTL time.Duration) *Service {
+	return &Service{db: db, stores: stores, ai: ai, model: model, locationDecimals: decimals, report: report, attributionWindow: attribution, visitorTTL: visitorTTL, now: time.Now}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	started := time.Now()
@@ -517,128 +216,47 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	var guidance *Guidance
 	var internal []storepkg.Item
-	var external []Place
-	googleUsed := false
-	// What the gate saw and what it decided, recorded on the search either way. While the
-	// flag is off this says "gate_disabled", which is itself worth being able to count.
-	decision := gateDecision{Reasons: []string{reasonGateDisabled}}
-	observed := sufficiency{Coverage: coverageUnknown}
-	var localElapsed, placesElapsed time.Duration
+	var localElapsed time.Duration
 	if intent.Scope == ScopeHomeLiving {
-		group, providerContext := errgroup.WithContext(ctx)
-		// A named store is worth finding wherever it is, so the radius filter is
-		// dropped for name-led intents. Generic queries keep the near-to-far filter.
+		// A named store is worth finding wherever it is, so the radius filter is dropped
+		// for name-led intents. Generic queries keep the near-to-far filter.
 		searchRadius := in.RadiusMeters
-		// The response can carry thirty stores. Stopping the catalogue at twenty before
-		// Google results are merged made nearby, explicitly categorised stores impossible
-		// to recover later; they never reached the shared ranking stage.
-		internalLimit := 30
 		if intent.StoreName != "" {
 			searchRadius = 0
-			internalLimit = 30
 		}
 		localStarted := time.Now()
-		group.Go(func() error {
-			var providerErr error
-			internal, providerErr = s.stores.Search(providerContext, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, internalLimit, user)
-			return providerErr
-		})
-		coverage := coverageUnknown
-		if s.policy.Enabled {
-			// Counted alongside the catalogue search rather than after it, so knowing how
-			// much of the neighbourhood we hold costs no wall clock time of its own.
-			group.Go(func() error {
-				coverage = s.catalogueCoverage(providerContext, in.Latitude, in.Longitude, s.policy.CoverageRadiusMeters)
-				return nil
-			})
-		} else if s.places != nil {
-			// The behaviour this product has always had, kept whole behind the flag: the
-			// provider is asked in parallel, before anyone has looked at what we hold.
-			googleUsed = true
-			group.Go(func() error {
-				places, reason := s.providerSearch(providerContext, intent, in, requestLocale)
-				external = places
-				if reason != "" {
-					fallback = joinFallback(fallback, reason)
-				}
-				return nil
-			})
-		}
-		if e := group.Wait(); e != nil {
+		var e error
+		if internal, e = s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, 30, user); e != nil {
 			return Response{}, e
 		}
 		localElapsed = time.Since(localStarted)
-		observed = sufficiency{
-			ResultCount:        len(internal),
-			Relevance:          localRelevance(internal, intent, s.policy.relevanceSample()),
-			Coverage:           coverage,
-			ExplicitStore:      intent.StoreName != "",
-			ExplicitStoreFound: localContainsStoreName(internal, intent.StoreName),
-		}
-		decision = s.policy.decide(observed)
-		// The single change to the flow: when what we already hold answers the question,
-		// the provider is not asked. Everything downstream of a provider call -- the
-		// home-and-living filter, place_id deduplication, the catalogue import, the
-		// ranking -- runs exactly as before whenever the call does happen.
-		if s.policy.Enabled && !decision.LocalOnly && s.places != nil {
-			googleUsed = true
-			placesStarted := time.Now()
-			places, reason := s.providerSearch(ctx, intent, in, requestLocale)
-			external = places
-			if reason != "" {
-				fallback = joinFallback(fallback, reason)
-			}
-			placesElapsed = time.Since(placesStarted)
-		}
 	} else {
 		// Before telling somebody we did not understand them, check whether they named a
 		// store we actually carry. "güney antalya" reads as a place rather than a request
 		// and was classified out of scope, while GÜNEY ANTALYA HALI ve YATAK SATIŞ
 		// MAĞAZASI sat in our own catalogue the whole time. Nobody should have to type a
 		// store's full registered name to find it.
-		// The rescue is for text we could not place, not for text we refused. "Güney
-		// Antalya" reads as an address and the model calls it out of scope, while a shop
-		// registered under that name sits in the catalogue -- that case must still be
-		// rescued. "Halı saha" is different: we refused it ourselves, and searching the
-		// catalogue for it anyway found every carpet shop whose sign carries "halı" and put
-		// the refused request back on screen as 28 results.
+		//
+		// The rescue is for text we could not place, not for text we refused. "Halı saha"
+		// is different: we refused it ourselves, and searching the catalogue for it anyway
+		// found every carpet shop whose sign carries "halı".
 		var named []storepkg.Item
 		if !vetoed {
+			localStarted := time.Now()
 			var e error
 			if named, e = s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user); e != nil {
 				return Response{}, e
 			}
+			localElapsed = time.Since(localStarted)
 		}
 		// A catalogue row is not permission to turn an explicit exclusion back into retail.
 		// Old imports can retain a stale category until their data migration runs; the
-		// trade-wide wording remains authoritative on the request path as well. The test is
-		// the whole exclusion vocabulary, not the service half of it: "depolama" was vetoed
-		// as a query and then handed back the warehouses that carry the word on their signs.
+		// trade-wide wording remains authoritative on the request path as well.
 		named = slices.DeleteFunc(named, func(item storepkg.Item) bool {
 			normalized := normalizeText(item.Name)
 			return namesAnExcludedTrade(normalized, foldLatin(normalized))
 		})
-		// A partial or previously unseen store name cannot be recognized by a finite
-		// brand list. Ask the provider for unclear text and let the same generic store
-		// classifier used for every city decide whether the matches sell home goods.
-		// Definite out-of-scope requests still never reach the provider unless they match
-		// a store already in our catalogue.
-		if s.places != nil && !localContainsStoreName(named, in.Query) && intent.Scope == ScopeUnclear {
-			googleUsed = true
-			var providerErr error
-			if localized, ok := s.places.(LocalizedPlacesProvider); ok {
-				external, providerErr = localized.TextSearchLocalized(ctx, in.Query, in.Latitude, in.Longitude, localHorizonMeters, requestLocale)
-			} else {
-				external, providerErr = s.places.TextSearch(ctx, in.Query, in.Latitude, in.Longitude, localHorizonMeters)
-			}
-			if providerErr != nil {
-				fallback = joinFallback(fallback, "places_unavailable")
-				external = nil
-			} else {
-				external = homeLivingOnly(external)
-			}
-		}
-		if len(named) > 0 || len(external) > 0 {
+		if len(named) > 0 {
 			internal = named
 			intent.Scope = ScopeHomeLiving
 			// Recording what this turned out to be keeps the ordering honest downstream:
@@ -668,58 +286,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		}
 	}
 
-	results := make([]Result, 0, len(internal)+20)
-	localIDs := map[uuid.UUID]bool{}
+	results := make([]Result, 0, len(internal))
 	for rank, x := range internal {
-		r := fromStore(x, rank)
-		results = append(results, r)
-		localIDs[x.ID] = true
+		results = append(results, fromStore(x, rank))
 	}
-	mapped, e := s.lookupExternal(ctx, external)
-	if e != nil {
-		return Response{}, e
-	}
-	// Every Google result must resolve to a store id: without one the client cannot
-	// open a detail page, verify a visit, or write a review, and search_results.store_id
-	// stays NULL so history cannot be replayed without calling Google again.
-	//
-	// Materialize mapped places too. The result row below uses the live cheap payload,
-	// while the detail page reads the persisted source. The merge refreshes cheap fields
-	// without erasing detail fields previously bought for an existing store.
-	imported, e := s.materializePlaces(ctx, external)
-	if e != nil {
-		return Response{}, e
-	}
-	for rank, p := range external {
-		if m, ok := mapped[p.PlaceID]; ok {
-			if localIDs[m.Platform.StoreID] {
-				for i := range results {
-					if results[i].ID != nil && *results[i].ID == m.Platform.StoreID {
-						results[i].Google = listExternal(p)
-						results[i].Source = "google+platform"
-						results[i].externalPlaceID = p.PlaceID
-					}
-				}
-				continue
-			}
-			id := m.Platform.StoreID
-			results = append(results, Result{ID: &id, Source: "google+platform", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: append([]string{}, m.Categories...), CategoryLabels: append([]string{}, m.CategoryLabels...), Platform: &m.Platform, Google: listExternal(p), Premium: m.Premium, CatalogStore: m.CatalogStore, score: mergedScore(m.Platform, p, rank), externalPlaceID: p.PlaceID})
-			localIDs[id] = true
-		} else {
-			// Platform stays nil: a freshly imported store has no community data, and
-			// an empty Platform block would render a fabricated 0.0 community rating.
-			r := Result{Source: "google", Name: p.Name, Address: p.Address, City: cityFromAddress(p.Address), Latitude: p.Latitude, Longitude: p.Longitude, Categories: StoreCategories(p.Name, p.Types), Google: listExternal(p), score: googleScore(p, rank), externalPlaceID: p.PlaceID}
-			if id, ok := imported[p.PlaceID]; ok {
-				storeID := id
-				r.ID = &storeID
-			}
-			results = append(results, r)
-		}
-	}
-	// The same verdict, applied to what is shown. A store already in the catalogue may have
-	// been classified by hand, so its own categories are trusted rather than re-derived --
-	// but a result that belongs to no category of ours has no business in a list of home
-	// and living stores, wherever it came from.
+	// A result that belongs to no category of ours has no business in a list of home and
+	// living stores. A store already in the catalogue may have been classified by hand, so
+	// its own categories are trusted rather than re-derived.
 	kept := results[:0]
 	for _, r := range results {
 		if len(r.Categories) > 0 && (intent.StoreName != "" || r.Premium || len(intent.Categories) == 0 || categoriesIntersect(r.Categories, intent.Categories)) {
@@ -728,9 +301,6 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	results = kept
 
-	if e = s.attachStoredGoogle(ctx, results); e != nil {
-		return Response{}, e
-	}
 	for i := range results {
 		if in.Latitude != nil {
 			d := haversine(*in.Latitude, *in.Longitude, results[i].Latitude, results[i].Longitude)
@@ -774,9 +344,11 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	defer tx.Rollback(ctx)
 	lat, lon := rounded(in.Latitude, s.locationDecimals), rounded(in.Longitude, s.locationDecimals)
-	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status,query_language,local_only,gate_reason,local_relevance,catalogue_coverage,local_duration_ms,places_duration_ms,search_city,search_district) VALUES($1,$2,$3,$4,$5,$6,'hybrid',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'completed',$20,$21,$22,$23,$24,$25,$26,$27,$28)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(external), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), googleUsed, intent.QueryLanguage,
-		decision.LocalOnly, nilIf(decision.reason() == "", decision.reason()), observed.Relevance, nilIf(observed.Coverage == coverageUnknown, observed.Coverage),
-		localElapsed.Milliseconds(), nilIf(placesElapsed == 0, placesElapsed.Milliseconds()), nilIf(searchCity == "", searchCity), nilIf(searchDistrict == "", searchDistrict))
+	// The provider columns are written as what they now always are. They are kept rather
+	// than dropped because they are history: a search recorded last month did use Google,
+	// and rewriting that would make the record lie about itself.
+	_, e = tx.Exec(ctx, `INSERT INTO searches(id,user_id,visitor_session_id,raw_query,normalized_query,parsed_intent,search_mode,ai_used,ai_provider,ai_model,request_latitude,request_longitude,requested_radius_meters,duration_ms,internal_result_count,external_result_count,total_result_count,fallback_state,location_text,google_places_used,status,query_language,local_only,local_duration_ms,search_city,search_district) VALUES($1,$2,$3,$4,$5,$6,'catalogue',$7,$8,$9,$10,$11,$12,$13,$14,0,$15,$16,$17,false,'completed',$18,true,$19,$20,$21)`, searchID, user, visitor, in.Query, intent.NormalizedQuery, intentJSON, aiUsed, nilIf(!aiUsed, "openai"), nilIf(!aiUsed, s.model), lat, lon, in.RadiusMeters, time.Since(start).Milliseconds(), len(internal), len(results), nilIf(fallback == "", fallback), nilIf(intent.LocationText == "", intent.LocationText), intent.QueryLanguage,
+		localElapsed.Milliseconds(), nilIf(searchCity == "", searchCity), nilIf(searchDistrict == "", searchDistrict))
 	if e != nil {
 		return Response{}, e
 	}
@@ -792,53 +364,25 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			favorites = &r.Platform.FavoriteCount
 			posts = &r.Platform.PostCount
 		}
-		var provider, place any
-		if r.Google != nil {
-			provider = "google"
-			place = r.Google.PlaceID
-		}
 		var distance *int
 		if r.DistanceMeters != nil {
 			v := int(math.Round(*r.DistanceMeters))
 			distance = &v
 		}
-		_, e = tx.Exec(ctx, `INSERT INTO search_results(id,search_id,rank,store_id,source,external_provider,external_place_id,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,distance_meters,ranking_score,ranking_reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`, impressionID, searchID, i+1, r.ID, r.Source, provider, place, rating, reviews, favorites, posts, distance, r.score, "source="+r.Source)
+		_, e = tx.Exec(ctx, `INSERT INTO search_results(id,search_id,rank,store_id,source,external_provider,external_place_id,platform_rating_at_time,platform_review_count_at_time,favorite_count_at_time,platform_post_count_at_time,distance_meters,ranking_score,ranking_reason) VALUES($1,$2,$3,$4,$5,NULL,NULL,$6,$7,$8,$9,$10,$11,$12)`, impressionID, searchID, i+1, r.ID, r.Source, rating, reviews, favorites, posts, distance, r.score, "source="+r.Source)
 		if e != nil {
 			return Response{}, e
 		}
 	}
-	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + searchID.String(), UserID: user, VisitorSessionID: visitor, SearchID: &searchID, Metadata: map[string]any{"ai_used": aiUsed, "google_places_used": googleUsed, "scope": intent.Scope, "zero_results": len(results) == 0}}); e != nil {
+	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.SearchPerformed, IdempotencyKey: "search:" + searchID.String(), UserID: user, VisitorSessionID: visitor, SearchID: &searchID, Metadata: map[string]any{"ai_used": aiUsed, "scope": intent.Scope, "zero_results": len(results) == 0}}); e != nil {
 		return Response{}, e
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return Response{}, e
 	}
-	observability.SearchGate(decision.LocalOnly, decision.Reasons)
 	observability.SearchStage("local", localElapsed)
-	if placesElapsed > 0 {
-		observability.SearchStage("places", placesElapsed)
-	}
-	observability.SearchStage(map[bool]string{true: "total_local_only", false: "total_fallback"}[decision.LocalOnly], time.Since(start))
-	// A small sample of the searches we decided not to pay for is asked anyway, after the
-	// answer has already gone out, purely to find out what the decision cost. Detached
-	// from the request so it can never delay or alter it.
-	if decision.LocalOnly && s.places != nil && s.shadowSampled() {
-		go s.measureShadow(context.WithoutCancel(ctx), shadowMeasurement{
-			SearchID: searchID, Intent: intent, Request: in, Locale: requestLocale,
-			LocalResultCount: len(internal), LocalTopScore: topScore(results),
-			Coverage: observed.Coverage, City: searchCity, District: searchDistrict,
-		})
-	}
+	observability.SearchStage("total", time.Since(start))
 	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
-}
-
-// listExternal is intentionally unable to expose detail-tier fields. Keeping this shape
-// at the DTO boundary protects the product decision even if a cached fixture or another
-// provider implementation hands Search a richer Place than Google search now requests.
-func listExternal(p Place) *External {
-	return &External{
-		Provider: "google", PlaceID: p.PlaceID, BusinessStatus: p.BusinessStatus,
-	}
 }
 
 func localContainsStoreName(items []storepkg.Item, name string) bool {
@@ -873,79 +417,6 @@ type mappedStore struct {
 	Photo          *Photo
 	Categories     []string
 	CategoryLabels []string
-}
-
-func (s *Service) lookupExternal(ctx context.Context, places []Place) (map[string]mappedStore, error) {
-	ids := make([]string, 0, len(places))
-	for _, p := range places {
-		ids = append(ids, p.PlaceID)
-	}
-	out := map[string]mappedStore{}
-	if len(ids) == 0 {
-		return out, nil
-	}
-	rows, e := s.db.Query(ctx, `SELECT x.external_id,s.id,ss.average_rating,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,coalesce(s.cover_media_id::text,''),coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id JOIN store_category_translations t ON t.category_id=c.id AND t.locale=$2 WHERE l.store_id=s.id),'{}') FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id WHERE x.provider='google' AND x.external_id=ANY($1)`, ids, i18n.FromContext(ctx))
-	if e != nil {
-		return nil, e
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var coverMediaID string
-		var m mappedStore
-		if e = rows.Scan(&id, &m.Platform.StoreID, &m.Platform.AverageRating, &m.Platform.ReviewCount, &m.Platform.FavoriteCount, &m.Platform.PostCount, &m.Premium, &m.CatalogStore, &coverMediaID, &m.Categories, &m.CategoryLabels); e != nil {
-			return nil, e
-		}
-		if coverMediaID != "" {
-			m.Photo = &Photo{Source: "admin", MediaID: coverMediaID}
-		}
-		out[id] = m
-	}
-	return out, rows.Err()
-}
-
-// Internal results still carry stored Google identity and business status when the live
-// text search did not return that store. Photo metadata is deliberately excluded: showing
-// it on a list would turn every visible image into a separately billed photo-media call.
-func (s *Service) attachStoredGoogle(ctx context.Context, results []Result) error {
-	ids := make([]uuid.UUID, 0, len(results))
-	for i := range results {
-		if results[i].ID != nil && results[i].Google == nil {
-			ids = append(ids, *results[i].ID)
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	rows, err := s.db.Query(ctx, `SELECT store_id,external_id,coalesce(attribution->>'business_status','')
-	 FROM store_external_sources WHERE provider='google' AND store_id=ANY($1)`, ids)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	stored := map[uuid.UUID]*External{}
-	for rows.Next() {
-		var id uuid.UUID
-		var item External
-		if err = rows.Scan(&id, &item.PlaceID, &item.BusinessStatus); err != nil {
-			return err
-		}
-		item.Provider = "google"
-		stored[id] = &item
-	}
-	if err = rows.Err(); err != nil {
-		return err
-	}
-	for i := range results {
-		if results[i].ID == nil || results[i].Google != nil {
-			continue
-		}
-		results[i].Google = stored[*results[i].ID]
-		if results[i].Google != nil && results[i].Source == "internal" {
-			results[i].Source = "google+platform"
-		}
-	}
-	return nil
 }
 
 func (s *Service) Interaction(ctx context.Context, searchID uuid.UUID, user, visitor *uuid.UUID, resultID *uuid.UUID, event, key string) error {
@@ -1121,44 +592,6 @@ func internalQuery(i Intent) string {
 	return strings.Join(terms, " OR ")
 }
 
-func placesQuery(i Intent, raw string) string {
-	// A named store is a precision lookup. Repeating the raw sentence, parsed store name,
-	// products and categories made the provider query less exact and returned no result
-	// for "Yeğenler Elektrik Antalya" even though that exact place exists. Coordinates
-	// still provide the geographic bias; explicit location text is kept when supplied.
-	if strings.TrimSpace(i.StoreName) != "" {
-		query := strings.TrimSpace(strings.Join([]string{i.StoreName, i.LocationText}, " "))
-		if runes := []rune(query); len(runes) > 500 {
-			query = strings.TrimSpace(string(runes[:500]))
-		}
-		return query
-	}
-	// The person's own words, and where they are. Nothing else.
-	//
-	// This used to append the parsed intent -- product terms, semantic terms and category
-	// slugs -- on the theory that more terms meant a better match. They are internal keys
-	// in English, and handing them to a provider that does literal text matching wrecks
-	// the query: searching "yatak" near Bostanlı returned two chain branches in six, and
-	// "yatak bedding" returned six in six, because "Bedding" is half the name of a chain
-	// with a branch on every corner. The slug was competing with the question.
-	//
-	// This is not about that chain. Every category key we have is an ordinary English word
-	// that some Turkish business has put on its sign, so any of them can do the same thing.
-	// The categories still do their work where they belong -- filtering our own catalogue,
-	// where they are keys rather than search terms.
-	terms := make([]string, 0, 2)
-	terms = append(terms, strings.TrimSpace(raw))
-	if location := strings.TrimSpace(i.LocationText); location != "" {
-		terms = appendUnique(terms, location)
-	}
-	query := strings.TrimSpace(strings.Join(terms, " "))
-	runes := []rune(query)
-	if len(runes) > 500 {
-		query = strings.TrimSpace(string(runes[:500]))
-	}
-	return query
-}
-
 // aiFallbackReason names why the parser did not answer, without leaking provider detail
 // into a public response.
 func aiFallbackReason(e error, invalid bool) string {
@@ -1205,114 +638,20 @@ func haversine(a, b, c, d float64) float64 {
 
 var _ = pgx.ErrNoRows
 
-// homeLivingOnly drops places Google is explicit about being something else. Silence keeps
-// a place: most shops carry nothing but "store" and "establishment", and refusing those
-// would empty the catalogue.
-func homeLivingOnly(places []Place) []Place {
-	if len(places) == 0 {
-		return places
-	}
-	kept := places[:0]
-	for _, p := range places {
-		if IsHomeLivingStore(p.Name, p.Types) {
-			kept = append(kept, p)
-		}
-	}
-	return kept
-}
-
 // How long a provider answer stands. Short enough that a shop opening today is found
 // today, long enough that a query typed twice in an afternoon is paid for once.
 const placesCacheTTL = 6 * time.Hour
 
-// The question, not the asker. Coordinates are rounded to about a kilometre: two people
-// standing a street apart are asking the same thing, and keeping full precision would give
-// every one of them a private copy of the same answer.
-func placesCacheKey(query string, lat, lon *float64, radius int, locale string) string {
-	coarse := func(v *float64) string {
-		if v == nil {
-			return "-"
+// searchPlace is where a search effectively happened: the city and district of its nearest
+// result. Recorded on the search so that "what do people look for in Konyaaltı" is a
+// question the reporting can answer without re-deriving it from coordinates.
+func searchPlace(results []Result) (string, string) {
+	nearest := math.MaxFloat64
+	city, district := "", ""
+	for _, r := range results {
+		if r.DistanceMeters != nil && *r.DistanceMeters < nearest && strings.TrimSpace(r.City) != "" {
+			nearest, city, district = *r.DistanceMeters, strings.TrimSpace(r.City), strings.TrimSpace(r.District)
 		}
-		return strconv.FormatFloat(math.Round(*v*100)/100, 'f', 2, 64)
 	}
-	return strings.Join([]string{
-		// v2 invalidates the six-hour rows written before list payloads stopped carrying
-		// detail-tier fields. It avoids both displaying them and re-materializing them as
-		// though they were a fresh cheap response after deployment.
-		"v2", foldLatin(normalizeText(query)), coarse(lat), coarse(lon),
-		strconv.Itoa(radius), locale,
-	}, "|")
-}
-
-// providerSearch is the Google branch exactly as it has always been: the same query, the
-// same shared cache, the same home-and-living filter applied at the door. What the
-// sufficiency gate changed is when this runs -- never what it does once it does.
-//
-// The returned string is a fallback reason, empty when the call went through.
-func (s *Service) providerSearch(ctx context.Context, intent Intent, in Request, locale i18n.Locale) ([]Place, string) {
-	if s.places == nil {
-		return nil, ""
-	}
-	query := placesQuery(intent, in.Query)
-	providerRadius := in.RadiusMeters
-	if intent.StoreName != "" {
-		providerRadius = localHorizonMeters
-	}
-	// The same question, asked again from the same place, gets the answer we already
-	// bought. Two thirds of the searches on record repeat a query already made nearby,
-	// and each repeat was paid for separately.
-	//
-	// It is the question that is cached, not a store. Skipping the provider on the
-	// strength of a full local catalogue is now the gate's job, and is decided before
-	// this is ever reached.
-	key := placesCacheKey(query, in.Latitude, in.Longitude, providerRadius, string(locale))
-	if cached, ok := s.cachedPlaces(ctx, key); ok {
-		return homeLivingOnly(cached), ""
-	}
-	var places []Place
-	var providerErr error
-	if localized, ok := s.places.(LocalizedPlacesProvider); ok {
-		places, providerErr = localized.TextSearchLocalized(ctx, query, in.Latitude, in.Longitude, providerRadius, locale)
-	} else {
-		places, providerErr = s.places.TextSearch(ctx, query, in.Latitude, in.Longitude, providerRadius)
-	}
-	if providerErr != nil {
-		return nil, "places_unavailable"
-	}
-	s.storePlaces(ctx, key, places)
-	// A search finding a bakery does not make the bakery a home store, and anything a
-	// search turned up used to be kept and imported. Dropped here, at the door, rather
-	// than filtered out of the results later -- otherwise it still lands in the
-	// catalogue and in the sitemap.
-	return homeLivingOnly(places), ""
-}
-
-func (s *Service) cachedPlaces(ctx context.Context, key string) ([]Place, bool) {
-	if s.db == nil {
-		return nil, false
-	}
-	var raw []byte
-	e := s.db.QueryRow(ctx, `SELECT places FROM places_search_cache WHERE cache_key=$1 AND created_at > now()-$2::interval`, key, placesCacheTTL.String()).Scan(&raw)
-	if e != nil {
-		return nil, false
-	}
-	var places []Place
-	if json.Unmarshal(raw, &places) != nil {
-		return nil, false
-	}
-	return places, true
-}
-
-// A cache write must never fail a search. The worst case of losing one is paying for the
-// same question twice, which is what happened before this existed.
-func (s *Service) storePlaces(ctx context.Context, key string, places []Place) {
-	if s.db == nil {
-		return
-	}
-	raw, e := json.Marshal(places)
-	if e != nil {
-		return
-	}
-	_, _ = s.db.Exec(ctx, `INSERT INTO places_search_cache(cache_key,places,created_at) VALUES($1,$2,now())
- ON CONFLICT(cache_key) DO UPDATE SET places=EXCLUDED.places,created_at=now()`, key, raw)
+	return city, district
 }
