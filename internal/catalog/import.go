@@ -118,9 +118,11 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	for _, raw := range published {
 		raw.Name = RepairSpelling(raw.Name, spellings)
 		row := i.resolver.Normalize(raw)
-		// Named here rather than in the adapter, because only here are both facts known:
-		// which chain this is, and which real town the row resolved to.
-		row.Name = DisplayName(brand.Name, StripHouseWords(row.Name, house), row.City, row.District)
+		// The whole of naming, here rather than in the adapter, because only here are both
+		// facts known: which chain this is, and which real town the row resolved to. The
+		// order matters -- the city code comes off while the name is still shouted, casing
+		// follows, then the chain's own filing words, then what is missing.
+		row.Name = DisplayName(brand.Name, StripHouseWords(TidyName(StripPlaceCode(row.Name, row.City)), house), row.City, row.District)
 		// Not every chain publishes an id for every shop. Where one is missing, it is
 		// derived from what the row itself says, so the same shop derives the same id on
 		// every run and a re-import updates it instead of adding a second copy. Without

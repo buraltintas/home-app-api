@@ -413,11 +413,11 @@ func (l *JSONLocator) mapRow(object map[string]any) RawStore {
 	// branch name with a styled prefix in front of it reads as mixed case, and the caser
 	// then leaves the whole thing alone: "Madame Coco ADANA CEYHAN CADDE".
 	city, district := text(object, l.config.City), text(object, l.config.District)
-	// Only the branch name, cased and with the chain's internal city code removed. What a
-	// shop is finally called is decided in DisplayName, once the town has been resolved to
-	// a real one -- a locator publishes its own sales regions ("İstanbul - Avrupa"), which
-	// are no use to anybody reading a list of shops.
-	name := TidyName(StripPlaceCode(text(object, l.config.Name), city))
+	// The publisher's own name, untouched apart from whitespace. Everything done to it --
+	// repairing its capital I's, removing the chain's internal city code, casing it, adding
+	// the town and the chain -- happens in the importer, in that order, because each step
+	// needs what the one before it produced and the first two need the name still shouted.
+	name := Tidy(text(object, l.config.Name))
 	latitude, longitude := number(object, l.config.Latitude), number(object, l.config.Longitude)
 	if latitude == nil && longitude == nil {
 		latitude, longitude = pair(text(object, l.config.Coordinates))

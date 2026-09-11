@@ -141,7 +141,7 @@ func (l *HTMLLocator) mapBlock(block string) RawStore {
 	city, district := field("city"), field("district")
 	row := RawStore{
 		ExternalID: field("id"),
-		Name:       TidyName(StripPlaceCode(field("name"), city)),
+		Name:       field("name"),
 		Address:    field("address"),
 		City:       city,
 		District:   district,

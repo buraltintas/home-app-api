@@ -221,7 +221,10 @@ func (r *Resolver) fromAddress(address string) Place {
 // Normalize applies every rule above to one published row, and then checks the row against
 // itself: a point that contradicts the place beside it is not usable as either.
 func (r *Resolver) Normalize(in RawStore) RawStore {
-	in.Name = TidyName(in.Name)
+	// The name is deliberately left as published here. Casing it before the importer has
+	// repaired its capital I's and taken off the chain's city code would erase the very
+	// evidence those two steps read -- a shouted "ÇELIK" is what tells us it is ambiguous.
+	in.Name = Tidy(in.Name)
 	in.Address = Tidy(in.Address)
 	in.Phone = Tidy(in.Phone)
 	in.Website = Tidy(in.Website)
