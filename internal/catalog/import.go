@@ -117,6 +117,12 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	}
 	for _, raw := range published {
 		raw.Name = RepairSpelling(raw.Name, spellings)
+		// Derived from what the publisher wrote, before any of our naming touches it. It
+		// used to be derived from the finished display name, which is ours -- so every time
+		// the naming rules improved, the identifier of every shop of every chain that
+		// publishes none changed with them, and the next import inserted the lot again.
+		// Ninety-nine shops stood duplicated at zero metres because of it.
+		derived := DerivedID(raw)
 		row := i.resolver.Normalize(raw)
 		// The whole of naming, here rather than in the adapter, because only here are both
 		// facts known: which chain this is, and which real town the row resolved to. The
@@ -129,7 +135,7 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		// this a locator like Bellona's -- which publishes an id for a handful of its
 		// branches and nothing for the other five hundred -- loses almost all of them.
 		if row.ExternalID == "" {
-			row.ExternalID = DerivedID(row)
+			row.ExternalID = derived
 		}
 		// A list that repeats a shop is the publisher's problem, not ours; the first one
 		// wins and the rest are recorded as skipped rather than fought over.

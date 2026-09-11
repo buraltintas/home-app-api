@@ -542,12 +542,16 @@ brands:
     categories: [carpet, home_textile]
     locator:
       kind: html
-      # Each dealer is a list item carrying its point on the button that opens the map. The
-      # address ends with "Town / PROVINCE", which is what places it.
+      # Each dealer is a list item carrying its point on the button that opens the map, and
+      # its town as "District / PROVINCE" on the line under the street. Read from the markup
+      # rather than out of the address, because the address is one run of text with line
+      # breaks in it and the town is the half that matters.
       url: https://www.merinos.com.tr/storelocation
       row: '(?s)(<li class=nav-item role=presentation><b>.*?data-longitude=[0-9.]+)'
       name: '<b>([^<]+)</b>'
-      address: '(?s)<span class=map-text-details>(.*?)<a '
+      address: '(?s)<span class=map-text-details>(.*?)</span>'
+      district: '<br>\s*([^<>/]+?)\s*/'
+      city: '/\s*([A-ZÇĞİÖŞÜ][^<>]*?)\s*<br>'
       latitude: 'data-latitude=([0-9.]+)'
       longitude: 'data-longitude=([0-9.]+)'
 

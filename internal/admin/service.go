@@ -11,6 +11,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
+	storepkg "github.com/burakaltintas/home-app-api/internal/store"
+	"github.com/burakaltintas/home-app-api/internal/textnorm"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -565,4 +567,149 @@ func (s *Service) SetFeedbackStatus(ctx context.Context, actor uuid.UUID, email 
 		return e
 	}
 	return tx.Commit(ctx)
+}
+
+// storeSlug is the address a store is shared and indexed by. It is the search package's
+// rule, repeated here rather than exported, because the two must agree: a store added by
+// hand and one imported have to produce the same shape of URL.
+func storeSlug(name string, id uuid.UUID) string {
+	folded := textnorm.Fold(strings.ToLower(strings.TrimSpace(name)))
+	var b strings.Builder
+	dash := false
+	for _, r := range folded {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	base := strings.Trim(b.String(), "-")
+	if base == "" {
+		base = "store"
+	}
+	if len(base) > 60 {
+		base = base[:60]
+	}
+	return base + "-" + id.String()[:8]
+}
+
+// NewStore is what an operator types to add a shop by hand.
+type NewStore struct {
+	Name       string   `json:"name"`
+	BrandSlug  string   `json:"brand_slug"`
+	Address    string   `json:"address"`
+	City       string   `json:"city"`
+	District   string   `json:"district"`
+	Phone      string   `json:"phone"`
+	Website    string   `json:"website"`
+	Latitude   float64  `json:"latitude"`
+	Longitude  float64  `json:"longitude"`
+	Categories []string `json:"categories"`
+}
+
+// NearbyStore is a shop that already exists close to where one is about to be added, with
+// how close and how alike the two names are.
+type NearbyStore struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	Address    string    `json:"address"`
+	City       string    `json:"city"`
+	District   string    `json:"district"`
+	Distance   float64   `json:"distance_meters"`
+	Similarity float64   `json:"name_similarity"`
+	SourceKind string    `json:"source_kind"`
+}
+
+// nearbyMeters is how far around a proposed shop is worth showing. Wider than the importer's
+// merge radius on purpose: this list is shown to a person, who can tell a neighbour from a
+// duplicate, and the cost of showing one shop too many is a glance.
+const nearbyMeters = 400
+
+// Nearby answers "is this shop already here?" for the add form.
+//
+// It does not decide; it shows. The importer has to choose without anybody watching and so
+// needs thresholds, but an operator adding one shop can see that "Çelik Mağazacılık
+// Konyaaltı Bellona" seven metres away is the shop they are about to type in again -- a
+// judgement no similarity score made correctly.
+func (s *Service) Nearby(ctx context.Context, name string, lat, lon float64) ([]NearbyStore, error) {
+	rows, e := s.db.Query(ctx, `
+SELECT id,name,coalesce(address,''),city,coalesce(district,''),
+       ST_Distance(location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography),
+       similarity(compact_name,$1),source_kind
+  FROM stores
+ WHERE deleted_at IS NULL
+   AND ST_DWithin(location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography,$4)
+ ORDER BY 6 LIMIT 12`, textnorm.Compact(name), lat, lon, nearbyMeters)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []NearbyStore{}
+	for rows.Next() {
+		var x NearbyStore
+		if e = rows.Scan(&x.ID, &x.Name, &x.Address, &x.City, &x.District, &x.Distance, &x.Similarity, &x.SourceKind); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// CreateStore adds a shop an operator typed in.
+//
+// It is recorded as source_kind='admin' and verified now: a person looked at it, which is
+// the strongest provenance this catalogue has. The importer will not overwrite it -- its
+// update only rewrites rows it owns or rows nothing has verified.
+//
+// The duplicate check is shown by Nearby before this is called and is deliberately not
+// enforced here. An operator who has seen the neighbours and still says add is answering a
+// question the software cannot: two shops of different chains do share a mall floor.
+func (s *Service) CreateStore(ctx context.Context, actor uuid.UUID, email string, in NewStore) (uuid.UUID, error) {
+	name := strings.TrimSpace(in.Name)
+	if name == "" || strings.TrimSpace(in.City) == "" {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	if !storepkg.ValidCoordinates(in.Latitude, in.Longitude) {
+		return uuid.Nil, httpapi.ErrInvalidInput
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return uuid.Nil, e
+	}
+	defer tx.Rollback(ctx)
+
+	id := uuid.New()
+	var brand *uuid.UUID
+	var brandName string
+	if slug := strings.TrimSpace(in.BrandSlug); slug != "" {
+		var found uuid.UUID
+		if e = tx.QueryRow(ctx, `SELECT id,name FROM brands WHERE slug=$1`, slug).Scan(&found, &brandName); e != nil {
+			return uuid.Nil, httpapi.E(404, "BRAND_NOT_FOUND", "Brand not found")
+		}
+		brand = &found
+	}
+	if _, e = tx.Exec(ctx, `
+INSERT INTO stores(id,name,slug,brand_name,brand_id,address,city,district,location,phone,website,compact_name,
+                   source_kind,data_verified_at,is_catalog_store,location_from)
+VALUES($1,$2,$3,nullif($4,''),$5,nullif($6,''),$7,nullif($8,''),ST_SetSRID(ST_MakePoint($10,$9),4326)::geography,
+       nullif($11,''),nullif($12,''),$13,'admin',now(),true,'entered by an operator')`,
+		id, name, storeSlug(name, id), brandName, brand, strings.TrimSpace(in.Address), strings.TrimSpace(in.City),
+		strings.TrimSpace(in.District), in.Latitude, in.Longitude, strings.TrimSpace(in.Phone),
+		strings.TrimSpace(in.Website), textnorm.Compact(name)); e != nil {
+		return uuid.Nil, e
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); e != nil {
+		return uuid.Nil, e
+	}
+	if len(in.Categories) > 0 {
+		if _, e = tx.Exec(ctx, `INSERT INTO store_category_links(store_id,category_id) SELECT $1,id FROM store_categories WHERE slug=ANY($2) AND active`, id, in.Categories); e != nil {
+			return uuid.Nil, e
+		}
+	}
+	if e = record(ctx, tx, actor, email, "store.create", "store", id, map[string]any{"name": name, "city": in.City}); e != nil {
+		return uuid.Nil, e
+	}
+	return id, tx.Commit(ctx)
 }
