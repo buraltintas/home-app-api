@@ -143,16 +143,29 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// "englishhome" inside "englishhomeantlaracad" is 0.42 by trigram and obviously the
 	// same shop on the ground. It counts only alongside proximity, never on its own.
 	contained := containment(CompactName(in.Name), candidate.CompactName)
+	// A nearby shop whose own sign names this chain is this chain's shop. It is the
+	// strongest evidence on offer and the one similarity is worst at: "Çelik Mağazacılık
+	// Konyaaltı Bellona" and our "Bellona - Antalya Çelik Centroom Konyaaltı" stand seven
+	// metres apart, are plainly the same dealer, and score 0.28 -- below even the review
+	// band, so the row inserted silently and the shop appeared twice in the results.
+	//
+	// Two different dealers of one chain do not share a doorway, so proximity is what makes
+	// this safe; the rule is not applied beyond the merge radius, and a candidate the brand
+	// itself lists separately has already been settled above.
+	named := strings.Contains(candidate.CompactName, CompactName(brand.Name))
 	radius := float64(mergeMeters)
 	if !candidate.Verified {
 		radius = legacyMeters
 	}
 	switch {
-	case hasPoint && (candidate.Similarity >= mergeSimilarity || contained) && candidate.Distance <= radius:
+	case hasPoint && (candidate.Similarity >= mergeSimilarity || contained || named) && candidate.Distance <= radius:
 		decision.Action = ActionUpdated
 		why := fmt.Sprintf("%.2f name similarity", candidate.Similarity)
 		if contained {
 			why = "one name contains the other"
+		}
+		if named && !contained && candidate.Similarity < mergeSimilarity {
+			why = "the shop already here is signed with this chain's name"
 		}
 		decision.Reason = fmt.Sprintf("same place: %.0f m away, %s, matched %q", candidate.Distance, why, candidate.Name)
 		m.claim(candidate.ID)

@@ -6,6 +6,43 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Two shops at one doorway, and a word that does not exist
+
+Both reported from the live site, both general rather than particular.
+
+**A shop appeared twice.** "Çelik Mağazacılık Konyaaltı Bellona", a row left over from the
+provider era, and our newly imported "Bellona - Antalya Çelik Centroom Konyaaltı" stand seven
+metres apart and are plainly the same dealer. They score 0.28 by trigram similarity -- below
+even the review band -- so the import inserted the second one without a word.
+
+The evidence similarity misses is the one a person uses immediately: the shop already there
+is signed with this chain's name. Two dealers of one chain do not share a doorway, so within
+the merge radius that is now enough to merge, and the decision says so in those words. A row
+the brand itself lists separately is still settled before this, so a chain with two branches
+in one mall is unaffected.
+
+Twenty-two such pairs existed. Fourteen were unambiguous -- exactly one branded shop within
+sixty metres -- and were merged, three favourites moving to the surviving row and no review
+touched. The other eight are further apart or have more than one candidate, and one of them
+("English Home | Antalya The Land Of Legends AVM" beside "English Home - Isiklar CAD", 132 m)
+is probably two real shops with one bad coordinate. Those are left for the matching queue
+rather than guessed at.
+
+**"Çelık" is not a word.** Turkish has two i's and a keyboard that makes the wrong capital
+easy to type, so Bellona's own list says "ÇELİK CENTROOM ALTINTAŞ" on one row and "ÇELIK
+CENTROOM KONYAALTI" on the next. Cased by the Turkish rules, the second becomes Çelık.
+
+Vowel harmony was the obvious fix and was measured before being believed: across the
+catalogue it repairs about thirty-five words and breaks about twenty-five, because Turkish
+place and family names break harmony freely -- Kırşehir, Iğdır, Yılmaz and Ilgın all come out
+wrong. Trading one kind of error for another is not a fix.
+
+So the publisher decides instead. Within one brand's own list, a shouted word containing an
+ASCII I is repaired only where that same brand writes the same word with İ somewhere else.
+Nobody writes Kırşehir with a dot, so nothing invents one; Bellona writes MOBİLYA on most of
+its rows, so the handful spelled MOBILYA are corrected to match -- 135 rows in that one case.
+
+
 ## Tier two, and four things I had wrongly given up on
 
 Nine more chains: Çilek, Vivense, Dinarsu, Paşabahçe, Korkmaz, Merinos, Weltew, Pierre

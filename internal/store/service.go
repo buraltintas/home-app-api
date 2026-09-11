@@ -269,7 +269,7 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
 // "güney antalya" should not have to produce "GÜNEY ANTALYA HALI ve YATAK SATIŞ MAĞAZASI"
 // maxNameMatches matches the number of results a search is allowed to return, so this
 // stage never becomes the thing that decides which branches a person is shown.
-const maxNameMatches = 30
+const maxNameMatches = 90
 
 // word for word, and should certainly not be told the request was not understood.
 func (s *Service) SearchByName(ctx context.Context, q string, lat, lon *float64, limit int, viewer *uuid.UUID) ([]Item, error) {

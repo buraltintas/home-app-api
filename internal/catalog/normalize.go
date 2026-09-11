@@ -451,3 +451,61 @@ func uniqueWords(name string) map[string]bool {
 	}
 	return out
 }
+
+// Spellings is how a publisher tells us which of its own capital I's is an İ.
+//
+// Turkish has two i's and a keyboard that makes it easy to type the wrong capital, so a
+// chain's list says "ÇELİK CENTROOM ALTINTAŞ" on one row and "ÇELIK CENTROOM KONYAALTI" on
+// the next. Cased by the Turkish rules, the second becomes "Çelık" -- a word that does not
+// exist, printed on a shop nobody will recognise.
+//
+// Vowel harmony was tried and is not good enough: measured across the catalogue it repairs
+// about thirty-five words and breaks about twenty-five, because Turkish place and family
+// names break harmony freely -- Kırşehir, Iğdır, Yılmaz, Ilgın all become wrong. A rule that
+// trades one kind of error for another is not a fix.
+//
+// This uses evidence instead. Within one brand's own list, a shouted word containing an
+// ASCII I is repaired only when that same brand writes the same word with İ somewhere else.
+// Nobody writes Kırşehir with an İ, so nothing invents one; Bellona writes MOBİLYA on most
+// of its rows, so the handful spelled MOBILYA are corrected to match.
+func Spellings(names []string) map[string]string {
+	definite := map[string]bool{}
+	ambiguous := map[string]bool{}
+	for _, name := range names {
+		for _, word := range shoutedWords(name) {
+			if strings.ContainsRune(word, 'İ') {
+				definite[word] = true
+			}
+			if strings.ContainsRune(word, 'I') {
+				ambiguous[word] = true
+			}
+		}
+	}
+	out := map[string]string{}
+	for word := range ambiguous {
+		if fixed := strings.ReplaceAll(word, "I", "İ"); definite[fixed] {
+			out[word] = fixed
+		}
+	}
+	return out
+}
+
+// RepairSpelling applies those corrections to one published name.
+func RepairSpelling(name string, spellings map[string]string) string {
+	if len(spellings) == 0 {
+		return name
+	}
+	return shouted.ReplaceAllStringFunc(name, func(word string) string {
+		if fixed, ok := spellings[word]; ok {
+			return fixed
+		}
+		return word
+	})
+}
+
+// A shouted word is one written entirely in capitals, which is how these lists are kept and
+// the only place the ambiguity arises: a name written in ordinary case already carries the
+// dot or does not.
+var shouted = regexp.MustCompile(`[A-ZÇĞİÖŞÜI]{2,}`)
+
+func shoutedWords(name string) []string { return shouted.FindAllString(name, -1) }

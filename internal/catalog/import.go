@@ -99,6 +99,9 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	if e != nil {
 		return report, e
 	}
+	// Which of this chain's capital I's it means as İ, learned from the rows where it wrote
+	// the dot itself.
+	spellings := Spellings(published0)
 
 	matcher := NewMatcher(tx)
 	seen := map[string]bool{}
@@ -113,6 +116,7 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		return record(ctx, tx, runID, row, decision)
 	}
 	for _, raw := range published {
+		raw.Name = RepairSpelling(raw.Name, spellings)
 		row := i.resolver.Normalize(raw)
 		// Named here rather than in the adapter, because only here are both facts known:
 		// which chain this is, and which real town the row resolved to.

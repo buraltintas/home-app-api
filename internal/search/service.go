@@ -145,6 +145,20 @@ func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	return out, err
 }
 
+// maxResults is how many stores one search answers with.
+//
+// It was thirty, chosen when the catalogue was small enough that thirty was most of what
+// there was. It is not any more: a chain search in İstanbul has more than thirty branches
+// before it leaves the district, and cutting at thirty threw away shops that were nearer
+// than ones that survived in another query.
+//
+// They are returned in one response rather than paged over several. Paging would mean
+// re-running the search for each page -- a second classification, a second query, a second
+// row in the searches log for one person's one question -- to save a payload that is tens of
+// kilobytes. The page reveals them a screenful at a time; nobody waits for the second
+// screenful.
+const maxResults = 90
+
 func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	start := s.now()
 	in.Query = strings.TrimSpace(in.Query)
@@ -243,7 +257,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		}
 		localStarted := time.Now()
 		var e error
-		if internal, e = s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, 30, user); e != nil {
+		if internal, e = s.stores.Search(ctx, internalQuery(intent), intent.Categories, intent.LocationText, in.Latitude, in.Longitude, searchRadius, maxResults, user); e != nil {
 			return Response{}, e
 		}
 		localElapsed = time.Since(localStarted)
@@ -261,7 +275,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		if !vetoed {
 			localStarted := time.Now()
 			var e error
-			if named, e = s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, 30, user); e != nil {
+			if named, e = s.stores.SearchByName(ctx, in.Query, in.Latitude, in.Longitude, maxResults, user); e != nil {
 				return Response{}, e
 			}
 			localElapsed = time.Since(localStarted)
@@ -349,8 +363,8 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 		}
 	}
 	rankResults(results, in.Latitude != nil, intent.StoreName != "")
-	if len(results) > 30 {
-		results = results[:30]
+	if len(results) > maxResults {
+		results = results[:maxResults]
 	}
 	searchID := uuid.New()
 	searchCity, searchDistrict := searchPlace(results)
