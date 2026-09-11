@@ -26,6 +26,10 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 | Kelebek Mobilya | 236 | same panel, `mark=kelebek` |
 | Linens | 85 | `/api/inventory/inventoryGetStoreFilter` |
 | Taç | 364 | same platform as Linens |
+| Karaca Home | 171 | rendered into the page, one JSON object per shop |
+| Tepe Home | 16 | rendered into the page as preloaded state |
+| Yataş Bedding | 42 | SAP Commerce OCC, filtered by the chain's own code |
+| Enza Home | 60 | same list as Yataş Bedding, other code |
 
 **Look for the shared one first.** Three mappings covered seven brands: Bellona, İstikbal
 and Mondi are all Erciyes Holding; Doğtaş and Kelebek share a dealer panel; Linens and Taç
@@ -38,14 +42,13 @@ a third-party host before assuming the chain runs its own endpoint.
 scripts, or sits at a path the probe does not guess. These need a person to watch the
 network panel once.
 
-Çilek · Yataş Bedding · Koçtaş · IKEA · Özdilek Home · Boyner Ev (its locator is a
+Çilek · Koçtaş · IKEA · Özdilek Home · Boyner Ev (its locator is a
 single-page application; every path answers with the same 527 KB shell) · Chakra ·
 Paşabahçe · Enza Home · Alfemo · Nurus · Merinos · Dinarsu · Emsan · Korkmaz
 
 **Published inside the page, not behind an endpoint.** Karaca Home and Tepe Home render
-their store lists into the HTML -- Karaca as `data-` attributes on each row, Tepe Home as a
-preloaded state object. Neither fits the JSON adapter as it stands; both want a locator that
-reads a page rather than an endpoint, which is the next thing worth building.
+their store lists into the HTML. Both are mapped now, through `extract` and `extract_after`
+respectively; a chain that does this needs no new adapter, only the right marker.
 
 **The site refuses us.** A 403 on `robots.txt` itself, which this fetcher treats as "we do
 not know what is allowed" and therefore does not proceed.

@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -21,6 +22,7 @@ type JSONLocator struct {
 	spec    BrandSpec
 	config  JSONLocatorConfig
 	extract *regexp.Regexp
+	require *regexp.Regexp
 	fetcher *Fetcher
 }
 
@@ -37,8 +39,12 @@ type JSONLocatorConfig struct {
 	// is common enough here that it belongs in the shared adapter: the customer picks a
 	// province from a dropdown and the page asks for that province, so the whole country
 	// is eighty-one of the same request.
-	URL   string `json:"url"`
-	Pages int    `json:"pages"`
+	URL string `json:"url"`
+	// URLs is the alternative to URL for a publisher that splits its list across more than
+	// one address. Every one is fetched and the results are pooled; a shop appearing in two
+	// of them is deduplicated by its identifier like any other repeat.
+	URLs  []string `json:"urls"`
+	Pages int      `json:"pages"`
 	// Extract pulls the store data out of a page that is not itself JSON. Plenty of chains
 	// render their list into the HTML rather than serving it from an endpoint -- there is
 	// nothing to call, and the data is right there in the markup.
@@ -50,8 +56,19 @@ type JSONLocatorConfig struct {
 	// below, so a page-rendered locator costs a line of configuration rather than a second
 	// adapter.
 	Extract string `json:"extract"`
+	// ExtractAfter is the other shape the same problem takes: a page that carries its whole
+	// list as one JSON value, nested inside a larger blob of state. A regular expression
+	// cannot cut that out -- the value contains brackets of its own and RE2 will not count
+	// them -- so this names a literal marker instead ("\"items\":"), and the adapter reads
+	// one balanced value starting at the bracket after it.
+	ExtractAfter string `json:"extract_after"`
 	// List is the dotted path to the array of stores, empty when the body is the array.
 	List string `json:"list"`
+	// Require keeps only the rows whose name matches, for a publisher that answers with
+	// more than one chain's shops in a single list. Yataş publishes its own and Enza Home's
+	// together, marking each row with the chain's code, which is the publisher telling us
+	// which is which -- better evidence than anything we could infer.
+	Require string `json:"require"`
 	// Field names inside one store object.
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -76,7 +93,7 @@ func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
 			return nil, fmt.Errorf("%s locator config: %w", spec.Slug, e)
 		}
 	}
-	if config.URL == "" {
+	if config.URL == "" && len(config.URLs) == 0 {
 		return nil, fmt.Errorf("%s has no locator url", spec.Slug)
 	}
 	locator := &JSONLocator{spec: spec, config: config, fetcher: fetcher}
@@ -90,6 +107,13 @@ func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
 		}
 		locator.extract = compiled
 	}
+	if config.Require != "" {
+		compiled, e := regexp.Compile(config.Require)
+		if e != nil {
+			return nil, fmt.Errorf("%s require pattern: %w", spec.Slug, e)
+		}
+		locator.require = compiled
+	}
 	return locator, nil
 }
 
@@ -97,21 +121,29 @@ func (l *JSONLocator) Brand() BrandSpec { return l.spec }
 
 func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
 	var out []RawStore
-	for _, province := range l.provinces() {
-		url := strings.ReplaceAll(l.config.URL, "{province}", province)
-		rows, e := l.fetchPages(ctx, url)
-		if e != nil {
-			return nil, e
+	for _, address := range l.addresses() {
+		for _, province := range l.provinces(address) {
+			rows, e := l.fetchPages(ctx, strings.ReplaceAll(address, "{province}", province))
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, rows...)
 		}
-		out = append(out, rows...)
 	}
 	return out, nil
 }
 
+func (l *JSONLocator) addresses() []string {
+	if len(l.config.URLs) > 0 {
+		return l.config.URLs
+	}
+	return []string{l.config.URL}
+}
+
 // provinces is the list of substitutions for "{province}", or a single empty one when the
 // URL does not ask for it.
-func (l *JSONLocator) provinces() []string {
-	if !strings.Contains(l.config.URL, "{province}") {
+func (l *JSONLocator) provinces(address string) []string {
+	if !strings.Contains(address, "{province}") {
 		return []string{""}
 	}
 	out := make([]string, 0, 81)
@@ -152,6 +184,11 @@ func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, 
 			if !ok {
 				continue
 			}
+			// Tested against the name as published, before any tidying: the marker is the
+			// publisher's own code and tidying is free to recase or drop it.
+			if l.require != nil && !l.require.MatchString(text(object, l.config.Name)) {
+				continue
+			}
 			out = append(out, l.mapRow(object))
 		}
 	}
@@ -161,6 +198,14 @@ func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, 
 // document turns a fetched body into something listAt can walk: the body itself when the
 // endpoint answers with JSON, or whatever Extract finds when it does not.
 func (l *JSONLocator) document(body []byte) (any, error) {
+	if l.config.ExtractAfter != "" {
+		value, e := balancedAfter(body, l.config.ExtractAfter)
+		if e != nil {
+			return nil, e
+		}
+		var out any
+		return out, json.Unmarshal(value, &out)
+	}
 	if l.extract == nil {
 		var out any
 		return out, json.Unmarshal(body, &out)
@@ -189,6 +234,48 @@ func (l *JSONLocator) document(body []byte) (any, error) {
 		return nil, fmt.Errorf("%d block(s) matched the extract pattern and none held JSON", len(matches))
 	}
 	return out, nil
+}
+
+// balancedAfter returns the one JSON array or object that begins after marker, counting
+// brackets so that the value's own nesting does not end it early. Strings are tracked,
+// because a bracket inside a shop's address is not structure.
+func balancedAfter(body []byte, marker string) ([]byte, error) {
+	at := bytes.Index(body, []byte(marker))
+	if at < 0 {
+		return nil, fmt.Errorf("the page does not contain %q", marker)
+	}
+	start := at + len(marker)
+	for start < len(body) && body[start] != '[' && body[start] != '{' {
+		start++
+	}
+	if start == len(body) {
+		return nil, fmt.Errorf("nothing follows %q that could be JSON", marker)
+	}
+	open, shut := body[start], byte(']')
+	if open == '{' {
+		shut = '}'
+	}
+	depth, inString, escaped := 0, false, false
+	for at := start; at < len(body); at++ {
+		c := body[at]
+		switch {
+		case escaped:
+			escaped = false
+		case c == '\\' && inString:
+			escaped = true
+		case c == '"':
+			inString = !inString
+		case inString:
+		case c == open:
+			depth++
+		case c == shut:
+			depth--
+			if depth == 0 {
+				return body[start : at+1], nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("the value after %q is never closed", marker)
 }
 
 // cloudflareEmail matches the markup Cloudflare's email obfuscation leaves behind. It

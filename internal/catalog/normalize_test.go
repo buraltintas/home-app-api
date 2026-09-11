@@ -24,3 +24,24 @@ func TestDisplayNameCarriesTheChainAndTheTownExactlyOnce(t *testing.T) {
 		}
 	}
 }
+
+// The chain's own filing shorthand comes off; words the whole trade uses stay on.
+func TestStripHouseWordsLeavesWhatNamesTheShop(t *testing.T) {
+	house := map[string]bool{"yb": true, "prk": true, "shw": true}
+	for _, c := range []struct{ in, want string }{
+		{"ORAN YB PRK SHW CAD", "ORAN CAD"},
+		{"KENTPARK YB PRK SHW AVM", "KENTPARK AVM"},
+		// Nothing to strip.
+		{"Akdeniz Bulvarı", "Akdeniz Bulvarı"},
+		// A name that is nothing but shorthand keeps it: shorthand beats an empty name.
+		{"YB PRK SHW", "YB PRK SHW"},
+	} {
+		if got := StripHouseWords(c.in, house); got != c.want {
+			t.Errorf("StripHouseWords(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// With nothing measured, nothing is removed.
+	if got := StripHouseWords("ORAN YB PRK SHW CAD", nil); got != "ORAN YB PRK SHW CAD" {
+		t.Errorf("stripped without evidence: %q", got)
+	}
+}

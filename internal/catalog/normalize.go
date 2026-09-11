@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/burakaltintas/home-app-api/internal/textnorm"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -348,4 +349,105 @@ func placeInName(name, province, district string) string {
 		return name
 	}
 	return strings.TrimSpace(strings.Join(missing, " ") + " " + name)
+}
+
+// HouseWords are the tokens a chain uses in its own branch names that tell a shopper
+// nothing: Yataş writes "ANK ORAN YB PRK SHW CAD", where only "Oran" names the shop and the
+// rest is the chain's shorthand for which of its brands, whether there is parking, and that
+// it is a showroom on a street.
+//
+// The test is not a list of codes, because a list covers the chains somebody thought of and
+// quietly fails for the rest. It is two measurements:
+//
+//   - the token appears in at least a quarter of this chain's own branch names, so it
+//     cannot be the thing that distinguishes one branch from another; and
+//   - no other chain in the catalogue uses it, so it is this chain's private vocabulary
+//     rather than the trade's.
+//
+// The second measurement is what keeps "AVM" and "Outlet" -- words every chain in Turkey
+// writes, which genuinely tell a shopper what kind of place this is -- while removing "SHW"
+// and "PRK", which only Yataş writes. A chain imported into an empty catalogue has nothing
+// to compare against and strips nothing, which is the safe direction to fail in.
+//
+// The comparison is done here rather than in SQL so that both sides are folded by the same
+// function. A second folding written in SQL is the kind of near-duplicate that agrees on
+// every case anybody tests and disagrees on the one that matters.
+func HouseWords(ctx context.Context, db Queryer, names []string, brandID string) (map[string]bool, error) {
+	if len(names) < minNamesForHouseWords {
+		return nil, nil
+	}
+	counts := map[string]int{}
+	for _, name := range names {
+		for word := range uniqueWords(name) {
+			counts[word]++
+		}
+	}
+	threshold := len(names) / 4
+	frequent := map[string]bool{}
+	for word, n := range counts {
+		if n >= threshold && len([]rune(word)) <= maxHouseWordLength {
+			frequent[word] = true
+		}
+	}
+	if len(frequent) == 0 {
+		return nil, nil
+	}
+	rows, e := db.Query(ctx, `SELECT name FROM stores WHERE deleted_at IS NULL AND brand_id IS DISTINCT FROM $1::uuid`, brandID)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if e = rows.Scan(&name); e != nil {
+			return nil, e
+		}
+		for word := range uniqueWords(name) {
+			delete(frequent, word)
+		}
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	return frequent, nil
+}
+
+// Queryer is the part of a pool or a transaction this needs.
+type Queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+const (
+	// Below this there is no frequency to measure and a coincidence looks like a pattern.
+	minNamesForHouseWords = 20
+	// Internal shorthand is short. A whole word repeated across a chain's branches is
+	// usually the chain naming itself, which DisplayName already handles.
+	maxHouseWordLength = 4
+)
+
+// StripHouseWords removes those tokens from one name, leaving what actually names the shop.
+func StripHouseWords(name string, house map[string]bool) string {
+	if len(house) == 0 {
+		return name
+	}
+	fields := strings.Fields(name)
+	kept := make([]string, 0, len(fields))
+	for _, field := range fields {
+		if !house[textnorm.Key(field)] {
+			kept = append(kept, field)
+		}
+	}
+	// Never everything: a name reduced to nothing is worse than one carrying shorthand.
+	if len(kept) == 0 {
+		return name
+	}
+	return strings.Join(kept, " ")
+}
+
+func uniqueWords(name string) map[string]bool {
+	out := map[string]bool{}
+	for _, word := range strings.Fields(textnorm.Key(name)) {
+		out[word] = true
+	}
+	return out
 }

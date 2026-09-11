@@ -209,7 +209,24 @@ brands:
     tier: 1
     categories: [bedding, home_textile, furniture]
     store_count_estimate: 600
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Yataş publishes its own network and Enza Home's in one list, across two addresses
+      # that mostly but not entirely overlap, marking each row with the chain's code. Both
+      # are fetched and pooled; the marker decides which chain a shop belongs to, which is
+      # the publisher telling us rather than us guessing.
+      urls:
+        - https://api.yatas.com.tr/occ/v2/yatas/stores?fields=FULL&pageSize=2000
+        - https://api.yatas.com.tr/occ/v2/enza/stores?fields=FULL&pageSize=2000
+      list: stores
+      id: name
+      name: displayName
+      address: address.streetname
+      city: address.city.name
+      district: address.county.name
+      latitude: geoPoint.latitude
+      longitude: geoPoint.longitude
+      require: '(^| )YB( |$)'
 
   - slug: ikea
     name: IKEA
@@ -233,7 +250,20 @@ brands:
     tier: 1
     categories: [furniture, decoration, home_textile, home_accessories]
     store_count_estimate: 40
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Tepe Home renders its list into the page as preloaded state rather than serving it
+      # from an endpoint. The marker points at the array; the adapter counts brackets to
+      # find its end, which a regular expression cannot do.
+      url: https://www.tepehome.com.tr/magazalar
+      extract_after: '"items":'
+      id: id
+      name: name
+      address: line
+      city: city
+      district: district
+      latitude: latitude
+      longitude: longitude
 
   - slug: ozdilek-home
     name: Özdilek Home
@@ -359,7 +389,20 @@ brands:
     website: https://www.enzahome.com
     tier: 2
     categories: [furniture, bedding]
-    locator: {kind: none}
+    locator:
+      kind: json
+      urls:
+        - https://api.yatas.com.tr/occ/v2/yatas/stores?fields=FULL&pageSize=2000
+        - https://api.yatas.com.tr/occ/v2/enza/stores?fields=FULL&pageSize=2000
+      list: stores
+      id: name
+      name: displayName
+      address: address.streetname
+      city: address.city.name
+      district: address.county.name
+      latitude: geoPoint.latitude
+      longitude: geoPoint.longitude
+      require: '(^| )EH( |$)'
 
   - slug: alfemo
     name: Alfemo

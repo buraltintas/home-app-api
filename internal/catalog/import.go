@@ -88,6 +88,18 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	}
 	report.RunID = runID
 
+	// The chain's own shorthand, measured from this run's names against the rest of the
+	// catalogue, so branch names carry what names a shop and not what the chain files it
+	// under.
+	published0 := make([]string, 0, len(published))
+	for _, raw := range published {
+		published0 = append(published0, raw.Name)
+	}
+	house, e := HouseWords(ctx, tx, published0, brand.ID)
+	if e != nil {
+		return report, e
+	}
+
 	matcher := NewMatcher(tx)
 	seen := map[string]bool{}
 	// A row thrown out before matching is recorded like any other decision. It used to be
@@ -104,7 +116,7 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		row := i.resolver.Normalize(raw)
 		// Named here rather than in the adapter, because only here are both facts known:
 		// which chain this is, and which real town the row resolved to.
-		row.Name = DisplayName(brand.Name, row.Name, row.City, row.District)
+		row.Name = DisplayName(brand.Name, StripHouseWords(row.Name, house), row.City, row.District)
 		// Not every chain publishes an id for every shop. Where one is missing, it is
 		// derived from what the row itself says, so the same shop derives the same id on
 		// every run and a re-import updates it instead of adding a second copy. Without

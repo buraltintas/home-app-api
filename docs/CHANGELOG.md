@@ -6,6 +6,43 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Three more chains, and a name that says what a shop is rather than how it is filed
+
+Tepe Home, Yataş Bedding and Enza Home. Fourteen brands in the catalogue now, and 4,884
+stores, none of which cost a provider request.
+
+Each of the three needed a capability the adapter did not have, and each of those is a
+general one rather than an entry in that brand's configuration:
+
+**`extract_after`** reads a list a page carries as preloaded state rather than serving from
+an endpoint. A regular expression cannot cut such a value out -- it contains brackets of its
+own and RE2 will not count them -- so this names a literal marker and the adapter reads one
+balanced JSON value after it, tracking strings so a bracket in an address does not end it.
+
+**`urls`** fetches a list a publisher splits across more than one address, pooling the
+results; repeats are deduplicated by identifier like any other.
+
+**`require`** keeps only the rows whose published name matches, for a publisher that answers
+with more than one chain in a single list. Yataş publishes its own network and Enza Home's
+together across two addresses that mostly overlap, marking each row with the chain's code.
+That marker is the publisher telling us which is which, which is better evidence than
+anything we could infer: 42 Yataş Bedding, 60 Enza Home, no overlap.
+
+**House words.** Yataş names a branch "ANK ORAN YB PRK SHW CAD", of which only "Oran" names
+the shop; the rest is the chain's shorthand for which of its brands, whether there is
+parking, and that it is a showroom. A list of codes would cover the chains somebody thought
+of and fail silently for the rest, so the test is measured instead: a token appearing in at
+least a quarter of one chain's own branch names cannot be what distinguishes its branches,
+and if no other chain in the catalogue uses that token it is private vocabulary rather than
+the trade's. That second measurement is what removes "SHW" and "PRK" while keeping "AVM" --
+a word every chain in Turkey writes and which tells a shopper something real. A chain
+imported into an empty catalogue has nothing to compare against and strips nothing.
+
+Both sides of that comparison are folded by the same function, in Go rather than in SQL. A
+second folding written in SQL is the kind of near-duplicate that agrees on every case
+anybody tests and disagrees on the one that matters.
+
+
 ## The product vocabulary learns instead of being maintained
 
 Measured against 108 ordinary Turkish words for things these shops sell -- written down by
