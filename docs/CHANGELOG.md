@@ -6,6 +6,19 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A brand search near Kadıköy answered with Diyarbakır
+
+Found the moment the catalogue held three hundred shops of one chain, and it had been true
+all along with too few rows to notice.
+
+Candidate selection ordered by raw `ts_rank` before distance. That score rewards a shorter
+document, so a chain's branch names sorted by how many words their code has -- "DYR 75.CAD"
+above "YLV STAR AVM" above "IST AND MALTEPE PIAZZA AVM" -- and the thirty-row limit threw
+away all seventy-nine İstanbul shops before the ranker that orders by distance ever saw
+them. The score is now rounded to one decimal: a name matching both words still beats one
+matching neither, and "this sign is longer" no longer beats "this shop is two kilometres
+away". Searching "english home" from Kadıköy used to answer at 41 km; it now answers at 2.
+
 ## The catalogue starts being ours: brands, imports, and a matcher that will not make twins
 
 Second step of removing Google Places. The chains publish their own store lists; this reads

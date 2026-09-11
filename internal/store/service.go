@@ -414,7 +414,15 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
  WHERE s.deleted_at IS NULL AND ($1='' OR to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')||' '||coalesce(s.description,'')||' '||coalesce(s.city,'')||' '||coalesce(s.district,'')) @@ websearch_to_tsquery('simple',$1) OR ($7::text[] IS NOT NULL AND EXISTS(SELECT 1 FROM store_category_links cl JOIN store_categories sc ON sc.id=cl.category_id WHERE cl.store_id=s.id AND sc.slug=ANY($7))))
  AND ($8='' OR lower(s.city) LIKE '%'||$8||'%' OR lower(coalesce(s.district,'')) LIKE '%'||$8||'%')
  AND ($2::float8 IS NULL OR $3::float8 IS NULL OR $4<=0 OR ST_DWithin(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography,$4))
- GROUP BY s.id,ss.store_id ORDER BY CASE WHEN $1='' THEN 0 ELSE ts_rank(to_tsvector('simple',s.name||' '||coalesce(s.brand_name,'')),websearch_to_tsquery('simple',$1)) END DESC,
+ GROUP BY s.id,ss.store_id ORDER BY
+	-- Rounded, not raw. ts_rank rewards a shorter document, and a chain's branch names are
+	-- not all the same length: searching a brand near Kadıköy ordered Diyarbakır above
+	-- Yalova above İstanbul, on nothing but how many words each branch code has, and the
+	-- LIMIT then threw away all seventy-nine İstanbul shops before the ranker ever saw
+	-- them. Rounding keeps the difference that means something -- a name matching both
+	-- words against one matching neither -- and discards the difference that means only
+	-- "this sign is longer".
+	CASE WHEN $1='' THEN 0 ELSE round(ts_rank(to_tsvector('simple',s.name||' '||coalesce(s.brand_name,'')),websearch_to_tsquery('simple',$1))::numeric,1) END DESC,
 	-- Nearby search promises nearest first. Specificity breaks ties after distance; putting
 	-- it first silently discarded a nearby multi-category shop at LIMIT before the shared
 	-- ranker could see it.
