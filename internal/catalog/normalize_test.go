@@ -95,3 +95,16 @@ func TestSpellingsLearnFromThePublishersOwnRows(t *testing.T) {
 		t.Errorf("TidyName = %q", got)
 	}
 }
+
+// An identifier we made up carries none of the authority a chain's own does.
+func TestDerivedIdentifiersAreNotTheChainSpeaking(t *testing.T) {
+	if published(DerivedID(RawStore{Name: "Polo Mobilya"})) {
+		t.Error("a derived identifier was read as the chain's own")
+	}
+	if !published("3771") || !published("BEL-867") {
+		t.Error("a published identifier was read as ours")
+	}
+	if published("") {
+		t.Error("no identifier at all was read as the chain's own")
+	}
+}

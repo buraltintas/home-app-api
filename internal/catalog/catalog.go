@@ -102,6 +102,11 @@ type Decision struct {
 // are one string and a trigram index can tell how close two shops' signs are.
 func CompactName(name string) string { return textnorm.Compact(name) }
 
+// derivedPrefix marks an identifier as ours rather than the chain's. The difference is
+// load-bearing: a chain listing two rows under two of its own identifiers has told us they
+// are two shops, and one we made up says no such thing.
+const derivedPrefix = "derived:"
+
 // DerivedID stands in for the identifier a chain did not publish.
 //
 // It is built from the two things about a shop that do not drift between runs: its name,
@@ -116,5 +121,5 @@ func DerivedID(row RawStore) string {
 		point = fmt.Sprintf("%.4f,%.4f", *row.Latitude, *row.Longitude)
 	}
 	sum := sha256.Sum256([]byte(textnorm.Key(row.Name) + "|" + point))
-	return "derived:" + hex.EncodeToString(sum[:8])
+	return derivedPrefix + hex.EncodeToString(sum[:8])
 }

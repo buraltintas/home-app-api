@@ -139,7 +139,13 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// comparable store already carries a different id from this same list, the chain has
 	// told us they are two shops -- "Ayvalık 1" and "Ayvalık 2" stand 229 m apart and share
 	// four fifths of their name, and no similarity threshold will ever separate them.
-	if candidate.BrandExternalID != "" && candidate.BrandExternalID != in.ExternalID {
+	//
+	// Only identifiers the brand actually published carry that authority. One we derived
+	// because the brand published none is ours, and says nothing about whether the chain
+	// considers two rows distinct -- so two different derived identifiers must never be read
+	// as the chain distinguishing them. They differ whenever the derivation changes, and the
+	// first time it did, this rule wanted to insert all 652 İstikbal dealers a second time.
+	if published(candidate.BrandExternalID) && published(in.ExternalID) && candidate.BrandExternalID != in.ExternalID {
 		decision.Action = ActionInserted
 		decision.Reason = fmt.Sprintf("the brand lists this separately from %q", candidate.Name)
 		decision.StoreID = ""
@@ -248,3 +254,6 @@ LIMIT 1`, compact, in.City, in.District, provider)
 	}
 	return c, true, nil
 }
+
+// published reports whether an identifier came from the chain rather than from us.
+func published(id string) bool { return id != "" && !strings.HasPrefix(id, derivedPrefix) }
