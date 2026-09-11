@@ -30,6 +30,11 @@ var dataset embed.FS
 // file, and a district that has been dissolved should disappear rather than linger because
 // an upsert had nothing to say about it. The whole thing runs in one transaction, so a
 // failed load leaves the previous data in place rather than an empty picker.
+//
+// The rows land in a staging table of plain numbers first. COPY speaks the binary protocol,
+// and a geography column expects EWKB there -- handing it the text "SRID=4326;POINT(...)"
+// is read as binary and fails with an endian error. Building the point in SQL, from two
+// float8 columns, is both correct and the form PostGIS is happiest parsing.
 func Seed(ctx context.Context, db *pgxpool.Pool) (int64, error) {
 	file, e := dataset.Open("data/tr_locations.csv.gz")
 	if e != nil {
@@ -56,13 +61,12 @@ func Seed(ctx context.Context, db *pgxpool.Pool) (int64, error) {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Children reference parents, so the constraint has to stand down for the length of
-	// the load; the file is written parents-first but a single statement cannot promise
-	// that to the planner.
-	if _, e = tx.Exec(ctx, `SET CONSTRAINTS ALL DEFERRED`); e != nil {
-		return 0, e
-	}
-	if _, e = tx.Exec(ctx, `DELETE FROM tr_locations`); e != nil {
+	if _, e = tx.Exec(ctx, `
+CREATE TEMP TABLE tr_locations_load(
+  id text, kind text, name text, search_key text, parent_id text,
+  province_name text, district_name text,
+  latitude double precision, longitude double precision, population integer
+) ON COMMIT DROP`); e != nil {
 		return 0, e
 	}
 
@@ -98,13 +102,10 @@ func Seed(ctx context.Context, db *pgxpool.Pool) (int64, error) {
 		if line[6] != "" {
 			district = line[6]
 		}
-		// COPY cannot call ST_MakePoint, so the point is handed over in the text form
-		// PostGIS parses on input.
-		point := fmt.Sprintf("SRID=4326;POINT(%.6f %.6f)", longitude, latitude)
-		return []any{line[0], line[1], line[2], line[3], parent, line[5], district, point, population}, nil
+		return []any{line[0], line[1], line[2], line[3], parent, line[5], district, latitude, longitude, population}, nil
 	})
-	copied, e := tx.CopyFrom(ctx, pgx.Identifier{"tr_locations"},
-		[]string{"id", "kind", "name", "search_key", "parent_id", "province_name", "district_name", "location", "population"}, source)
+	copied, e := tx.CopyFrom(ctx, pgx.Identifier{"tr_locations_load"},
+		[]string{"id", "kind", "name", "search_key", "parent_id", "province_name", "district_name", "latitude", "longitude", "population"}, source)
 	if e != nil {
 		return 0, e
 	}
@@ -113,6 +114,19 @@ func Seed(ctx context.Context, db *pgxpool.Pool) (int64, error) {
 	}
 	if copied == 0 {
 		return 0, fmt.Errorf("dataset is empty")
+	}
+	if _, e = tx.Exec(ctx, `DELETE FROM tr_locations`); e != nil {
+		return 0, e
+	}
+	// Parents before children, so the foreign key holds row by row without having to be
+	// made deferrable for a load that happens twice a year.
+	if _, e = tx.Exec(ctx, `
+INSERT INTO tr_locations(id,kind,name,search_key,parent_id,province_name,district_name,location,population)
+SELECT id,kind,name,search_key,parent_id,province_name,nullif(district_name,''),
+       ST_SetSRID(ST_MakePoint(longitude,latitude),4326)::geography,population
+FROM tr_locations_load
+ORDER BY CASE kind WHEN 'il' THEN 0 WHEN 'ilce' THEN 1 ELSE 2 END`); e != nil {
+		return 0, e
 	}
 	if e = tx.Commit(ctx); e != nil {
 		return 0, e
