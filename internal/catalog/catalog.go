@@ -95,16 +95,7 @@ type Decision struct {
 // CompactName is the form two names are compared in: folded to plain letters and digits
 // with the spaces taken out, so "ENGLISH HOME KADIKÖY AVM" and "English Home Kadıköy AVM"
 // are one string and a trigram index can tell how close two shops' signs are.
-func CompactName(name string) string {
-	key := textnorm.Key(name)
-	out := make([]rune, 0, len(key))
-	for _, r := range key {
-		if r != ' ' {
-			out = append(out, r)
-		}
-	}
-	return string(out)
-}
+func CompactName(name string) string { return textnorm.Compact(name) }
 
 // DerivedID stands in for the identifier a chain did not publish.
 //

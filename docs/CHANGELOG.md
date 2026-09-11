@@ -6,6 +6,41 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Four ways a brand search failed, found by running one
+
+Someone searching for a chain they can see from the window should get the branch nearest
+them. Four separate things stopped that, all of them found by running the search rather than
+reasoning about it.
+
+**Turkish typed without its diacritics matched nothing at all.** "dogtas" met "Doğtaş"
+nowhere: the name query lowercases and strips punctuation but leaves letters alone. The
+catalogue has held a folded `compact_name` all along -- it is what the importer's matcher
+compares on -- and the search simply never looked at it. It does now, against the same
+folding applied to the query, which is the whole reason `textnorm.Compact` exists in one
+place rather than two.
+
+**A chain named inside a longer query was not recognised.** "doğtaş" worked and "doğtaş
+mobilya" did not, because the catalogue lexicon only matched a chain against the entire
+query. It now finds the longest chain name appearing as a run of whole words, and the rest
+of the query still contributes its product words: "doğtaş mobilya" is Doğtaş and furniture,
+"bellona yatak" is Bellona and beds.
+
+**The nearest branch sorted below one 335 km away.** "kelebek mobilya" from Kadıköy answered
+with Ankara first and the branch a kilometre away fourth, because `ts_rank` rewards a
+shorter document and the Ankara branch's longer name scattered the two words further apart.
+Rounding it, which is what the last attempt at this did, was not enough. It is gone from the
+ordering: what a person typed appearing in a shop's name is the strong signal, and between
+branches of one chain -- all equally the shop that was asked for -- the question is which
+one can be reached. Phrase match, then distance, with `ts_rank` kept only as the tiebreak
+for a search made before anyone has shared a location.
+
+**Two runs of one import duplicated a chain.** Kelebek Mobilya was imported twice
+concurrently, fifty-three seconds apart; both runs saw no existing shop, both inserted. An
+import now takes a transaction-scoped advisory lock on the brand, so the second run says so
+and stops. The two duplicate rows this produced carried no reviews or favourites and have
+been removed.
+
+
 ## The panel's totals stopped being a guess
 
 Two problems with the same shape, one after the other.

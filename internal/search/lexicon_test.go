@@ -9,10 +9,39 @@ import (
 // A lexicon already loaded, so the test exercises the matching rather than the database.
 func loaded() *lexicon {
 	l := newLexicon(nil)
-	l.brands = map[string]string{"englishhome": "English Home", "madamecoco": "Madame Coco"}
+	l.brands = map[string]string{"englishhome": "English Home", "madamecoco": "Madame Coco", "dogtas": "Doğtaş"}
 	l.terms = map[string]string{"gardırop": "furniture", "yemek masası": "furniture", "yemek takımı": "tableware", "tül perde": "curtain", "perde": "curtain"}
 	l.until = time.Now().Add(time.Hour)
 	return l
+}
+
+// A chain named inside a longer query is still that chain. "doğtaş" was understood and
+// "doğtaş mobilya" was not, which is the same request typed slightly more naturally.
+func TestLexiconFindsAChainNamedInsideALongerQuery(t *testing.T) {
+	l := loaded()
+	l.terms["mobilya"] = "furniture"
+	for _, query := range []string{"doğtaş mobilya", "english home kadıköy", "madame coco bul"} {
+		got := l.enrich(context.Background(), Deterministic(query), query)
+		if got.StoreName == "" {
+			t.Fatalf("%q: no chain recognised (%+v)", query, got)
+		}
+	}
+	// The rest of the query still says what is wanted.
+	got := l.enrich(context.Background(), Intent{Scope: ScopeUnclear}, "doğtaş mobilya")
+	if got.StoreName != "Doğtaş" || len(got.Categories) != 1 || got.Categories[0] != "furniture" {
+		t.Fatalf("%+v", got)
+	}
+}
+
+// The longest name wins, so a chain whose name begins with another chain's is not mistaken
+// for it.
+func TestLexiconPrefersTheLongerChainName(t *testing.T) {
+	l := loaded()
+	l.brands["yatas"] = "Yataş"
+	l.brands["yatasbedding"] = "Yataş Bedding"
+	if got := l.enrich(context.Background(), Intent{Scope: ScopeUnclear}, "yataş bedding"); got.StoreName != "Yataş Bedding" {
+		t.Fatalf("store name %q", got.StoreName)
+	}
 }
 
 func TestLexiconRecognisesOurOwnChains(t *testing.T) {

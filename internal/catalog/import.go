@@ -67,6 +67,20 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// One import of a brand at a time, across every process that might start one -- the
+	// command line, and the panel's "import now" button once it exists. Two runs of the
+	// same brand overlapping both see an empty catalogue for each shop, both decide to
+	// insert, and the chain lands twice; it happened here, to Kelebek Mobilya, with the two
+	// runs fifty-three seconds apart. The lock is held for the transaction and released
+	// with it, so a crashed run does not block the next one.
+	var mine bool
+	if e = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtext('catalog-import:'||$1))`, brand.Slug).Scan(&mine); e != nil {
+		return report, e
+	}
+	if !mine {
+		return report, fmt.Errorf("%s is already being imported by another run", brand.Slug)
+	}
+
 	var runID string
 	if e = tx.QueryRow(ctx, `INSERT INTO store_import_runs(brand_id,applied,fetched) VALUES($1,$2,$3) RETURNING id::text`,
 		brand.ID, apply, len(published)).Scan(&runID); e != nil {

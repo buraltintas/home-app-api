@@ -118,3 +118,12 @@ func Title(raw string) string {
 	}
 	return strings.Join(words, " ")
 }
+
+// Compact is the form two names are compared in: Key with the spaces taken out, so
+// "ENGLISH HOME KADIKÖY AVM" and "English Home Kadıköy AVM" are one string. It is what the
+// catalogue stores in compact_name and what a search has to fold a query into before it can
+// meet that column -- the two must be the same function or the column silently stops
+// matching anything.
+func Compact(name string) string {
+	return strings.ReplaceAll(Key(name), " ", "")
+}

@@ -89,6 +89,34 @@ func (l *lexicon) refresh(ctx context.Context) {
 	l.mu.Unlock()
 }
 
+// containsSpacedWord tests a compacted brand key against a spaced query, matching on word
+// boundaries so that a chain's name is found however the query spaces it: the key for
+// "English Home" is "englishhome", and it has to meet "english home" as the user typed it.
+func containsSpacedWord(haystack, key string) bool {
+	if key == "" {
+		return false
+	}
+	for _, word := range spans(haystack) {
+		if compact(word) == key {
+			return true
+		}
+	}
+	return false
+}
+
+// spans is every run of consecutive words in a query, longest first -- the phrases a brand
+// name could be hiding in.
+func spans(query string) []string {
+	words := strings.Fields(query)
+	var out []string
+	for length := len(words); length >= 1; length-- {
+		for start := 0; start+length <= len(words); start++ {
+			out = append(out, strings.Join(words[start:start+length], " "))
+		}
+	}
+	return out
+}
+
 func compact(value string) string {
 	key := textnorm.Key(value)
 	return strings.ReplaceAll(key, " ", "")
@@ -108,14 +136,25 @@ func (l *lexicon) enrich(ctx context.Context, intent Intent, query string) Inten
 	brands, terms := l.brands, l.terms
 	l.mu.RUnlock()
 
-	// A query that is a chain's name is a search for that chain. Whole-query match only:
-	// "yataş" inside "yataş yatak aldım" is a product sentence, and the parser handles
-	// those better than a substring test would.
+	// A chain named anywhere in the query is a search for that chain. Whole query or part
+	// of it: "doğtaş" and "doğtaş mobilya" are the same request, and only the first of them
+	// used to be understood -- the second went looking for a shop whose sign says both
+	// words, and there is no such shop.
+	//
+	// The longest name wins, so "yataş bedding" is that chain rather than Yataş, and the
+	// rest of the query still contributes its product words below: "bellona yatak" is
+	// Bellona, and beds.
 	if intent.StoreName == "" {
-		if name, ok := brands[compact(query)]; ok {
+		normalized := textnorm.Key(query)
+		best, bestLength := "", 0
+		for key, name := range brands {
+			if len(key) > bestLength && containsSpacedWord(normalized, key) {
+				best, bestLength = name, len(key)
+			}
+		}
+		if best != "" {
 			intent.Scope = ScopeHomeLiving
-			intent.StoreName = name
-			return intent
+			intent.StoreName = best
 		}
 	}
 	if len(intent.Categories) > 0 {

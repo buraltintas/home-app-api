@@ -12,6 +12,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
+	"github.com/burakaltintas/home-app-api/internal/textnorm"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -373,17 +374,31 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
    OR (regexp_replace(lower($1),'[^[:alnum:]]','','g')<>''
       AND regexp_replace(lower(coalesce(s.name,'')||coalesce(s.brand_name,'')),'[^[:alnum:]]','','g')
           LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%')
+   -- Turkish written without its diacritics, which is how a great many people type. The
+   -- clauses above lowercase and strip punctuation but leave the letters alone, so
+   -- "dogtas" met "Doğtaş" nowhere and answered with nothing at all. compact_name is
+   -- already folded on write, and $7 is the same folding applied to the query, so the two
+   -- meet. The trigram index on compact_name serves this.
+   OR ($7<>'' AND s.compact_name LIKE '%'||$7||'%')
  )
  GROUP BY s.id,ss.store_id
  ORDER BY
- -- Rounded, for the same reason it is rounded in Search above: ts_rank rewards a shorter
- -- document, so a chain's branch names sort by how many words their code has rather than
- -- by where the shop is. Searching a brand from Kadıköy answered with Yalova, Bursa and
- -- Diyarbakır while all seventy-nine İstanbul branches fell below the limit. This is the
- -- path a brand name actually takes -- the model reads "english home" as unclear and the
- -- name rescue below picks it up -- so fixing only the other query fixed nothing.
- round(ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1))::numeric,1) DESC,
- CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END LIMIT $4`, q, lat, lon, limit, i18n.FromContext(ctx), viewer)
+ -- What somebody typed, appearing in the shop's name as they typed it, is the only strong
+ -- evidence here. Everything else is a branch of the same chain, and between branches of
+ -- one chain the question is not which is more relevant -- they are equally the shop that
+ -- was asked for -- but which one can be reached.
+ --
+ -- ts_rank cannot make that distinction and was actively working against it: it rewards a
+ -- shorter document, so branches sorted by how many words their name happens to carry.
+ -- "kelebek mobilya" from Kadıköy answered with Ankara, 335 km away, above the Kadıköy
+ -- branch a kilometre from the door, because the Ankara branch's name is longer and
+ -- scattered the two words further apart. Rounding it was not enough; it is gone, and the
+ -- phrase test that replaces it says something a person would recognise as a reason.
+ CASE WHEN $7<>'' AND s.compact_name LIKE '%'||$7||'%' THEN 0 ELSE 1 END,
+ CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
+ -- With no location to sort by -- a search made before the visitor has shared one -- the
+ -- index's own score is still better than an arbitrary order.
+ ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1)) DESC LIMIT $4`, q, lat, lon, limit, i18n.FromContext(ctx), viewer, textnorm.Compact(q))
 	if e != nil {
 		return nil, e
 	}
