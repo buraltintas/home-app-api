@@ -375,7 +375,14 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
           LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%')
  )
  GROUP BY s.id,ss.store_id
- ORDER BY ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1)) DESC,
+ ORDER BY
+ -- Rounded, for the same reason it is rounded in Search above: ts_rank rewards a shorter
+ -- document, so a chain's branch names sort by how many words their code has rather than
+ -- by where the shop is. Searching a brand from Kadıköy answered with Yalova, Bursa and
+ -- Diyarbakır while all seventy-nine İstanbul branches fell below the limit. This is the
+ -- path a brand name actually takes -- the model reads "english home" as unclear and the
+ -- name rescue below picks it up -- so fixing only the other query fixed nothing.
+ round(ts_rank(to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')),`+fn+`('simple',$1))::numeric,1) DESC,
  CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END LIMIT $4`, q, lat, lon, limit, i18n.FromContext(ctx), viewer)
 	if e != nil {
 		return nil, e

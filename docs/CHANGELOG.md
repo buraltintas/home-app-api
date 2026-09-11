@@ -19,6 +19,13 @@ them. The score is now rounded to one decimal: a name matching both words still 
 matching neither, and "this sign is longer" no longer beats "this shop is two kilometres
 away". Searching "english home" from Kadıköy used to answer at 41 km; it now answers at 2.
 
+It had to be fixed in two places, and finding the second one is the point. Rounding the
+score in the ordinary catalogue query changed nothing on the live site, because a brand name
+does not take that path: the model reads "english home" as unclear, the name rescue picks it
+up, and that runs a different query with its own copy of the same ORDER BY. The response
+still reports the scope as home-living, because the rescue rewrites it on the way out --
+which is exactly why the first fix looked like it should have worked.
+
 ## The catalogue starts being ours: brands, imports, and a matcher that will not make twins
 
 Second step of removing Google Places. The chains publish their own store lists; this reads
