@@ -34,6 +34,15 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 | IKEA | 10 | rendered as markup, points in data attributes |
 | Chakra | 84 | rendered as markup, point on its own map button |
 | Emsan | 18 | Karaca's group, Karaca's platform, same mapping |
+| Çilek | 227 | two POSTs: provinces, then each province's shops |
+| Vivense | 101 | rendered as markup, point per shop |
+| Merinos | ~1,600 | rendered as markup, point on each map button |
+| Weltew | 136 | rendered as markup, comma decimals |
+| Pierre Cardin Yatak | 88 | rendered as markup, province and district on the card |
+| Alfemo | 81 | whole list in the page, filtered client-side |
+| Paşabahçe | 49 | same platform as Madame Coco |
+| Korkmaz | 40 | rendered as markup, no coordinates |
+| Dinarsu | — | WordPress admin-ajax, per city and per shop type |
 
 **Look for the shared one first.** Three mappings covered seven brands: Bellona, İstikbal
 and Mondi are all Erciyes Holding; Doğtaş and Kelebek share a dealer panel; Linens and Taç
@@ -46,56 +55,18 @@ a third-party host before assuming the chain runs its own endpoint.
 scripts, or sits at a path the probe does not guess. These need a person to watch the
 network panel once.
 
-**Tier 2, still to do.** Alfemo and Korkmaz render nothing server-side and their pages did
-not call a store endpoint while being watched; Dinarsu builds its list from three script
-arrays keyed by city; Merinos, Nurus and Pierre Cardin Home answer 404 at every path tried,
-so their locators have moved. İpek Halı, Neva Home and Weltew time out. Zara Home answers
-403 to us.
+**What is left, and why.**
 
-**Tier 1, each for its own reason.** These are the ones left, and none of them is "could
-not find it":
-
-- **Koçtaş** — the site is behind Akamai bot protection and the locator is a three-step
-  form (province, town, district) with no endpoint that answers for a whole province. A
-  person can map it; a fetcher that respects bot protection cannot.
-- **Çilek** — the endpoint its own page calls, `store.cilek.com/location/getstates`, answers
-  with an empty array to us and to a browser alike. Their locator appears to be broken;
-  worth another look later rather than working around.
-- **Vivense** — its showroom page publishes a hundred points and no names: `{"No":301,
-  "lat":…, "lng":…}`. A shop with no name is not a catalogue row, and the names are fetched
-  per marker on click.
-- **Deco Home** — `decohome.com.tr` does not resolve at all. Someone has to find where the
-  chain publishes now.
-- **Boyner Ev** — removed from the registry deliberately, with the reason recorded there:
-  it is a department inside Boyner's department stores, not a store network. Importing
-  those branches would fill a home and living catalogue with clothing shops.
-- **Paşabahçe** — its store API (`/api/client/address/retail_store/`) answers 403 to us;
-  Cloudflare is refusing non-browser clients regardless of what robots.txt says.
-
-**Published inside the page, not behind an endpoint.** Karaca Home and Tepe Home render
-their store lists into the HTML. Both are mapped now, through `extract` and `extract_after`
-respectively; a chain that does this needs no new adapter, only the right marker.
-
-**The site refuses us.** A 403 on `robots.txt` itself, which this fetcher treats as "we do
-not know what is allowed" and therefore does not proceed.
-
-Vivense · Zara Home
-
-**The address in the registry does not resolve.** Someone has to find the current one.
-
-Deco Home (`decohome.com.tr`) · Mondi (`mondi.com.tr`) · Padişah Halı (`padisahhali.com`)
-
-**Times out.** May be temporary; worth another run before treating it as blocked.
-
-İpek Halı · Neva Home · Weltew
-
-## Logos
-
-Nineteen brands have a usable mark, collected by `cmd/brand-logos`. The others publish
-none their own markup identifies, or are among the unreachable above.
-
-**English Home's mark is inline SVG.** The collector looks for an image file; English Home
-draws its wordmark directly in the page's markup, so the collector found only a photograph
-of a phone and a pair of app-store badges and reported none. The mark is now in the web
-application. A chain that does this is not rare, and the collector should learn to read an
-inline `<svg>` out of the masthead.
+- **Koçtaş** — behind Akamai bot protection with a three-step form (province, town,
+  district) and no endpoint that answers for a whole province.
+- **Zara Home** — answers 403 to our bot for every page, and serves no robots.txt at all.
+  Every other chain here serves us willingly. Reading it through a browser would mean
+  presenting ourselves as a different client, and the data could not then be refreshed by
+  the import that keeps every other brand current: it would be one stale island nobody
+  would notice going wrong. Left out deliberately.
+- **Nurus** — contract furniture rather than home and living; out of scope.
+- **İpek Halı · Neva Home · Padişah Halı** — their sites time out or do not resolve. Nobody
+  has found where these chains publish now.
+- **Boyner Ev** — removed from the registry deliberately; it is a department inside a
+  department store, not a network.
+- **Deco Home** — `decohome.com.tr` does not resolve.

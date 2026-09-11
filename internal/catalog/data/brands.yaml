@@ -458,6 +458,11 @@ brands:
       longitude: longitude
 
   - slug: zara-home
+    # Answers 403 to our bot for every page and serves no robots.txt at all, alone among
+    # the chains here. Reading it through a browser would mean presenting ourselves as a
+    # different client, and the result could not be refreshed by the import that keeps every
+    # other brand current -- one stale island nobody would notice going wrong.
+    active: false
     name: Zara Home
     website: https://www.zarahome.com
     tier: 2
@@ -521,6 +526,9 @@ brands:
       longitude: 'data-longitude="([0-9,.]+)"'
 
   - slug: nurus
+    # Contract furniture -- offices and public buildings -- rather than a home and living
+    # chain anybody shops at. Out of scope for this catalogue.
+    active: false
     name: Nurus
     website: https://www.nurus.com
     tier: 2
