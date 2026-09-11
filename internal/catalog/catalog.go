@@ -90,6 +90,11 @@ type Decision struct {
 	StoreID    string
 	Similarity float64
 	Distance   float64
+	// Carried marks a row that turned out to be a shop already in the catalogue under
+	// another chain -- one dealer holding two franchises. The shop is not duplicated and its
+	// own details are not overwritten by the second chain's copy of them; only the fact that
+	// it carries this brand is recorded.
+	Carried bool
 }
 
 // CompactName is the form two names are compared in: folded to plain letters and digits

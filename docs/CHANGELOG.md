@@ -6,6 +6,31 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## One dealer, two franchises, one shop
+
+A shop in Antalya appears in Taç's published list and in Linens's, under nearly the same
+company name at the same address. It is one shop that sells both, and the catalogue was
+listing it twice -- telling a visitor to choose between two doors that are the same door.
+
+"Two chains are two chains" was the rule, and it is right about English Home and Madame Coco
+ten metres apart in a mall. What separates that case from this one is the name: a dealer
+carries its own name into both lists, while two chains' own shops do not resemble each other
+at all. So a near, same-named shop already held under another brand is this shop, and the
+brand being imported is recorded in `store_carried_brands` rather than inserted again. The
+shop's own details are left alone -- the second chain is not the authority on a dealer whose
+sign is somebody else's, and overwriting here would make the shop flip spellings on every
+import.
+
+Four such shops existed and now carry two brands each. This also makes
+`store_carried_brands` earn its place before anybody fills it by hand: it is what will
+answer "somewhere in Antalya that sells Yataş".
+
+**And an import that produces twins now takes itself back.** A net under a mistake already
+made: the whole run is one transaction, so a check for two shops of one brand sharing a name
+costs one query at the end and loses nothing when it fires. The cause of the last outbreak is
+fixed; the next cause will be something nobody predicted either.
+
+
 ## Two shops at one doorway, and a word that does not exist
 
 Both reported from the live site, both general rather than particular.

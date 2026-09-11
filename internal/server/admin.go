@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/admin"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/google/uuid"
@@ -448,4 +449,43 @@ func (s *Server) adminReplyFeedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminNearbyStores answers "is this shop already here?" while somebody is typing a new one.
+func (s *Server) adminNearbyStores(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.adminActor(r); !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	lat, e1 := strconv.ParseFloat(r.URL.Query().Get("latitude"), 64)
+	lon, e2 := strconv.ParseFloat(r.URL.Query().Get("longitude"), 64)
+	if e1 != nil || e2 != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	items, e := s.admin.Nearby(r.Context(), r.URL.Query().Get("name"), lat, lon)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+func (s *Server) adminCreateStore(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	var body admin.NewStore
+	if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384)).Decode(&body); e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	id, e := s.admin.CreateStore(r.Context(), actor, email, body)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 201, map[string]any{"id": id})
 }

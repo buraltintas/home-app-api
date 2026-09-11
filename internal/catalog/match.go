@@ -110,6 +110,25 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// English Home and a Madame Coco in the same shopping centre are 89 m apart and share
 	// the mall's name, which is most of what a name-similarity score can see.
 	if candidate.BrandID != nil && *candidate.BrandID != brand.ID {
+		// One dealer can hold two franchises. A shop in Antalya appears in Taç's published
+		// list and in Linens's, under nearly the same company name, at the same address --
+		// it is one shop that sells both, and listing it twice is telling a visitor to
+		// choose between two doors that are the same door.
+		//
+		// What separates that from two chains sharing a mall floor is the name: the dealer
+		// carries its own name into both lists, while English Home and Madame Coco ten
+		// metres apart do not resemble each other at all. So a near, same-named shop under
+		// another brand is this shop, and the brand being imported is recorded as one it
+		// carries rather than as a second shop.
+		near := in.Latitude != nil && in.Longitude != nil && candidate.Distance <= mergeMeters
+		alike := candidate.Similarity >= mergeSimilarity || containment(CompactName(in.Name), candidate.CompactName)
+		if near && alike {
+			decision.Action = ActionUpdated
+			decision.Carried = true
+			decision.Reason = fmt.Sprintf("the same dealer %.0f m away already carries another brand (%q); recorded as carrying this one too", candidate.Distance, candidate.Name)
+			m.claim(candidate.ID)
+			return decision, nil
+		}
 		decision.Action = ActionInserted
 		decision.Reason = fmt.Sprintf("nearest comparable store belongs to another brand (%q)", candidate.Name)
 		decision.StoreID = ""

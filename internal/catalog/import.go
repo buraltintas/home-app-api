@@ -191,6 +191,27 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		}
 	}
 
+	// An import that has produced twins takes itself back.
+	//
+	// This is a net under a mistake already made and fixed: the identifier derived for a
+	// chain that publishes none used to be hashed from the name we build, so improving the
+	// naming rules changed every such shop's identity and the next run inserted the lot
+	// again -- 448 shops, in one pass, with nobody watching. The cause is gone. The net
+	// stays, because the next cause will be something nobody predicted either, and the whole
+	// run is one transaction: catching it here costs one query and loses nothing.
+	if apply {
+		var twins int
+		if e = tx.QueryRow(ctx, `
+SELECT count(*) FROM (
+  SELECT 1 FROM stores WHERE deleted_at IS NULL AND brand_id=$1
+   GROUP BY compact_name HAVING count(*)>1) x`, brand.ID).Scan(&twins); e != nil {
+			return report, e
+		}
+		if twins > 0 {
+			return report, fmt.Errorf("%s: this run would leave %d name(s) on more than one shop; rolled back", brand.Slug, twins)
+		}
+	}
+
 	if _, e = tx.Exec(ctx, `UPDATE store_import_runs SET finished_at=now(),inserted=$2,updated=$3,review=$4,skipped=$5 WHERE id=$1`,
 		runID, report.Inserted, report.Updated, report.Review, report.Skipped); e != nil {
 		return report, e
@@ -256,6 +277,19 @@ VALUES($1,$2,$3,$4,$5,$6,$7,$8,ST_SetSRID(ST_MakePoint($10,$9),4326)::geography,
 		return d, nil
 
 	case ActionUpdated:
+		// A shop that turned out to hold two franchises is recorded as carrying this brand
+		// and otherwise left exactly as it is. The chain being imported is not the authority
+		// on a dealer whose sign is somebody else's: overwriting the name and address here
+		// would make the shop flip between two chains' spellings on every import.
+		if d.Carried {
+			if _, e := tx.Exec(ctx, `INSERT INTO store_carried_brands(store_id,brand_id,source) VALUES($1,$2,'import') ON CONFLICT DO NOTHING`, d.StoreID, brand.ID); e != nil {
+				return d, e
+			}
+			if e := linkSource(ctx, tx, d.StoreID, brand, d.Raw); e != nil {
+				return d, e
+			}
+			return d, nil
+		}
 		// The brand is the authority on its own shop's address, telephone and position, so
 		// those are replaced. The name is only replaced when the row we hold is unverified:
 		// an administrator who corrected a sign should not be overruled by a locator.
