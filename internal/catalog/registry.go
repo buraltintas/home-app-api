@@ -123,6 +123,12 @@ ORDER BY tier, slug`, slug)
 // what exists, and the work still to do is part of what it lists.
 func SourceFor(spec BrandSpec, fetcher *Fetcher) (Source, bool, error) {
 	switch spec.LocatorKind {
+	case "html":
+		locator, e := NewHTMLLocator(spec, fetcher)
+		if e != nil {
+			return nil, false, e
+		}
+		return locator, true, nil
 	case "json":
 		source, e := NewJSONLocator(spec, fetcher)
 		if e != nil {

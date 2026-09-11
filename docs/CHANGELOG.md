@@ -6,6 +6,27 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A locator that reads a page, and a store that says where its point came from
+
+Some chains publish no endpoint at all. Özdilek prints its whole network into its own
+markup -- 155 shops, each with a name, an address and a telephone -- and that list is as
+complete as any JSON one. `kind: html` reads it: a pattern that isolates one shop's block,
+and a pattern per field matched inside that block.
+
+The configuration is regular expressions rather than CSS selectors on purpose. A selector
+library is a second parser with its own opinions about broken markup, and these pages are
+broken in ways nobody has catalogued; a pattern is checked by looking at what it actually
+produced.
+
+What such a page usually lacks is a coordinate, and that is the part worth being careful
+about. Every one of those 155 shops is placed at the centre of the town its address names:
+a few kilometres out rather than absent, which is the right trade -- but only if it is
+visible. A catalogue that sorts results by distance and cannot say which of its distances
+are measured and which are inferred is quietly lying to whoever reads it. The importer had
+been deciding this per row all along and writing the reason into its run record, where
+nothing on the request path could see it. `stores.location_from` puts it on the store.
+
+
 ## Three more chains, and a name that says what a shop is rather than how it is filed
 
 Tepe Home, Yataş Bedding and Enza Home. Fourteen brands in the catalogue now, and 4,884

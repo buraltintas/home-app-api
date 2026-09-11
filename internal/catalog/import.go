@@ -225,10 +225,10 @@ func (i *Importer) apply(ctx context.Context, tx pgx.Tx, brand BrandSpec, d Deci
 			return d, nil
 		}
 		if _, e := tx.Exec(ctx, `
-INSERT INTO stores(id,name,slug,brand_name,brand_id,address,city,district,location,phone,website,compact_name,source_kind,data_verified_at,is_catalog_store)
-VALUES($1,$2,$3,$4,$5,$6,$7,$8,ST_SetSRID(ST_MakePoint($10,$9),4326)::geography,nullif($11,''),nullif($12,''),$13,'brand_locator',now(),true)`,
+INSERT INTO stores(id,name,slug,brand_name,brand_id,address,city,district,location,phone,website,compact_name,source_kind,data_verified_at,is_catalog_store,location_from)
+VALUES($1,$2,$3,$4,$5,$6,$7,$8,ST_SetSRID(ST_MakePoint($10,$9),4326)::geography,nullif($11,''),nullif($12,''),$13,'brand_locator',now(),true,$14)`,
 			id, d.Raw.Name, storeSlug(d.Raw.Name, id), brand.Name, brand.ID, d.Raw.Address, d.Raw.City, d.Raw.District,
-			*d.Raw.Latitude, *d.Raw.Longitude, d.Raw.Phone, firstNonEmpty(d.Raw.Website, brand.Website), CompactName(d.Raw.Name)); e != nil {
+			*d.Raw.Latitude, *d.Raw.Longitude, d.Raw.Phone, firstNonEmpty(d.Raw.Website, brand.Website), CompactName(d.Raw.Name), d.Raw.PointFrom); e != nil {
 			return d, e
 		}
 		if _, e := tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1)`, id); e != nil {
@@ -257,6 +257,7 @@ UPDATE stores SET
   city=coalesce(nullif($7,''),city),
   district=coalesce(nullif($8,''),district),
   location=CASE WHEN $9::float8 IS NULL THEN location ELSE ST_SetSRID(ST_MakePoint($10,$9),4326)::geography END,
+  location_from=CASE WHEN $9::float8 IS NULL THEN location_from ELSE $13 END,
   phone=coalesce(nullif($11,''),phone),
   website=coalesce(nullif($12,''),website),
   source_kind='brand_locator',
@@ -265,7 +266,7 @@ UPDATE stores SET
   updated_at=now()
 WHERE id=$1`,
 			d.StoreID, d.Raw.Name, CompactName(d.Raw.Name), brand.Name, brand.ID, d.Raw.Address, d.Raw.City, d.Raw.District,
-			d.Raw.Latitude, d.Raw.Longitude, d.Raw.Phone, firstNonEmpty(d.Raw.Website, brand.Website)); e != nil {
+			d.Raw.Latitude, d.Raw.Longitude, d.Raw.Phone, firstNonEmpty(d.Raw.Website, brand.Website), d.Raw.PointFrom); e != nil {
 			return d, e
 		}
 		if e := linkCategories(ctx, tx, d.StoreID, brand.CategoryProfile); e != nil {

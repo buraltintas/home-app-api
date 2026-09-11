@@ -269,9 +269,21 @@ brands:
     name: Özdilek Home
     website: https://www.ozdilek.com.tr
     tier: 1
-    categories: [home_textile, bedding, decoration, tableware]
-    store_count_estimate: 120
-    locator: {kind: none}
+    categories: [home_textile, bedding, decoration, kitchenware]
+    store_count_estimate: 150
+    locator:
+      kind: html
+      # Özdilek renders its list into the page with no endpoint behind it: name, address and
+      # telephone per shop, and no coordinate -- so each shop is placed at the centre of the
+      # town its address names, and the row records that that is where the point came from.
+      urls:
+        - https://www.ozdilek.com.tr/tr/ev-tekstili-magazalari
+        - https://www.ozdilek.com.tr/tr/departman-magazalar
+      row: '(?s)<li class="merkezz">(.*?)</ul>'
+      id: 'href="/tr/[^"]*/([a-z0-9-]+)"'
+      name: 'title="[^"]*">([^<]+)</a>'
+      address: '(?s)<li class="mbd">([^<]+)</li>'
+      phone: '(?s)tel:[0-9]+"[^>]*></a>([^<]+)'
 
   - slug: mudo-concept
     name: Mudo Concept
