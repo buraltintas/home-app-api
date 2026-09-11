@@ -468,6 +468,15 @@ func uniqueWords(name string) map[string]bool {
 // ASCII I is repaired only when that same brand writes the same word with İ somewhere else.
 // Nobody writes Kırşehir with an İ, so nothing invents one; Bellona writes MOBİLYA on most
 // of its rows, so the handful spelled MOBILYA are corrected to match.
+//
+// Both halves of that scope are load-bearing, and widening either was measured and rejected:
+//
+//   - Only shouted words. The ambiguity comes from a capital-I key; a name already written
+//     in ordinary case carries the dot or does not, and is not ours to second-guess.
+//   - Only this brand's own list. Taking evidence from the whole catalogue turns "halı" into
+//     "hali" -- 156 rows somewhere spell it that way -- and "satış" into "satiş" and "aydın"
+//     into "aydin". A hundred and seventy-eight such "corrections" were on offer and most of
+//     them were wrong.
 func Spellings(names []string) map[string]string {
 	definite := map[string]bool{}
 	ambiguous := map[string]bool{}
