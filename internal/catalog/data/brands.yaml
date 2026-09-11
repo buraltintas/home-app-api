@@ -155,7 +155,7 @@ brands:
 
   - slug: tepe-home
     name: Tepe Home
-    website: https://www.tepehome.com
+    website: https://www.tepehome.com.tr
     tier: 1
     categories: [furniture, decoration, home_textile, home_accessories]
     store_count_estimate: 40
@@ -163,7 +163,7 @@ brands:
 
   - slug: ozdilek-home
     name: Özdilek Home
-    website: https://www.ozdilekteknoloji.com
+    website: https://www.ozdilek.com.tr
     tier: 1
     categories: [home_textile, bedding, decoration, tableware]
     store_count_estimate: 120
@@ -205,7 +205,7 @@ brands:
 
   - slug: tac
     name: Taç
-    website: https://www.tacshop.com
+    website: https://www.tac.com.tr
     tier: 1
     categories: [home_textile, bedding, curtain]
     store_count_estimate: 200

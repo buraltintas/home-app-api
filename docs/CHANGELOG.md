@@ -6,6 +6,28 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A chain's own mark, instead of a photograph we have to buy
+
+Store imagery stops being something purchased per store and becomes one file per chain --
+the model Trustpilot uses, and the one that survives Google leaving.
+
+- A brand mark is public, identifies the brand, and does not change, so it is not user
+  media: no owner row, no signed URL, no storage bill. `cmd/brand-logos` collects them
+  through the same robots-respecting fetcher an import uses, and they are committed beside
+  the web application's other static assets. Nineteen of thirty-five brands have one; the
+  rest either publish no usable mark or do not answer us, and their stores keep the initial
+  letter they already showed.
+- The photo a store shows is now: an administrator's upload, then its chain's mark, then a
+  provider photograph for as long as we still hold one.
+- A mark is drawn contained on a plain ground rather than cropped to fill, because a logo
+  rendered like a photograph reads as a mistake.
+- **The tool's output has to be looked at.** A site's markup is not always honest about
+  which image is its mark: English Home's first image whose path says "logo" is a
+  photograph of a phone, and the one beside it is a pair of app-store badges. Size and
+  shape tests throw out favicons and banners -- twenty of the first pass were 32-pixel
+  icons -- and a wrong-but-plausible picture still gets through. English Home therefore has
+  no mark; a screenshot would have been worse than none.
+
 ## Three more chains, and four things a brand's own list gets wrong about itself
 
 Madame Coco (673 shops) and Mudo Concept (73) join English Home (305): **1,051 verified

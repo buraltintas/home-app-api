@@ -185,7 +185,10 @@ type Result struct {
 	// "Nevresim takımı" in the results and "Yatak" on its own page.
 	CategoryLabels []string  `json:"category_labels,omitempty"`
 	Platform       *Platform `json:"platform,omitempty"`
-	Google         *External `json:"google,omitempty"`
+	// The chain this shop belongs to, when it belongs to one. It is what lets a result
+	// card show the brand's own mark instead of a letter.
+	BrandSlug string    `json:"brand_slug,omitempty"`
+	Google    *External `json:"google,omitempty"`
 	// Paid placement. The client must label it: promotion that cannot be told apart from
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
@@ -747,7 +750,7 @@ func containsAny(s string, terms ...string) bool {
 }
 func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, BrandSlug: x.BrandSlug, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {
