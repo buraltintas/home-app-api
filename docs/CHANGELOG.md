@@ -6,6 +6,40 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Google is gone
+
+The provider this product was built on top of no longer answers any request it makes.
+
+- **Deleted:** the Places client, the sufficiency gate, the shadow sampler, `providerSearch`
+  and the merge that folded provider results into ours, `materializePlaces` and the
+  on-the-fly store imports, the lazy Place Details purchase on every store page, the photo
+  proxy, `/v1/stores/resolve-external`, and the five commands that existed only to buy
+  Place Details. With them went `GOOGLE_PLACES_API_KEY` and every `SEARCH_GATE_*` setting.
+- **1,206 provider rows deleted. No store row was.** A review, a favourite and a rating
+  belong to the shop, not to whoever first told us the shop existed; a catalogue that forgot
+  the shop would take what people wrote with it. Those stores are marked unverified: still
+  listed, still searchable, ranked behind anything a brand's own list confirms.
+- The store photo is now an administrator's upload or the chain's own mark. There is no
+  third source, and nothing on a store page is purchased.
+- Opening hours are not published in the structured data any more. They came from the
+  provider, and inventing them would be worse than their absence; the importer will supply
+  them again from the chains themselves.
+- A store page fetched its store twice per view -- once for the page, once for its metadata.
+  Wrapped in React's request cache, so once.
+
+**Reviews no longer require proof of being there.** Distance decides whether the review
+carries the "verified visit" badge, not whether somebody may write one. Requiring proof made
+the badge meaningful and the review rare: the only people who could write one were standing
+in the shop with the site open, and a directory of empty stores proves nothing either.
+Verified reviews are marked and sorted first, so the claim the badge makes is exactly as
+strong as it was. A review written without a location has an *unknown* distance, which the
+column now allows: zero would claim its writer stood in the shop.
+
+**The published documents changed with it**, because they said store data comes from Google
+Places and that a location-verified visitor is the only kind who may review. Both were true
+this morning. The KVKK transfer table and the privacy policy's recipients table each lost a
+foreign recipient, which is a reduction in what we declare rather than an addition.
+
 ## A chain's own mark, instead of a photograph we have to buy
 
 Store imagery stops being something purchased per store and becomes one file per chain --
