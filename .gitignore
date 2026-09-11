@@ -1,5 +1,11 @@
 .env
 bin/
+# Compiled command binaries. `go build ./cmd/x` drops one in the repository root, and one
+# of them has already been committed by accident.
+/catalog
+/build-locations
+/seed-locations
+/normalize-legacy
 coverage.out
 *.log
 .DS_Store
