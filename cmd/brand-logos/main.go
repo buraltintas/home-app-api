@@ -54,13 +54,20 @@ var logoPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*apple-touch-icon[^"'>\s]*`) + `[^>]*href=` + capture),
 	regexp.MustCompile(`(?is)<link[^>]+href=` + capture + `[^>]*rel=` + attr(`[^"'>\s]*apple-touch-icon[^"'>\s]*`)),
 	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*icon[^"'>\s]*`) + `[^>]*href=` + attr(`([^"'>\s]+\.svg[^"'>\s]*)`)),
+	// The masthead image the page itself calls a logo comes before the generic icons. A
+	// favicon is a mark of sorts and passes every test here, so left later in the list it
+	// wins over the real wordmark sitting further down the page -- Mondi's favicon beat its
+	// own sign that way. A page holds several images whose path says "logo" and only some
+	// are the brand, which is why every candidate is tried in turn and why the output of
+	// this tool is looked at.
+	regexp.MustCompile(`(?is)<img[^>]+alt=` + attr(`[^"'>]*logo[^"'>]*`) + `[^>]*(?:src|data-src)=` + capture),
+	// The same tag written the other way round. Attribute order is the author's choice and
+	// half of them put src first; assuming one order made this pattern miss Mondi's own
+	// sign and settle for a dealer's logo further up the page.
+	regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src)=` + capture + `[^>]*alt=` + attr(`[^"'>]*logo[^"'>]*`)),
+	regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src)=` + attr(`([^"'>\s]*logo[^"'>\s]*)`)),
 	regexp.MustCompile(`(?is)<meta[^>]+property=` + attr(`og:image`) + `[^>]*content=` + capture),
 	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*icon[^"'>\s]*`) + `[^>]*href=` + capture),
-	// The mark in the masthead, last: a page holds many images whose path says "logo" and
-	// only some of them are the brand. English Home's first such image is a photograph of
-	// a phone, which is how this tool came to need an eye on its output.
-	regexp.MustCompile(`(?is)<img[^>]+alt=` + attr(`[^"'>]*logo[^"'>]*`) + `[^>]*(?:src|data-src)=` + capture),
-	regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src)=` + attr(`([^"'>\s]*logo[^"'>\s]*)`)),
 }
 
 // attr wraps an attribute value so the pattern matches it quoted with either quote or not
@@ -309,15 +316,21 @@ func mastheadSVG(html string) string {
 // its width and height otherwise.
 func svgSize(svg string) (longest, shortest float64) {
 	var w, h float64
-	if box := viewBox.FindStringSubmatch(svg); box != nil {
-		w, h = number(box[3]), number(box[4])
+	// What the page draws it at, when it says. A drawing rendered at seventeen pixels is an
+	// interface icon whatever its internal coordinate system claims -- Mondi's page carries
+	// one whose viewBox is 308 square and whose width attribute is 17px, and reading the
+	// viewBox alone took it for a wordmark.
+	if m := svgWidth.FindStringSubmatch(svg); m != nil {
+		w = number(m[1])
 	}
+	if m := svgHeight.FindStringSubmatch(svg); m != nil {
+		h = number(m[1])
+	}
+	// Otherwise the coordinate system is all there is, and for a drawing with no declared
+	// size it is what a browser scales to.
 	if w == 0 || h == 0 {
-		if m := svgWidth.FindStringSubmatch(svg); m != nil {
-			w = number(m[1])
-		}
-		if m := svgHeight.FindStringSubmatch(svg); m != nil {
-			h = number(m[1])
+		if box := viewBox.FindStringSubmatch(svg); box != nil {
+			w, h = number(box[3]), number(box[4])
 		}
 	}
 	if w == 0 || h == 0 {
