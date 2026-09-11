@@ -32,6 +32,8 @@ type Service struct {
 	attributionWindow time.Duration
 	visitorTTL        time.Duration
 	now               func() time.Time
+	// What we know about our own catalogue, so the model is not asked about it.
+	lex *lexicon
 }
 
 // Turkish letters are folded to their Latin base rather than dropped. Without this,
@@ -134,7 +136,7 @@ func clamp(v string) string {
 }
 
 func NewService(db *pgxpool.Pool, stores *storepkg.Service, ai IntentParser, model string, decimals int, report *reporting.Service, attribution, visitorTTL time.Duration) *Service {
-	return &Service{db: db, stores: stores, ai: ai, model: model, locationDecimals: decimals, report: report, attributionWindow: attribution, visitorTTL: visitorTTL, now: time.Now}
+	return &Service{db: db, stores: stores, ai: ai, model: model, locationDecimals: decimals, report: report, attributionWindow: attribution, visitorTTL: visitorTTL, now: time.Now, lex: newLexicon(db)}
 }
 func (s *Service) Search(ctx context.Context, user, visitor *uuid.UUID, in Request) (Response, error) {
 	started := time.Now()
@@ -176,12 +178,21 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// decision about a trade we do not carry, while "out of scope" from the model is often
 	// just an address it could not read as a request.
 	vetoed := intent.Scope == ScopeOutOfScope
+	// Our own chains and product words, before anybody's model. "english home" is two
+	// English words to a language model and a shop to us; "gardırop" is a wardrobe whether
+	// or not a sign says so.
+	intent = s.lex.enrich(ctx, intent, in.Query)
 	aiUsed := false
 	fallback := ""
 	// Deterministic out-of-scope matches are deliberate vetoes (for example warehouse,
 	// tire shop or a service business). Asking the model to reinterpret them both costs a
 	// request and used to let a broad home-living answer put the excluded trade back.
-	if s.ai != nil && intent.Scope != ScopeOutOfScope {
+	// The model is asked only about queries we cannot place ourselves. It used to be asked
+	// about all of them, including "perde" and "yatak", which it answered with a non-home
+	// scope and search terms still filled in -- a shape that fails validation, so those
+	// searches paid about three seconds for an answer that was then thrown away in favour
+	// of the deterministic one they already had.
+	if s.ai != nil && !confident(intent) {
 		enriched, e := s.ai.ParseSearchIntent(ctx, in.Query, Context{in.Latitude, in.Longitude, requestLocale})
 		invalid := false
 		if e == nil {

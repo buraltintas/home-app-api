@@ -6,6 +6,39 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Search asks the model only what it cannot answer itself
+
+Every search made an OpenAI call, and the latency of a search was mostly that call. Worse,
+it was often paid for nothing. Measured against the live parser: `perde` and `yatak` -- the
+two most ordinary searches this product gets -- came back from the model with a non-home
+scope *and* search terms still filled in, a shape `Validate` rejects, so those searches
+waited about three seconds, recorded `fallback=ai_unavailable`, and then used the
+deterministic answer they had held all along. `english home` came back as `out_of_scope`,
+which as a reading of two English words is not wrong; only the name-rescue path downstream
+saved it.
+
+The order is now inverted. `internal/search/lexicon.go` holds what this product knows about
+its own catalogue -- the chains in `brands` and the product words in `product_terms`, both
+refreshed every ten minutes -- and consults it after the deterministic parser. A query that
+names one of our chains resolves to that chain; a query containing a product word resolves
+to that word's category, longest match first so `yemek takımı` is tableware rather than
+furniture by way of `yemek masası`. The model is then called only when neither pass placed
+the query. It never overturns a refusal, and never rewrites categories the parser already
+chose.
+
+Against the live catalogue, every one of `perde`, `yatak`, `halı`, `gardırop`, `avize`,
+`şifonyer`, `yemek masası`, `nevresim takımı`, `english home`, `madame coco` and
+`mudo concept` is now answered without a model call. `merhaba` and `arkadaşıma hediye`
+still reach it, which is what it is for.
+
+`migrations/000027_product_terms_seed` seeds about eighty-eight Turkish product words with
+`source='seed'`, so the table is useful before anybody has typed into it. Admin and user
+entries land beside them and are distinguishable by that column.
+
+An intent cache was planned alongside this and deliberately not built. Its value was in the
+repeated queries -- and those are exactly the ones that no longer reach the model at all.
+What remains is the long tail, where a cache mostly buys a write per search.
+
 ## Google is gone
 
 The provider this product was built on top of no longer answers any request it makes.
