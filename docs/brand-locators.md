@@ -30,6 +30,8 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 | Tepe Home | 16 | rendered into the page as preloaded state |
 | Yataş Bedding | 42 | SAP Commerce OCC, filtered by the chain's own code |
 | Enza Home | 60 | same list as Yataş Bedding, other code |
+| Özdilek Home | 155 | rendered as markup, no coordinates published |
+| IKEA | 10 | rendered as markup, points in data attributes |
 
 **Look for the shared one first.** Three mappings covered seven brands: Bellona, İstikbal
 and Mondi are all Erciyes Holding; Doğtaş and Kelebek share a dealer panel; Linens and Taç
@@ -42,9 +44,27 @@ a third-party host before assuming the chain runs its own endpoint.
 scripts, or sits at a path the probe does not guess. These need a person to watch the
 network panel once.
 
-Çilek · Koçtaş · IKEA · Özdilek Home · Boyner Ev (its locator is a
-single-page application; every path answers with the same 527 KB shell) · Chakra ·
-Paşabahçe · Enza Home · Alfemo · Nurus · Merinos · Dinarsu · Emsan · Korkmaz
+Chakra · Alfemo · Nurus · Merinos · Dinarsu · Emsan · Korkmaz
+
+**Tier 1, each for its own reason.** These are the ones left, and none of them is "could
+not find it":
+
+- **Koçtaş** — the site is behind Akamai bot protection and the locator is a three-step
+  form (province, town, district) with no endpoint that answers for a whole province. A
+  person can map it; a fetcher that respects bot protection cannot.
+- **Çilek** — the endpoint its own page calls, `store.cilek.com/location/getstates`, answers
+  with an empty array to us and to a browser alike. Their locator appears to be broken;
+  worth another look later rather than working around.
+- **Vivense** — its showroom page publishes a hundred points and no names: `{"No":301,
+  "lat":…, "lng":…}`. A shop with no name is not a catalogue row, and the names are fetched
+  per marker on click.
+- **Deco Home** — `decohome.com.tr` does not resolve at all. Someone has to find where the
+  chain publishes now.
+- **Boyner Ev** — removed from the registry deliberately, with the reason recorded there:
+  it is a department inside Boyner's department stores, not a store network. Importing
+  those branches would fill a home and living catalogue with clothing shops.
+- **Paşabahçe** — its store API (`/api/client/address/retail_store/`) answers 403 to us;
+  Cloudflare is refusing non-browser clients regardless of what robots.txt says.
 
 **Published inside the page, not behind an endpoint.** Karaca Home and Tepe Home render
 their store lists into the HTML. Both are mapped now, through `extract` and `extract_after`

@@ -6,6 +6,28 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Tier one, as far as it goes: IKEA and Özdilek in, four out with reasons
+
+Fifteen of the twenty largest chains are now in the catalogue -- 5,048 stores -- and the
+five that are not each have a reason recorded in `docs/brand-locators.md` rather than the
+word "unmapped". Koçtaş is behind bot protection with a three-step form; Çilek's own
+endpoint answers empty to browser and fetcher alike; Vivense publishes a hundred points and
+no names, and a shop with no name is not a catalogue row; Deco Home's domain does not
+resolve; Paşabahçe's store API refuses non-browser clients.
+
+**Boyner Ev was removed on purpose**, and the registry now records that kind of decision
+instead of losing it. "Boyner Ev" is a department inside Boyner's department stores, not a
+store network; importing those branches would fill a home and living catalogue with clothing
+shops, which is what the apparel filter exists to prevent. A deleted entry would have lost
+the reasoning and invited the next person to add it back, so `active: false` with the reason
+beside it is the honest record.
+
+One defect came out of IKEA: Turkish pages write a decimal separator as a comma, and IKEA
+publishes `data-latitude="39,89"`. The HTML locator's number reader split on the comma and
+produced 39 -- a point in the Mediterranean, several hundred kilometres from Ankara. The
+JSON side had handled this since English Home; the HTML side, being newer, had not.
+
+
 ## A locator that reads a page, and a store that says where its point came from
 
 Some chains publish no endpoint at all. Özdilek prints its whole network into its own

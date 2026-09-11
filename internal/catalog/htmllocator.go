@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -163,12 +164,19 @@ func stripTags(value string) string {
 	return html.UnescapeString(tags.ReplaceAllString(value, " "))
 }
 
+// decimal reads one coordinate from an attribute. Turkish pages write the decimal
+// separator as a comma -- IKEA publishes data-latitude="39,89" -- so a parser that only
+// knows the point reads that as the integer 39, which is in the Mediterranean.
 func decimal(value string) *float64 {
+	value = strings.TrimSpace(strings.ReplaceAll(value, ",", "."))
 	if value == "" {
 		return nil
 	}
-	first, _ := pair(value + ",0")
-	return first
+	parsed, e := strconv.ParseFloat(value, 64)
+	if e != nil {
+		return nil
+	}
+	return &parsed
 }
 
 func mustJSON(value string) []byte {

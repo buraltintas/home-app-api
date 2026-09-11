@@ -232,9 +232,18 @@ brands:
     name: IKEA
     website: https://www.ikea.com.tr
     tier: 1
-    categories: [furniture, decoration, kitchenware, home_textile, lighting, storage]
+    categories: [furniture, decoration, kitchenware, home_textile, lighting, bedding]
     store_count_estimate: 12
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Each location is a block on one page, carrying its point in data attributes with a
+      # comma for the decimal separator, which is how these are written in Turkish.
+      url: https://www.ikea.com.tr/magazalar
+      row: '(?s)<div class="malls-city-item"(.*?)</div>'
+      id: 'href="/magazalar/([a-z0-9-]+)"'
+      name: '<h4><a[^>]*>([^<]+)</a>'
+      latitude: 'data-latitude="([0-9.,]+)"'
+      longitude: 'data-longitude="([0-9.,]+)"'
 
   - slug: koctas
     name: Koçtaş
@@ -368,6 +377,10 @@ brands:
     locator: {kind: none}
 
   - slug: boyner-ev
+    # Not a store network of its own: "Boyner Ev" is a department inside Boyner's
+    # department stores. Importing their branches would fill a home and living catalogue
+    # with clothing shops, which is what the apparel filter exists to prevent.
+    active: false
     name: Boyner Ev
     website: https://www.boyner.com.tr
     tier: 1

@@ -21,7 +21,12 @@ type registryEntry struct {
 	Tier       int      `yaml:"tier"`
 	Categories []string `yaml:"categories"`
 	Estimate   int      `yaml:"store_count_estimate"`
-	Locator    struct {
+	// Inactive is how the registry records a brand we have decided not to carry, with the
+	// reason beside it. Deleting the entry would lose that reason and invite the next
+	// person to add it back; the registry is meant to list what we decided as well as what
+	// we import. Absent means active, so every existing entry keeps its meaning.
+	Inactive *bool `yaml:"active"`
+	Locator  struct {
 		Kind string `yaml:"kind"`
 		// Everything else in the block is the locator's own configuration, kept as
 		// written so that adding a field to JSONLocatorConfig needs no change here.
@@ -72,8 +77,8 @@ func LoadRegistry(ctx context.Context, db *pgxpool.Pool) (int, error) {
 			estimate = entry.Estimate
 		}
 		if _, e = tx.Exec(ctx, `
-INSERT INTO brands(slug,name,website,tier,locator_kind,locator_config,category_profile,store_count_estimate)
-VALUES($1,$2,nullif($3,''),$4,$5,$6,$7,$8)
+INSERT INTO brands(slug,name,website,tier,locator_kind,locator_config,category_profile,store_count_estimate,active)
+VALUES($1,$2,nullif($3,''),$4,$5,$6,$7,$8,$9)
 ON CONFLICT(slug) DO UPDATE SET
   name=EXCLUDED.name,
   website=coalesce(EXCLUDED.website,brands.website),
@@ -82,8 +87,9 @@ ON CONFLICT(slug) DO UPDATE SET
   locator_config=EXCLUDED.locator_config,
   category_profile=EXCLUDED.category_profile,
   store_count_estimate=coalesce(EXCLUDED.store_count_estimate,brands.store_count_estimate),
+  active=EXCLUDED.active,
   updated_at=now()`,
-			entry.Slug, entry.Name, entry.Website, tier, kind, config, entry.Categories, estimate); e != nil {
+			entry.Slug, entry.Name, entry.Website, tier, kind, config, entry.Categories, estimate, entry.Inactive == nil || *entry.Inactive); e != nil {
 			return 0, fmt.Errorf("brand %s: %w", entry.Slug, e)
 		}
 	}
