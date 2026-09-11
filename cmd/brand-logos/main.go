@@ -31,6 +31,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,26 +43,48 @@ import (
 // Where a site says its own mark is, most trustworthy first. An apple-touch-icon is
 // deliberately square and large; og:image is often a marketing banner rather than a mark,
 // so it comes last.
+// Where a site says its own mark is, most trustworthy first. An apple-touch-icon is
+// deliberately square and large; og:image is often a marketing banner rather than a mark,
+// so it comes last.
+//
+// Every attribute here tolerates its value being unquoted. Minified markup drops the quotes
+// -- Merinos serves its whole page that way -- and a pattern that insists on them reports
+// "no usable mark" for a page whose mark is plainly in the source.
 var logoPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?is)<link[^>]+rel=["'][^"']*apple-touch-icon[^"']*["'][^>]*href=["']([^"']+)["']`),
-	regexp.MustCompile(`(?is)<link[^>]+href=["']([^"']+)["'][^>]*rel=["'][^"']*apple-touch-icon[^"']*["']`),
-	regexp.MustCompile(`(?is)<link[^>]+rel=["'][^"']*icon[^"']*["'][^>]*href=["']([^"']+\.svg[^"']*)["']`),
-	regexp.MustCompile(`(?is)<meta[^>]+property=["']og:image["'][^>]*content=["']([^"']+)["']`),
-	regexp.MustCompile(`(?is)<link[^>]+rel=["'][^"']*icon[^"']*["'][^>]*href=["']([^"']+)["']`),
+	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*apple-touch-icon[^"'>\s]*`) + `[^>]*href=` + capture),
+	regexp.MustCompile(`(?is)<link[^>]+href=` + capture + `[^>]*rel=` + attr(`[^"'>\s]*apple-touch-icon[^"'>\s]*`)),
+	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*icon[^"'>\s]*`) + `[^>]*href=` + attr(`([^"'>\s]+\.svg[^"'>\s]*)`)),
+	regexp.MustCompile(`(?is)<meta[^>]+property=` + attr(`og:image`) + `[^>]*content=` + capture),
+	regexp.MustCompile(`(?is)<link[^>]+rel=` + attr(`[^"'>\s]*icon[^"'>\s]*`) + `[^>]*href=` + capture),
 	// The mark in the masthead, last: a page holds many images whose path says "logo" and
 	// only some of them are the brand. English Home's first such image is a photograph of
 	// a phone, which is how this tool came to need an eye on its output.
-	regexp.MustCompile(`(?is)<img[^>]+alt=["'][^"']*logo[^"']*["'][^>]*(?:src|data-src)=["']([^"']+)["']`),
-	regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src)=["']([^"']*logo[^"']*)["']`),
+	regexp.MustCompile(`(?is)<img[^>]+alt=` + attr(`[^"'>]*logo[^"'>]*`) + `[^>]*(?:src|data-src)=` + capture),
+	regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src)=` + attr(`([^"'>\s]*logo[^"'>\s]*)`)),
 }
 
-// Below this a mark is a favicon, not a logo: a store card draws it at 48 points, and a
-// 32-pixel image there is a smudge.
-const minLogoPixels = 96
+// attr wraps an attribute value so the pattern matches it quoted with either quote or not
+// quoted at all.
+func attr(value string) string { return `(?:"` + value + `"|'` + value + `'|` + value + `)` }
 
-// A wordmark is wide; a banner is wider. Four to one keeps "MADAME COCO" and rejects a
-// hero image.
-const maxLogoRatio = 4.0
+// capture is attr for the one value each pattern returns.
+const capture = `(?:"([^"]+)"|'([^']+)'|([^"'>\s]+))`
+
+// What separates a mark from a favicon is size, and what a store card needs is enough
+// pixels along the longest edge to draw at 48 points. Requiring both edges to clear a
+// threshold was the mistake: a wordmark is short. Doğtaş publishes its mark at 156x52 and
+// Bellona at 468x72, and both were thrown away for being 52 and 72 pixels tall -- between
+// them nine hundred shops showed an initial instead of their sign.
+const (
+	minLongestEdge  = 120
+	minShortestEdge = 28
+)
+
+// The ratio cap was written to reject hero images and never could: a hero is typically
+// three to one, the same shape as half the wordmarks in this trade. It is kept only to
+// throw out the genuinely absurd -- a full-width page banner -- and set where a wordmark
+// fits: Bellona's is 6.5 to one.
+const maxLogoRatio = 8.0
 
 var extensions = map[string]string{
 	"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp",
@@ -99,8 +122,21 @@ func main() {
 			missing = append(missing, brand.Slug+" (no website)")
 			continue
 		}
-		name, e := save(ctx, fetcher, brand.Website, filepath.Join(*out, brand.Slug))
-		if e != nil {
+		// The home page first, then the page whose address we already know works: a chain's
+		// store locator carries the same masthead, and for Merinos the mark is on that page
+		// and nowhere on the home page at all. Trying it costs one request we have already
+		// proven we can make.
+		var name string
+		var e error
+		for _, page := range []string{brand.Website, locatorPage(brand)} {
+			if strings.TrimSpace(page) == "" {
+				continue
+			}
+			if name, e = save(ctx, fetcher, page, filepath.Join(*out, brand.Slug)); e == nil {
+				break
+			}
+		}
+		if name == "" {
 			missing = append(missing, fmt.Sprintf("%s (%v)", brand.Slug, e))
 			continue
 		}
@@ -152,12 +188,27 @@ func save(ctx context.Context, fetcher *catalog.Fetcher, website, base string) (
 		return "", e
 	}
 	html := string(page)
-	for _, pattern := range logoPatterns {
-		match := pattern.FindStringSubmatch(html)
-		if match == nil {
-			continue
+	// A chain that draws its wordmark directly in the page has no file to fetch. English
+	// Home is one, and İstikbal and Taç turned out to be others; between them the collector
+	// reported "no usable mark" for sites whose mark was right there in the markup.
+	if svg := mastheadSVG(html); svg != "" {
+		if e = os.WriteFile(base+".svg", []byte(svg), 0o644); e != nil {
+			return "", e
 		}
-		target := absolute(website, strings.TrimSpace(match[1]))
+		return fmt.Sprintf("%-6s %5d KB  inline in the page", ".svg", len(svg)/1024), nil
+	}
+	// Every candidate of every pattern, in order, rather than the first of each. A page
+	// offers several images whose path says "logo" and the first is routinely the wrong one
+	// -- a vendor's badge, an app-store button -- and stopping at it threw away the real
+	// mark sitting two matches later.
+	var candidates []string
+	for _, pattern := range logoPatterns {
+		for _, match := range pattern.FindAllStringSubmatch(html, -1) {
+			candidates = append(candidates, firstGroup(match))
+		}
+	}
+	for _, candidate := range candidates {
+		target := absolute(website, strings.TrimSpace(candidate))
 		if target == "" {
 			continue
 		}
@@ -185,12 +236,18 @@ func save(ctx context.Context, fetcher *catalog.Fetcher, website, base string) (
 			}
 		} else if extension != ".svg" {
 			config, _, e := image.DecodeConfig(bytes.NewReader(body))
-			if e != nil || config.Width < minLogoPixels || config.Height < minLogoPixels {
+			if e != nil {
 				continue
 			}
-			// A brand mark is roughly square or a wordmark; anything much wider is a
-			// marketing banner, and a banner in a store card is not the shop's sign.
-			if ratio := float64(config.Width) / float64(config.Height); ratio > maxLogoRatio || ratio < 1/maxLogoRatio {
+			longest, shortest := config.Width, config.Height
+			if longest < shortest {
+				longest, shortest = shortest, longest
+			}
+			if longest < minLongestEdge || shortest < minShortestEdge {
+				continue
+			}
+			// Wider than this is a page banner, not a sign.
+			if float64(longest)/float64(shortest) > maxLogoRatio {
 				continue
 			}
 		}
@@ -214,6 +271,119 @@ func absolute(page, raw string) string {
 			trimmed = trimmed[:8+index]
 		}
 		return trimmed + raw
+	}
+	return ""
+}
+
+// mastheadSVG returns the first inline <svg> in the top of the document, when there is one
+// and it is small enough to be a mark rather than an illustration.
+//
+// Only the head of the page is searched: a masthead is at the top, and further down every
+// icon on the page is an <svg> too. The size bounds are what separate a wordmark from a
+// decorative drawing -- under a quarter of a kilobyte is an arrow, over forty is a scene.
+func mastheadSVG(html string) string {
+	head := html
+	if len(head) > mastheadBytes {
+		head = head[:mastheadBytes]
+	}
+	best, bestEdge := "", 0.0
+	for _, match := range inlineSVG.FindAllString(head, -1) {
+		if len(match) < minInlineSVG || len(match) > maxInlineSVG {
+			continue
+		}
+		// The drawing's own declared size is what separates a mark from an arrow. Byte
+		// length does not: the first pass of this took a 17-pixel chevron from five
+		// different chains because their markup happened to weigh a kilobyte.
+		longest, shortest := svgSize(match)
+		if longest < minInlineEdge || shortest < minInlineShortEdge || longest/shortest > maxLogoRatio {
+			continue
+		}
+		if longest > bestEdge {
+			best, bestEdge = match, longest
+		}
+	}
+	return best
+}
+
+// svgSize reads the drawing's own dimensions, from its viewBox where it has one and from
+// its width and height otherwise.
+func svgSize(svg string) (longest, shortest float64) {
+	var w, h float64
+	if box := viewBox.FindStringSubmatch(svg); box != nil {
+		w, h = number(box[3]), number(box[4])
+	}
+	if w == 0 || h == 0 {
+		if m := svgWidth.FindStringSubmatch(svg); m != nil {
+			w = number(m[1])
+		}
+		if m := svgHeight.FindStringSubmatch(svg); m != nil {
+			h = number(m[1])
+		}
+	}
+	if w == 0 || h == 0 {
+		return 0, 0
+	}
+	if w < h {
+		return h, w
+	}
+	return w, h
+}
+
+func number(v string) float64 {
+	parsed, e := strconv.ParseFloat(strings.TrimSpace(v), 64)
+	if e != nil {
+		return 0
+	}
+	return parsed
+}
+
+var (
+	viewBox   = regexp.MustCompile(`(?i)viewBox=["']\s*([0-9.eE+-]+)[ ,]+([0-9.eE+-]+)[ ,]+([0-9.eE+-]+)[ ,]+([0-9.eE+-]+)`)
+	svgWidth  = regexp.MustCompile(`(?i)<svg[^>]*\bwidth=["']?([0-9.]+)`)
+	svgHeight = regexp.MustCompile(`(?i)<svg[^>]*\bheight=["']?([0-9.]+)`)
+)
+
+var inlineSVG = regexp.MustCompile(`(?is)<svg[^>]*>.*?</svg>`)
+
+const (
+	mastheadBytes = 120 << 10
+	minInlineSVG  = 256
+	maxInlineSVG  = 40 << 10
+	// A mark is drawn at something like a wordmark's proportions; an interface icon is a
+	// small square. English Home's is 244 by 33.
+	minInlineEdge      = 60
+	minInlineShortEdge = 8
+)
+
+// locatorPage is the address this brand's store list is read from, which is a page of the
+// brand's own site and therefore carries the brand's own masthead.
+func locatorPage(brand catalog.BrandSpec) string {
+	var config struct {
+		URL  string   `json:"url"`
+		URLs []string `json:"urls"`
+	}
+	if len(brand.LocatorConfig) == 0 {
+		return ""
+	}
+	if json.Unmarshal(brand.LocatorConfig, &config) != nil {
+		return ""
+	}
+	if config.URL != "" {
+		return config.URL
+	}
+	if len(config.URLs) > 0 {
+		return config.URLs[0]
+	}
+	return ""
+}
+
+// firstGroup returns whichever of a pattern's alternative captures actually matched: the
+// value may have been double-quoted, single-quoted or bare.
+func firstGroup(match []string) string {
+	for _, group := range match[1:] {
+		if group != "" {
+			return group
+		}
 	}
 	return ""
 }

@@ -6,6 +6,47 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The mark collector was throwing away marks
+
+Forty-two percent of the catalogue -- Merinos, İstikbal, Bellona, Taç, Mondi, Doğtaş, nine
+hundred shops between the first two alone -- showed an initial where a shop's sign belongs.
+The collector reported "no usable mark on the page" for every one of them, and every one of
+those pages had its mark plainly in the source. Four separate reasons, each measured before
+it was changed:
+
+**Both edges had to clear 96 pixels.** A wordmark is short. Doğtaş publishes its mark at
+156x52 and Bellona at 468x72; both were thrown out for being 52 and 72 pixels tall. The test
+is now on the longest edge, which is what a store card actually needs.
+
+**The ratio cap was 4 and never did its job.** It was written to reject hero images, but a
+hero is typically three to one -- the same shape as half the wordmarks in this trade. It
+rejected Bellona at 6.5 to one and admitted every banner it was aimed at.
+
+**Only the first match of each pattern was tried.** A page offers several images whose path
+says "logo" and the first is routinely the wrong one: a vendor's badge, an app-store button.
+Stopping there threw away the real mark sitting two matches later.
+
+**Quoted attributes only.** Merinos serves its whole page minified, attributes unquoted, so
+a pattern insisting on quotes found nothing at all.
+
+Two capabilities were added for the same reason. A chain that draws its wordmark inline has
+no file to fetch -- English Home taught that, and İstikbal turned out to be another -- so the
+masthead's own `<svg>` is read, bounded by the drawing's declared size rather than its byte
+length: the first attempt at this collected a 17-pixel chevron from five different chains.
+And when a home page carries no mark, the brand's own store-locator page is tried, which is
+where Merinos keeps its.
+
+Coverage went from 42% of the catalogue to 95%. Mondi is what is left: its own domain does
+not resolve, and we import its shops through the group's shared API.
+
+**The importer now says when a brand has no mark**, because nothing tied "a brand was added"
+to "its mark was fetched" and that is exactly how eight brands went a day without one.
+
+**The collector is still not to be run blindly.** Loosening the patterns made it pick a
+banner for English Home and a CMS image for Madame Coco, both of which already had better
+marks on disk. It was run for the brands that had none. Look at what it writes.
+
+
 ## One dealer, two franchises, one shop
 
 A shop in Antalya appears in Taç's published list and in Linens's, under nearly the same
