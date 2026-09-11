@@ -713,3 +713,99 @@ VALUES($1,$2,$3,nullif($4,''),$5,nullif($6,''),$7,nullif($8,''),ST_SetSRID(ST_Ma
 	}
 	return id, tx.Commit(ctx)
 }
+
+// MatchQueueRow is a published shop the matcher could not place: too like an existing one to
+// ignore, too unlike it to merge on. The queue is the deliberate middle of that decision,
+// and this is what a person needs to settle it -- both shops, side by side, with the
+// distance and the resemblance that made it a question.
+type MatchQueueRow struct {
+	ID         uuid.UUID  `json:"id"`
+	Brand      string     `json:"brand"`
+	Name       string     `json:"name"`
+	Address    string     `json:"address"`
+	City       string     `json:"city"`
+	District   string     `json:"district"`
+	Reason     string     `json:"reason"`
+	Similarity float64    `json:"similarity"`
+	Distance   float64    `json:"distance_meters"`
+	CreatedAt  time.Time  `json:"created_at"`
+	MatchID    *uuid.UUID `json:"match_id"`
+	MatchName  string     `json:"match_name"`
+	MatchAddr  string     `json:"match_address"`
+	MatchKind  string     `json:"match_source_kind"`
+}
+
+// Reviews lists what is waiting, newest first.
+//
+// Only rows whose matched store still exists are worth showing: if that store has since
+// been merged away or deleted, the question the queue was holding has answered itself.
+func (s *Service) MatchQueue(ctx context.Context, limit, offset int) ([]MatchQueueRow, error) {
+	rows, e := s.db.Query(ctx, `
+SELECT r.id,coalesce(b.name,''),r.name,
+       coalesce(r.raw->>'address',''),coalesce(r.raw->>'city',''),coalesce(r.raw->>'district',''),
+       coalesce(r.reason,''),coalesce(r.similarity,0),coalesce(r.distance_meters,0),r.created_at,
+       r.matched_store_id,coalesce(m.name,''),coalesce(m.address,''),coalesce(m.source_kind,'')
+  FROM store_import_records r
+  JOIN store_import_runs run ON run.id=r.run_id
+  LEFT JOIN brands b ON b.id=run.brand_id
+  LEFT JOIN stores m ON m.id=r.matched_store_id AND m.deleted_at IS NULL
+ WHERE r.action='needs_review'
+ ORDER BY r.created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []MatchQueueRow{}
+	for rows.Next() {
+		var x MatchQueueRow
+		if e = rows.Scan(&x.ID, &x.Brand, &x.Name, &x.Address, &x.City, &x.District, &x.Reason,
+			&x.Similarity, &x.Distance, &x.CreatedAt, &x.MatchID, &x.MatchName, &x.MatchAddr, &x.MatchKind); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// ResolveReview settles one queued row.
+//
+// "merge" says the two are one shop: the existing row takes this brand's details and the
+// question is closed. "separate" says they are two, and the published row is added as its
+// own shop. Either way the record stops being a question, and the audit log says who
+// answered it -- the queue exists so that a judgement is made visibly rather than by a
+// threshold nobody can see.
+func (s *Service) ResolveReview(ctx context.Context, actor uuid.UUID, email string, id uuid.UUID, merge bool) error {
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+	var matched *uuid.UUID
+	var brand *uuid.UUID
+	var name string
+	if e = tx.QueryRow(ctx, `
+SELECT r.matched_store_id, run.brand_id, r.name FROM store_import_records r
+  JOIN store_import_runs run ON run.id=r.run_id
+ WHERE r.id=$1 AND r.action='needs_review'`, id).Scan(&matched, &brand, &name); e != nil {
+		return httpapi.E(404, "REVIEW_NOT_FOUND", "This row is not waiting for a decision")
+	}
+	action := "skipped"
+	if merge {
+		if matched == nil {
+			return httpapi.E(409, "NOTHING_TO_MERGE", "This row has no matching store to merge into")
+		}
+		// The shop is this brand's after all. Its own details are not overwritten here --
+		// the next import of this brand will do that, now that the rows are tied together.
+		if _, e = tx.Exec(ctx, `UPDATE stores SET brand_id=coalesce(brand_id,$2),source_kind='brand_locator',data_verified_at=now(),updated_at=now() WHERE id=$1`, *matched, brand); e != nil {
+			return e
+		}
+		action = "updated"
+	}
+	if _, e = tx.Exec(ctx, `UPDATE store_import_records SET action=$2, reason=coalesce(reason,'')||' | settled by an operator' WHERE id=$1`, id, action); e != nil {
+		return e
+	}
+	if e = record(ctx, tx, actor, email, "catalog.review", "import_record", id, map[string]any{"merge": merge, "name": name}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}

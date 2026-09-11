@@ -155,6 +155,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Post("/feedback/{id}/status", s.adminSetFeedbackStatus)
 			r.Post("/feedback/{id}/reply", s.adminReplyFeedback)
 			r.Get("/categories", s.adminCategories)
+			r.Get("/match-queue", s.adminMatchQueue)
+			r.Post("/match-queue/{id}", s.adminResolveMatch)
 			r.Get("/stores/nearby", s.adminNearbyStores)
 			r.Post("/stores", s.adminCreateStore)
 			r.Post("/stores/{id}/premium", s.adminSetPremium)

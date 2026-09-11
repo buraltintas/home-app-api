@@ -489,3 +489,43 @@ func (s *Server) adminCreateStore(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, 201, map[string]any{"id": id})
 }
+
+// adminMatchQueue lists the rows the matcher parked for a person.
+func (s *Server) adminMatchQueue(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.adminActor(r); !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	limit, offset := adminPage(r)
+	items, e := s.admin.MatchQueue(r.Context(), limit, offset)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+func (s *Server) adminResolveMatch(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var body struct {
+		Merge bool `json:"merge"`
+	}
+	if e := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if e := s.admin.ResolveReview(r.Context(), actor, email, id, body.Merge); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"id": id, "merged": body.Merge})
+}
