@@ -64,6 +64,11 @@ type JSONLocatorConfig struct {
 		Body   string `json:"body"`
 		List   string `json:"list"`
 		Field  string `json:"field"`
+		// Label is the readable half of whatever Field identifies -- the province's name
+		// beside its id. A publisher that answers per province often leaves the province
+		// off the rows themselves, having just been asked for it; the question we asked is
+		// part of the answer, and this carries it back onto the row.
+		Label string `json:"label"`
 	} `json:"over"`
 	Pages int `json:"pages"`
 	// Extract pulls the store data out of a page that is not itself JSON. Plenty of chains
@@ -179,11 +184,11 @@ func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
 	return out, nil
 }
 
-// request is one address and the body sent with it.
-type request struct{ url, body string }
+// request is one address, the body sent with it, and what that question was about.
+type request struct{ url, body, label string }
 
 func (r request) fill(token, value string) request {
-	return request{strings.ReplaceAll(r.url, token, value), strings.ReplaceAll(r.body, token, value)}
+	return request{strings.ReplaceAll(r.url, token, value), strings.ReplaceAll(r.body, token, value), r.label}
 }
 
 // expand resolves "{over}" by asking the publisher what values exist.
@@ -204,7 +209,8 @@ func (l *JSONLocator) expand(ctx context.Context, requests []request) ([]request
 	if e != nil {
 		return nil, fmt.Errorf("%s: listing what to iterate: %w", l.spec.Slug, e)
 	}
-	var values []string
+	type step struct{ value, label string }
+	var values []step
 	seen := map[string]bool{}
 	for _, item := range items {
 		object, ok := item.(map[string]any)
@@ -216,15 +222,17 @@ func (l *JSONLocator) expand(ctx context.Context, requests []request) ([]request
 			continue
 		}
 		seen[value] = true
-		values = append(values, value)
+		values = append(values, step{value, text(object, over.Label)})
 	}
 	if len(values) == 0 {
 		return nil, fmt.Errorf("%s: nothing to iterate over", l.spec.Slug)
 	}
 	out := make([]request, 0, len(requests)*len(values))
 	for _, base := range requests {
-		for _, value := range values {
-			out = append(out, base.fill("{over}", value))
+		for _, step := range values {
+			asked := base.fill("{over}", step.value)
+			asked.label = step.label
+			out = append(out, asked)
 		}
 	}
 	return out, nil
@@ -248,7 +256,7 @@ func (l *JSONLocator) requests() []request {
 		if len(bodies) == len(addresses) {
 			body = bodies[index]
 		}
-		out = append(out, request{address, body})
+		out = append(out, request{url: address, body: body})
 	}
 	return out
 }
@@ -307,7 +315,15 @@ func (l *JSONLocator) fetchPages(ctx context.Context, base request) ([]RawStore,
 			if l.require != nil && !l.require.MatchString(text(object, l.config.Name)) {
 				continue
 			}
-			out = append(out, l.mapRow(object))
+			row := l.mapRow(object)
+			// The province we asked about, when the rows themselves do not carry one.
+			// Dinarsu answers per province and leaves every row's province empty; without
+			// this its 1,650 dealers are placeless, and two dealers of the same name in
+			// two provinces are indistinguishable.
+			if row.City == "" {
+				row.City = base.label
+			}
+			out = append(out, row)
 		}
 	}
 	return out, nil

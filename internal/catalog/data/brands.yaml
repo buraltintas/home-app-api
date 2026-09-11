@@ -578,6 +578,7 @@ brands:
         method: post
         body: action=get_ajax_cities
         field: term_id
+        label: name
       urls:
         - https://dinarsu.com.tr/wp-admin/admin-ajax.php
         - https://dinarsu.com.tr/wp-admin/admin-ajax.php
