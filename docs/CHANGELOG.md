@@ -6,6 +6,51 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Tier two, and four things I had wrongly given up on
+
+Nine more chains: Çilek, Vivense, Dinarsu, Paşabahçe, Korkmaz, Merinos, Weltew, Pierre
+Cardin Yatak and Alfemo.
+
+Four of those I had already written off, and each write-off was my mistake rather than the
+publisher's:
+
+- **Çilek** I called broken because its endpoint answered with an empty array. It answers
+  with an empty array to a province id that does not exist; I had passed 6 where the
+  publisher's own id is 3663. The endpoint was fine.
+- **Vivense** I called nameless because its showroom page carries a JavaScript array of
+  points with no names. It also carries the shops themselves in the markup below, with their
+  names, provinces, addresses and their own coordinates. I found the easy thing and stopped.
+- **Paşabahçe** answered 403 once and I recorded it as blocked. It was transient.
+- **Pierre Cardin Home** publishes no network, but Pierre Cardin Yatak does, at its own
+  domain -- the same shops, under the name they actually trade as.
+
+The lesson worth keeping: an empty answer and a refused one are both worth one more look
+before they become a line in a document saying a chain cannot be read.
+
+Three general capabilities came out of the work, none of them specific to a brand:
+
+**POST locators, and two-step ones.** `method`/`body` carry a locator that answers only to a
+POST -- WordPress puts every endpoint behind one address and tells them apart by a form
+field. `over` fetches a list first and substitutes each of its values into the main request:
+"ask which cities exist, then ask each city for its shops" is how a great many store finders
+are built, and a fixed list of identifiers would be wrong the first time a publisher added a
+city. Both the address and the body carry the substitutions, which is the bug I wrote first:
+substituting only the address left the body asking for whatever the publisher defaults to,
+and Çilek imported the same Kyiv shop 76 times without complaining.
+
+**A 404 inside a fan-out is a missing city, not a broken locator.** Dinarsu's own site
+answers 404 for some of the city identifiers it publishes. Abandoning the brand there lost
+the other eighty. A single-address locator answering 404 still fails, because that means it
+moved.
+
+**robots.txt now follows RFC 9309 rather than something stricter.** A 4xx -- including the
+403 several Turkish sites answer with -- means the file is unavailable, which means no
+restrictions were stated, and the standard says a crawler may then proceed. Treating 403 as
+a refusal was a rule stricter than any publisher had written, and it cost us chains that
+serve their pages to us perfectly happily. A 5xx stays a refusal: the site is failing, and
+hammering a failing site is what robots.txt exists to prevent.
+
+
 ## Two of tier two: Chakra and Emsan
 
 5,133 stores across sixteen chains.

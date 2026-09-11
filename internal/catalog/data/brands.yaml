@@ -201,7 +201,26 @@ brands:
     tier: 1
     categories: [furniture, bedding]
     store_count_estimate: 250
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Two steps and both of them POSTs: ask which provinces exist in Türkiye (the
+      # publisher's country 223), then ask each province for its shops. "city_category" is
+      # the province; "city_name" is the branch.
+      method: post
+      over:
+        url: https://store.cilek.com/location/getstates
+        method: post
+        body: countryID=223
+        field: state_id
+      url: https://store.cilek.com/location/getcities
+      body: stateID={over}
+      id: city_id
+      name: city_name
+      address: city_address
+      city: city_category
+      phone: city_phone
+      latitude: city_latitude
+      longitude: city_longitude
 
   - slug: yatas-bedding
     name: Yataş Bedding
@@ -374,7 +393,17 @@ brands:
     tier: 1
     categories: [furniture, decoration, home_textile]
     store_count_estimate: 20
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Vivense's showroom page carries a JavaScript array of points with no names, which is
+      # easy to find and useless; the shops themselves are in the markup below it, each with
+      # its name, province, address and its own coordinate attribute.
+      url: https://www.vivense.com/mobilya-showroom.html
+      row: '(?s)(showroom-coordinate="[^"]+"[^>]*>.*?<p class="address">[^<]*)'
+      name: '(?s)listen-map-[0-9]+[^>]*>\s*(?:<p class="vvns-showroom-in-corner-head">\s*)?([^<\n]+)'
+      city: '(?s)<span>\s*([^<]+?)\s*</span>'
+      address: '(?s)<p class="address">\s*([^<]+)'
+      coordinates: 'showroom-coordinate="([^"]+)"'
 
   - slug: boyner-ev
     # Not a store network of its own: "Boyner Ev" is a department inside Boyner's
@@ -413,7 +442,20 @@ brands:
     website: https://www.pasabahcemagazalari.com
     tier: 2
     categories: [tableware, kitchenware, decoration]
-    locator: {kind: none}
+    locator:
+      kind: json
+      # The same commerce platform as Madame Coco and Mudo Concept: the town is a nested
+      # object holding the district's name and, under it, the city's.
+      url: https://www.pasabahce.com/api/client/address/retail_store/
+      list: results
+      id: pk
+      name: name
+      address: address
+      city: township.city.name
+      district: township.name
+      phone: phone_number
+      latitude: latitude
+      longitude: longitude
 
   - slug: zara-home
     name: Zara Home
@@ -447,14 +489,36 @@ brands:
     website: https://www.alfemo.com.tr
     tier: 2
     categories: [furniture, bedding]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Every shop is already in the page; the province dropdown only hides the rest. The
+      # town is on the row as "province/district", which is better evidence than reading it
+      # back out of the address -- and there is no coordinate, so that is what places them.
+      url: https://www.alfemo.com/magazalarimiz
+      row: '(?s)(<div class="store-accordion-item" data-target="[^"]*".*?Adres:\s*</b>\s*[^<]+)'
+      name: '<div class="left">([^<]+)</div>'
+      city: 'data-target="([^"/]*)'
+      district: 'data-target="[^"/]*/([^"]*)"'
+      address: '(?s)Adres:\s*</b>\s*([^<]+)'
 
   - slug: weltew
     name: Weltew Home
     website: https://www.weltewhome.com
     tier: 2
     categories: [furniture, bedding]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Weltew writes its coordinates with a comma for the decimal separator on one
+      # attribute and a point on the maps link beside it; the attributes are read, and the
+      # comma is handled where every Turkish page's is.
+      url: https://www.weltew.com/tr/magazalar
+      row: '(?s)(<div class="item servicePoints" id="servicePoint[0-9]+">.*?data-longitude="[0-9,.]+")'
+      id: 'id="servicePoint([0-9]+)"'
+      name: 'onclick="focusMarker\([0-9]+\)">([^<]+)</a>'
+      address: '(?s)<div class="cont"><p>([^<]+)</p>'
+      phone: 'TELEFON:\s*<a href="tel:([^"]+)"'
+      latitude: 'data-latitude="([0-9,.]+)"'
+      longitude: 'data-longitude="([0-9,.]+)"'
 
   - slug: nurus
     name: Nurus
@@ -468,7 +532,16 @@ brands:
     website: https://www.merinos.com.tr
     tier: 2
     categories: [carpet, home_textile]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Each dealer is a list item carrying its point on the button that opens the map. The
+      # address ends with "Town / PROVINCE", which is what places it.
+      url: https://www.merinos.com.tr/storelocation
+      row: '(?s)(<li class=nav-item role=presentation><b>.*?data-longitude=[0-9.]+)'
+      name: '<b>([^<]+)</b>'
+      address: '(?s)<span class=map-text-details>(.*?)<a '
+      latitude: 'data-latitude=([0-9.]+)'
+      longitude: 'data-longitude=([0-9.]+)'
 
   - slug: ipek-hali
     name: İpek Halı
@@ -482,7 +555,27 @@ brands:
     website: https://www.dinarsu.com.tr
     tier: 2
     categories: [carpet]
-    locator: {kind: none}
+    locator:
+      kind: json
+      # WordPress: one address for every endpoint, told apart by a form field. The shop list
+      # is asked for per city and per type -- Dinarsu separates its own shops from its
+      # dealers' -- so both types are fetched and pooled.
+      method: post
+      over:
+        url: https://dinarsu.com.tr/wp-admin/admin-ajax.php
+        method: post
+        body: action=get_ajax_cities
+        field: term_id
+      urls:
+        - https://dinarsu.com.tr/wp-admin/admin-ajax.php
+        - https://dinarsu.com.tr/wp-admin/admin-ajax.php
+      body: action=get_ajax_addresses&type=1&is_dealer=0&city_id={over}&district_id=
+      id: ID
+      name: title
+      address: address
+      phone: phone
+      latitude: latitude
+      longitude: longitude
 
   - slug: padisah-hali
     name: Padişah Halı
@@ -499,11 +592,23 @@ brands:
     locator: {kind: none}
 
   - slug: pierre-cardin-home
-    name: Pierre Cardin Home
+    # The home brand publishes no store list; the bedding brand does, at its own domain, and
+    # that is the network these shops belong to.
+    name: Pierre Cardin Yatak
     website: https://www.pierrecardinhome.com.tr
     tier: 2
     categories: [home_textile, bedding, decoration]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # The province and district are attributes on the card, which is better evidence than
+      # reading them back out of the address.
+      url: https://pierrecardinyatak.com.tr/satis-noktalari/
+      row: '(?s)(<div class="wpgmp-card" data-prov=.*?</p>)'
+      name: '<h3>([^<]+)</h3>'
+      city: 'data-prov="([^"]*)"'
+      district: 'data-dist="([^"]*)"'
+      address: '<small>[^A-Za-zÇĞİÖŞÜçğıöşü0-9]*([^<]+)</small>'
+      coordinates: 'maps\?q=([0-9.]+,[0-9.]+)'
 
   - slug: emsan
     name: Emsan
@@ -530,4 +635,12 @@ brands:
     website: https://www.korkmaz.com.tr
     tier: 2
     categories: [kitchenware, tableware, small_appliances]
-    locator: {kind: none}
+    locator:
+      kind: html
+      # Korkmaz lists its forty shops in the page with no coordinates; each address ends with
+      # its town and province, which is what places them.
+      url: https://www.korkmazstore.com.tr/satis-noktalarimiz
+      row: '(?s)(<div id="store-title-[0-9]+".*?<div class="content-store">[^<]*)'
+      id: 'store-title-([0-9]+)'
+      name: 'data-toggle="accordion">\s*([^<]+)'
+      address: '<div class="content-store">\s*([^<]+)'

@@ -3,6 +3,7 @@ package catalog
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -49,7 +50,21 @@ type ErrDisallowed struct{ URL string }
 
 func (e ErrDisallowed) Error() string { return "robots.txt disallows " + e.URL }
 
+// Get fetches a URL. Most locators are a GET and this is what they use.
 func (f *Fetcher) Get(ctx context.Context, rawURL string) ([]byte, error) {
+	return f.Send(ctx, http.MethodGet, rawURL, "")
+}
+
+// Send is the same request with a method and a form body, for the locators that answer only
+// to a POST. WordPress puts every one of its endpoints behind a single address and tells
+// them apart by a form field, so for those sites there is nothing to fetch without a body.
+// robots.txt is consulted for the path either way: a rule about a path is a rule about a
+// path, whichever verb reaches it.
+func (f *Fetcher) Send(ctx context.Context, method, rawURL, body string) ([]byte, error) {
+	if method == "" {
+		method = http.MethodGet
+	}
+	method = strings.ToUpper(method)
 	target, e := url.Parse(rawURL)
 	if e != nil {
 		return nil, e
@@ -71,9 +86,9 @@ func (f *Fetcher) Get(ctx context.Context, rawURL string) ([]byte, error) {
 	// quietly partial one.
 	var last error
 	for attempt := 0; attempt < backoffAttempts; attempt++ {
-		body, retryAfter, e := f.get(ctx, rawURL)
+		answer, retryAfter, e := f.send(ctx, method, rawURL, body)
 		if e == nil {
-			return body, nil
+			return answer, nil
 		}
 		last = e
 		if retryAfter <= 0 {
@@ -95,31 +110,46 @@ const backoffAttempts = 5
 
 // get performs one request. The second return value is how long to wait before trying
 // again, and is zero for every failure that waiting would not fix.
-func (f *Fetcher) get(ctx context.Context, rawURL string) ([]byte, time.Duration, error) {
+func (f *Fetcher) send(ctx context.Context, method, rawURL, body string) ([]byte, time.Duration, error) {
 	target, e := url.Parse(rawURL)
 	if e != nil {
 		return nil, 0, e
 	}
 	f.wait(target.Host)
-	request, e := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	var payload io.Reader
+	if body != "" {
+		payload = strings.NewReader(body)
+	}
+	request, e := http.NewRequestWithContext(ctx, method, rawURL, payload)
 	if e != nil {
 		return nil, 0, e
 	}
 	request.Header.Set("User-Agent", UserAgent)
 	request.Header.Set("Accept", "application/json, text/html;q=0.9, */*;q=0.5")
+	if body != "" {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	response, e := f.client.Do(request)
 	if e != nil {
 		return nil, 0, e
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, 0, fmt.Errorf("%s: %w", rawURL, errNotFound)
+	}
 	if response.StatusCode != http.StatusOK {
 		return nil, retryDelay(response), fmt.Errorf("%s: %s", rawURL, response.Status)
 	}
 	// A store list is tens of kilobytes. A cap keeps a misconfigured URL from pulling a
 	// whole site into memory.
-	body, e := io.ReadAll(io.LimitReader(response.Body, 16<<20))
-	return body, 0, e
+	answer, e := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	return answer, 0, e
 }
+
+// errNotFound lets a caller fanning out over many addresses tell "this one is not there"
+// apart from "this locator is broken". They look identical in a status line and are not the
+// same fact.
+var errNotFound = errors.New("404 not found")
 
 // retryDelay reads how long the server asked us to wait, and otherwise picks a delay for
 // the statuses that are about pace or a momentary fault. A 403 or a 404 is an answer, not
@@ -194,10 +224,16 @@ func (f *Fetcher) loadRobots(ctx context.Context, target *url.URL) (*robots, err
 		return nil, e
 	}
 	defer response.Body.Close()
-	// No robots.txt means no restrictions stated. A server error means we do not know what
-	// is allowed, and not knowing is not permission -- but it also should not wedge an
-	// import for a site that is merely having a bad minute, so it is reported.
-	if response.StatusCode == http.StatusNotFound {
+	// Which statuses mean what is settled by RFC 9309, and it is worth following rather
+	// than inventing something stricter. A 4xx -- including the 403 several Turkish sites
+	// answer with -- means the file is unavailable, which means no restrictions were
+	// stated: the standard says a crawler may then access the site. Treating 403 as a
+	// refusal, which this did, is a stricter rule than the publisher wrote, and it cost us
+	// two chains that serve their pages to us perfectly happily.
+	//
+	// A 5xx is different and stays a refusal: the site is failing, and hammering a failing
+	// site is exactly what robots.txt exists to prevent.
+	if response.StatusCode >= 400 && response.StatusCode < 500 {
 		return &robots{}, nil
 	}
 	if response.StatusCode != http.StatusOK {

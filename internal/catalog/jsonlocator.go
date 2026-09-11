@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -43,8 +45,27 @@ type JSONLocatorConfig struct {
 	// URLs is the alternative to URL for a publisher that splits its list across more than
 	// one address. Every one is fetched and the results are pooled; a shop appearing in two
 	// of them is deduplicated by its identifier like any other repeat.
-	URLs  []string `json:"urls"`
-	Pages int      `json:"pages"`
+	URLs []string `json:"urls"`
+	// Method and Body carry a locator that answers only to a POST. A WordPress site puts
+	// every one of its endpoints behind one address and tells them apart by a form field,
+	// so there is nothing to fetch without a body.
+	Method string `json:"method"`
+	Body   string `json:"body"`
+	// Bodies pairs with URLs when a publisher splits its list by a form field rather than by
+	// address: the same endpoint asked several different questions.
+	Bodies []string `json:"bodies"`
+	// Over makes this a two-step locator: fetch that list first, then substitute each of
+	// its values for "{over}" in this one. "Ask which cities exist, then ask for each
+	// city's shops" is how a great many store finders are built, and a static list of
+	// identifiers would be wrong the first time the publisher added a city.
+	Over *struct {
+		URL    string `json:"url"`
+		Method string `json:"method"`
+		Body   string `json:"body"`
+		List   string `json:"list"`
+		Field  string `json:"field"`
+	} `json:"over"`
+	Pages int `json:"pages"`
 	// Extract pulls the store data out of a page that is not itself JSON. Plenty of chains
 	// render their list into the HTML rather than serving it from an endpoint -- there is
 	// nothing to call, and the data is right there in the markup.
@@ -120,24 +141,116 @@ func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
 func (l *JSONLocator) Brand() BrandSpec { return l.spec }
 
 func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
+	// A request is its address and its body together. Both carry the substitutions, because
+	// a POST locator puts in its body exactly what a GET one puts in its query string --
+	// and substituting only the address leaves the body asking for whatever the publisher
+	// defaults to, which looks like a working import returning the same row 76 times.
+	requests, e := l.expand(ctx, l.requests())
+	if e != nil {
+		return nil, e
+	}
 	var out []RawStore
-	for _, address := range l.addresses() {
-		for _, province := range l.provinces(address) {
-			rows, e := l.fetchPages(ctx, strings.ReplaceAll(address, "{province}", province))
+	var missing int
+	var last error
+	fanned := len(requests) > 1 || strings.Contains(requests[0].url+requests[0].body, "{province}")
+	for _, request := range requests {
+		for _, province := range l.provinces(request.url + request.body) {
+			rows, e := l.fetchPages(ctx, request.fill("{province}", province))
 			if e != nil {
+				// One of many questions answering "not found" is a province or a city this
+				// chain does not serve, not a broken locator: Dinarsu's own site answers 404
+				// for some of the city identifiers it publishes. Abandoning the brand there
+				// loses the other eighty. A locator with a single address is different --
+				// a 404 on it means the locator has moved.
+				if fanned && errors.Is(e, errNotFound) {
+					missing++
+					last = e
+					continue
+				}
 				return nil, e
 			}
 			out = append(out, rows...)
 		}
 	}
+	// Unless every one of them was missing, which is a moved locator wearing a fan-out.
+	if len(out) == 0 && missing > 0 {
+		return nil, last
+	}
 	return out, nil
 }
 
-func (l *JSONLocator) addresses() []string {
-	if len(l.config.URLs) > 0 {
-		return l.config.URLs
+// request is one address and the body sent with it.
+type request struct{ url, body string }
+
+func (r request) fill(token, value string) request {
+	return request{strings.ReplaceAll(r.url, token, value), strings.ReplaceAll(r.body, token, value)}
+}
+
+// expand resolves "{over}" by asking the publisher what values exist.
+func (l *JSONLocator) expand(ctx context.Context, requests []request) ([]request, error) {
+	if l.config.Over == nil {
+		return requests, nil
 	}
-	return []string{l.config.URL}
+	over := l.config.Over
+	body, e := l.fetcher.Send(ctx, over.Method, over.URL, over.Body)
+	if e != nil {
+		return nil, fmt.Errorf("%s: listing what to iterate: %w", l.spec.Slug, e)
+	}
+	var document any
+	if e = json.Unmarshal(body, &document); e != nil {
+		return nil, fmt.Errorf("%s: listing what to iterate: %w", l.spec.Slug, e)
+	}
+	items, e := listAt(document, over.List)
+	if e != nil {
+		return nil, fmt.Errorf("%s: listing what to iterate: %w", l.spec.Slug, e)
+	}
+	var values []string
+	seen := map[string]bool{}
+	for _, item := range items {
+		object, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		value := text(object, over.Field)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	if len(values) == 0 {
+		return nil, fmt.Errorf("%s: nothing to iterate over", l.spec.Slug)
+	}
+	out := make([]request, 0, len(requests)*len(values))
+	for _, base := range requests {
+		for _, value := range values {
+			out = append(out, base.fill("{over}", value))
+		}
+	}
+	return out, nil
+}
+
+// requests is the address-and-body pairs this locator starts from. Several addresses share
+// one body; several bodies for one address are written as that address repeated, which is
+// how a publisher that splits its list by a form field (Dinarsu, by shop type) is described.
+func (l *JSONLocator) requests() []request {
+	addresses := l.config.URLs
+	if len(addresses) == 0 {
+		addresses = []string{l.config.URL}
+	}
+	bodies := l.config.Bodies
+	if len(bodies) == 0 {
+		bodies = []string{l.config.Body}
+	}
+	var out []request
+	for index, address := range addresses {
+		body := bodies[0]
+		if len(bodies) == len(addresses) {
+			body = bodies[index]
+		}
+		out = append(out, request{address, body})
+	}
+	return out
 }
 
 // provinces is the list of substitutions for "{province}", or a single empty one when the
@@ -153,16 +266,21 @@ func (l *JSONLocator) provinces(address string) []string {
 	return out
 }
 
-func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, error) {
+func (l *JSONLocator) fetchPages(ctx context.Context, base request) ([]RawStore, error) {
 	pages := l.config.Pages
 	if pages < 1 {
 		pages = 1
 	}
 	var out []RawStore
 	for page := 1; page <= pages; page++ {
-		url := strings.ReplaceAll(base, "{page}", strconv.Itoa(page))
-		body, e := l.fetcher.Get(ctx, url)
+		paged := base.fill("{page}", strconv.Itoa(page))
+		body, e := l.fetcher.Send(ctx, l.config.Method, paged.url, paged.body)
 		if e != nil {
+			// The body is part of the request for a POST locator, so an error that names
+			// only the address says nothing about which question failed.
+			if paged.body != "" {
+				return nil, fmt.Errorf("%s [%s]: %w", l.spec.Slug, paged.body, e)
+			}
 			return nil, e
 		}
 		document, e := l.document(body)
@@ -334,11 +452,26 @@ func listAt(document any, path string) ([]any, error) {
 			}
 		}
 	}
-	items, ok := current.([]any)
-	if !ok {
-		return nil, fmt.Errorf("%q is not a list", path)
+	switch collection := current.(type) {
+	case []any:
+		return collection, nil
+	case map[string]any:
+		// Some publishers hand back an object keyed "0", "1", "2" where any other would
+		// have used an array -- PHP does this whenever a list has been through a map. It is
+		// a list; the keys carry nothing. Sorted, so the order is the publisher's own and
+		// not Go's map iteration, which would shuffle a dry run's output between runs.
+		keys := make([]string, 0, len(collection))
+		for key := range collection {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		items := make([]any, 0, len(collection))
+		for _, key := range keys {
+			items = append(items, collection[key])
+		}
+		return items, nil
 	}
-	return items, nil
+	return nil, fmt.Errorf("%q is neither a list nor an object", path)
 }
 
 // field walks a dotted path into one store object. Publishers nest: Madame Coco's township
