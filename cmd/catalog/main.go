@@ -30,6 +30,7 @@ func main() {
 	apply := flag.Bool("apply", false, "write the changes; without it nothing is written")
 	reload := flag.Bool("registry", false, "reload the shipped brand registry into the database and exit")
 	list := flag.Bool("list", false, "list registered brands and exit")
+	probe := flag.Bool("probe", false, "look for a brand's store locator and report what is there")
 	verbose := flag.Int("show", 15, "how many per-row decisions to print")
 	flag.Parse()
 
@@ -72,11 +73,38 @@ func main() {
 		return
 	}
 
+	fetcher := catalog.NewFetcher()
+	if *probe {
+		for _, brand := range brands {
+			if *tier > 0 && brand.Tier != *tier {
+				continue
+			}
+			if brand.LocatorKind != "none" && brand.LocatorKind != "" {
+				continue
+			}
+			fmt.Printf("\n%s  %s\n", brand.Name, brand.Website)
+			findings, e := fetcher.Probe(ctx, brand.Website)
+			if e != nil {
+				fmt.Printf("  %v\n", e)
+				continue
+			}
+			for _, finding := range findings {
+				if finding.Stores == 0 && finding.Status != "ok" {
+					continue
+				}
+				fmt.Printf("  %-58s %s\n", shorten(finding.URL, 58), firstLine(finding.Status, finding.Note))
+				for _, endpoint := range finding.Endpoint {
+					fmt.Printf("      -> %s\n", shorten(endpoint, 100))
+				}
+			}
+		}
+		return
+	}
+
 	resolver, e := catalog.NewResolver(ctx, db)
 	if e != nil {
 		log.Fatal(e)
 	}
-	fetcher := catalog.NewFetcher()
 	importer := catalog.NewImporter(db, resolver)
 
 	var ran int
@@ -124,6 +152,21 @@ func printDecisions(report catalog.Report, limit int) {
 	if report.Review > 0 {
 		fmt.Printf("  %d row(s) need a person to decide; they are in store_import_records for run %s\n", report.Review, report.RunID)
 	}
+}
+
+func firstLine(status, note string) string {
+	if status != "ok" {
+		return status
+	}
+	return note
+}
+
+func shorten(value string, limit int) string {
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 func trim(value string) string {

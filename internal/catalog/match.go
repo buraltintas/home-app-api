@@ -105,6 +105,17 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	}
 	decision.Similarity, decision.Distance, decision.StoreID = candidate.Similarity, candidate.Distance, candidate.ID
 
+	// Two chains are two chains. A store already confirmed as one brand's cannot be
+	// another brand's, however alike the signs read and however close they stand -- an
+	// English Home and a Madame Coco in the same shopping centre are 89 m apart and share
+	// the mall's name, which is most of what a name-similarity score can see.
+	if candidate.BrandID != nil && *candidate.BrandID != brand.ID {
+		decision.Action = ActionInserted
+		decision.Reason = fmt.Sprintf("nearest comparable store belongs to another brand (%q)", candidate.Name)
+		decision.StoreID = ""
+		return decision, nil
+	}
+
 	// The brand is the authority on which of its own shops are distinct. If the nearest
 	// comparable store already carries a different id from this same list, the chain has
 	// told us they are two shops -- "Ayvalık 1" and "Ayvalık 2" stand 229 m apart and share

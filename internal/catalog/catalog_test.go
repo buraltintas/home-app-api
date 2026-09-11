@@ -29,7 +29,9 @@ func TestTidyNameLeavesAStyledSignAloneAndCalmsAShoutedOne(t *testing.T) {
 		// A name carrying no Turkish letter is read as English, so an English branch code
 		// does not acquire a dotless ı; one carrying any Turkish letter is read as Turkish
 		// throughout, which is what keeps "ADIYAMAN" from becoming "Adiyaman".
-		{"ANK ACITY AVM", "Ank Acity Avm"},
+		// A short shouted token is an abbreviation the writer meant. Dropping "ANK" is
+		// StripPlaceCode's job, not the caser's; see the test below.
+		{"ANK ACITY AVM", "ANK Acity AVM"},
 		{"ADIYAMAN MAĞAZASI", "Adıyaman Mağazası"},
 		// Already styled by the brand: not ours to restyle.
 		{"English Home", "English Home"},
@@ -174,8 +176,9 @@ func TestJSONLocatorMapsAPublishedListToRows(t *testing.T) {
 	if rows[0].ExternalID != "3771" {
 		t.Errorf("external id=%q", rows[0].ExternalID)
 	}
-	// A branch code is not a shop sign; the chain's name goes in front of it.
-	if rows[0].Name != "English Home ANK 365 1 AVM" {
+	// A branch code is not a shop sign: the chain's own city code comes off the front and
+	// its name goes on.
+	if rows[0].Name != "English Home - 365 1 AVM" {
 		t.Errorf("name=%q", rows[0].Name)
 	}
 	if rows[0].Latitude == nil || *rows[0].Latitude < 39.8 || *rows[0].Latitude > 39.9 {
@@ -184,5 +187,31 @@ func TestJSONLocatorMapsAPublishedListToRows(t *testing.T) {
 	// 0,0 is not a coordinate anywhere near Turkey; it is a locator saying "I do not know".
 	if rows[1].Latitude != nil || rows[1].Longitude != nil {
 		t.Errorf("row published at 0,0 was taken as a point: %v %v", rows[1].Latitude, rows[1].Longitude)
+	}
+}
+
+func TestStripPlaceCodeDropsTheChainsOwnCityCode(t *testing.T) {
+	// Every one of these is a real English Home branch name. The codes are the province in
+	// the chain's shorthand, which is useful in their warehouse and meaningless to somebody
+	// looking for a shop.
+	for _, c := range []struct{ name, province, want string }{
+		{"ANK ACITY AVM", "Ankara", "ACITY AVM"},
+		{"DYR 75.CAD", "Diyarbakır", "75.CAD"},
+		{"GTP AKKENT CAD", "Gaziantep", "AKKENT CAD"},
+		{"BLK AYVALIK1 CAD", "Balıkesir", "AYVALIK1 CAD"},
+		{"IST AND LARA CAD", "İstanbul", "AND LARA CAD"},
+		{"MUG BODRUM MIDTOWN1 AVM", "Muğla", "BODRUM MIDTOWN1 AVM"},
+		// Not a code: a real first word, even a short shouted one, stays.
+		{"LARA CAD", "Antalya", "LARA CAD"},
+		{"AVM MERKEZ", "Ankara", "AVM MERKEZ"},
+		// Nothing to strip against, or nothing left after stripping.
+		{"ANK ACITY AVM", "", "ANK ACITY AVM"},
+		{"ANK", "Ankara", "ANK"},
+		// A styled name is not a code, whatever its letters.
+		{"Ank Acity", "Ankara", "Ank Acity"},
+	} {
+		if got := StripPlaceCode(c.name, c.province); got != c.want {
+			t.Errorf("StripPlaceCode(%q,%q)=%q want %q", c.name, c.province, got, c.want)
+		}
 	}
 }

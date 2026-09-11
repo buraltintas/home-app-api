@@ -6,6 +6,47 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Three more chains, and four things a brand's own list gets wrong about itself
+
+Madame Coco (673 shops) and Mudo Concept (73) join English Home (305): **1,051 verified
+stores, and every published id maps to exactly one of them.** Both new chains run on the
+same commerce platform, so both were a block of configuration rather than any code.
+
+`cmd/catalog -probe` is how a brand gets mapped now. It fetches the likely locator paths
+through the same robots-respecting fetcher an import uses, reads what comes back for the
+marks of a store list, and reports the endpoints a page's own scripts call. It found both
+chains in one pass; the other seventeen tier-one brands publish nothing at the standard
+paths and still need a person to look once.
+
+What the imports taught, each of it fixed as a rule rather than a patch:
+
+- **A chain's internal city code is not part of a shop's name.** English Home publishes
+  "ANK ACITY AVM"; the "ANK" is Ankara in their warehouse shorthand and means nothing to
+  anybody looking for the shop. It comes off by a general test against the row's own
+  province -- a short shouted first token whose letters appear in order inside the province
+  name is that province abbreviated. It catches ANK in Ankara, DYR in Diyarbakır, GTP in
+  Gaziantep and BLK in Balıkesir, and leaves "LARA" alone, which is not a subsequence of
+  "Antalya". Names now read "English Home - Acity AVM".
+- **A store list is not a promise that everything on it belongs here.** Mudo publishes its
+  clothing departments beside its homeware ones -- "Akmerkez Home" and "Akmerkez Giyim" at
+  the same address -- and a directory of home and living stores that lists a clothes shop is
+  wrong about itself. Fifty-four were skipped on the trade's own department words.
+- **A chain's foreign branches are not Turkish shops.** Madame Coco publishes in Almaty,
+  Amman and Astana, and the administrative table cheerfully matched Tashkent to Taşkent, a
+  district of Konya. Forty rows were being placed in Turkey; a point outside the country now
+  drops the row rather than relocating it. Seventeen legacy rows in Germany, Belgium and the
+  Netherlands went with them.
+- **Publishers nest.** Madame Coco's township is an object holding the district's name and,
+  under it, the city's. A mapping that could only read flat fields read nothing, and the
+  address fallback then placed a shop in İstanbul Maltepe at Hani, in Diyarbakır, because a
+  word in its address happened to be a district somewhere. Field paths are dotted now, and
+  the fallback no longer guesses a district from a stray word: a wrong district is worse than
+  a missing one, because the catalogue is grouped and searched by it.
+
+Two brands are two brands: a store already confirmed as one chain's is never merged into
+another's, however close they stand and however much of the shopping centre's name they
+share. That alone took seventeen rows out of the review queue on the first Madame Coco run.
+
 ## A brand search near Kadıköy answered with Diyarbakır
 
 Found the moment the catalogue held three hundred shops of one chain, and it had been true

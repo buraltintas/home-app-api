@@ -51,6 +51,9 @@ type RawStore struct {
 	// PointFrom records where the coordinate finally used came from, so a store standing
 	// at its district's centre is distinguishable from one the brand actually placed.
 	PointFrom string
+	// Outside marks a branch the brand publishes abroad. Several Turkish chains do, and
+	// their foreign cities sometimes carry names a Turkish district also has.
+	Outside bool
 	// Raw is kept whole so a later change of mind about a field costs a re-match rather
 	// than another fetch of somebody else's website.
 	Raw json.RawMessage

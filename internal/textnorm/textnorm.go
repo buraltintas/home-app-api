@@ -102,8 +102,19 @@ func Title(raw string) string {
 	if len([]rune(name)) <= 4 && !strings.ContainsRune(name, ' ') {
 		return name
 	}
+	caser := plainTitle
 	if strings.ContainsAny(name, turkishLetters) {
-		return turkishTitle.String(name)
+		caser = turkishTitle
 	}
-	return plainTitle.String(name)
+	words := strings.Split(name, " ")
+	for i, word := range words {
+		// A short shouted word inside a name is an abbreviation the writer meant: AVM is a
+		// shopping centre, CAD is a street. Calming them to "Avm" and "Cad" makes the name
+		// read like a mistake.
+		if len([]rune(word)) <= 3 {
+			continue
+		}
+		words[i] = caser.String(word)
+	}
+	return strings.Join(words, " ")
 }

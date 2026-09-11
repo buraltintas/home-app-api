@@ -89,6 +89,22 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		}
 		seen[row.ExternalID] = true
 
+		// A chain's own list is not a promise that everything on it belongs here.
+		if row.Outside {
+			report.Skipped++
+			if e = record(ctx, tx, runID, row, Decision{Raw: row, Action: ActionSkipped, Reason: "published at a point outside Turkey"}); e != nil {
+				return report, e
+			}
+			continue
+		}
+		if NamesAnApparelDepartment(row.Name) {
+			report.Skipped++
+			if e = record(ctx, tx, runID, row, Decision{Raw: row, Action: ActionSkipped, Reason: "the branch name says this department sells clothing, not homeware"}); e != nil {
+				return report, e
+			}
+			continue
+		}
+
 		decision, e := matcher.Match(ctx, brand, row)
 		if e != nil {
 			return report, e

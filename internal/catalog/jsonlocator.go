@@ -99,9 +99,13 @@ func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
 
 func (l *JSONLocator) mapRow(object map[string]any) RawStore {
 	raw, _ := json.Marshal(object)
-	name := text(object, l.config.Name)
+	// The chain's internal city code goes first, then the casing, then the chain's name --
+	// in that order. Cased before the prefix is added rather than after, because a shouted
+	// branch name with a styled prefix in front of it reads as mixed case, and the caser
+	// then leaves the whole thing alone: "Madame Coco ADANA CEYHAN CADDE".
+	name := TidyName(StripPlaceCode(text(object, l.config.Name), text(object, l.config.City)))
 	if l.config.NamePrefix != "" {
-		name = strings.TrimSpace(l.config.NamePrefix + " " + name)
+		name = strings.TrimSpace(l.config.NamePrefix + " - " + name)
 	}
 	return RawStore{
 		ExternalID: text(object, l.config.ID),
@@ -140,13 +144,31 @@ func listAt(document any, path string) ([]any, error) {
 	return items, nil
 }
 
+// field walks a dotted path into one store object. Publishers nest: Madame Coco's township
+// is an object holding both the district's name and, under it, the city's -- and a mapping
+// that could only read flat fields silently read nothing and left the row placeless.
+func field(object map[string]any, path string) any {
+	if path == "" {
+		return nil
+	}
+	var current any = object
+	for _, step := range strings.Split(path, ".") {
+		node, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = node[step]
+	}
+	return current
+}
+
 // text reads a field that may be published as a string or as a number, because plenty of
 // locators publish a store id as an integer and a telephone number as a string.
-func text(object map[string]any, field string) string {
-	if field == "" {
+func text(object map[string]any, path string) string {
+	if path == "" {
 		return ""
 	}
-	switch value := object[field].(type) {
+	switch value := field(object, path).(type) {
 	case string:
 		return strings.TrimSpace(value)
 	case float64:
@@ -159,12 +181,12 @@ func text(object map[string]any, field string) string {
 
 // number reads a coordinate published either as a number or as a string, and refuses one
 // that is not a coordinate at all. A missing point is handled; a wrong one is not.
-func number(object map[string]any, field string) *float64 {
-	if field == "" {
+func number(object map[string]any, path string) *float64 {
+	if path == "" {
 		return nil
 	}
 	var parsed float64
-	switch value := object[field].(type) {
+	switch value := field(object, path).(type) {
 	case float64:
 		parsed = value
 	case string:

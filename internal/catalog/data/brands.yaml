@@ -51,7 +51,27 @@ brands:
     tier: 1
     categories: [home_textile, decoration, kitchenware, tableware, home_accessories]
     store_count_estimate: 450
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Akinon's commerce platform, which several Turkish chains run on: the locator page
+      # answers with JSON when asked for it, and the shape is the same for all of them.
+      url: https://www.madamecoco.com/magazalar
+      list: results
+      id: pk
+      name: name
+      address: address
+      # The place is published as a nested object: the township holds the district's name
+      # and, under it, the city's. Dotted paths read it where it actually is; the flat
+      # fields beside it are empty, and reading those left every row placeless.
+      city: township.city.name
+      district: township.name
+      phone: phone_number
+      image: image
+      latitude: latitude
+      longitude: longitude
+      # Branch names are published as places -- "Adana Ceyhan Cadde" -- with no chain name
+      # in them at all.
+      name_prefix: Madame Coco
 
   - slug: karaca-home
     name: Karaca Home
@@ -154,8 +174,26 @@ brands:
     website: https://www.mudo.com.tr
     tier: 1
     categories: [decoration, home_accessories, home_textile, tableware]
-    store_count_estimate: 60
-    locator: {kind: none}
+    store_count_estimate: 130
+    locator:
+      kind: json
+      # Akinon's commerce platform, which several Turkish chains run on: the locator page
+      # answers with JSON when asked for it, and the shape is the same for all of them.
+      url: https://www.mudo.com.tr/stores
+      list: results
+      id: pk
+      name: name
+      address: address
+      # The place is published as a nested object: the township holds the district's name
+      # and, under it, the city's. Dotted paths read it where it actually is; the flat
+      # fields beside it are empty, and reading those left every row placeless.
+      city: township.city.name
+      district: township.name
+      phone: phone_number
+      image: image
+      latitude: latitude
+      longitude: longitude
+      name_prefix: Mudo Concept
 
   - slug: linens
     name: Linens
