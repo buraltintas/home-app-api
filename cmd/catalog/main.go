@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -134,6 +136,18 @@ func main() {
 		fmt.Println("nothing to do: no registered brand has a mapped store locator yet")
 		return
 	}
+	// Which of the brands just imported have no mark on disk.
+	//
+	// Collecting marks is a separate command, and nothing tied "a brand was added" to "its
+	// mark was fetched" -- so eight brands were added and none of their marks were, leaving
+	// 42% of the catalogue showing an initial where a shop's sign belongs. Nobody noticed
+	// for a day. A tool that knows a thing is missing should say so where somebody is
+	// already looking, rather than waiting to be asked.
+	if missing := brandsWithoutMarks(brands); len(missing) > 0 {
+		fmt.Printf("\n%d brand(s) here have no mark in %s -- their shops show an initial:\n  %s\n",
+			len(missing), marksDir, strings.Join(missing, " · "))
+		fmt.Println("  go run ./cmd/brand-logos -out ../ui/public/brands")
+	}
 	// The panel's totals are a maintained counter, kept up to date by the events the
 	// product raises as people use it. An import raises none: it writes stores straight
 	// into the table, so every run left the counter further behind -- after this catalogue
@@ -190,4 +204,28 @@ func trim(value string) string {
 		return value
 	}
 	return string(runes[:39]) + "…"
+}
+
+// marksDir is where the web application keeps the brand marks. Named here so the reminder
+// above can point at it rather than describing it.
+const marksDir = "../ui/public/brands"
+
+func brandsWithoutMarks(brands []catalog.BrandSpec) []string {
+	entries, e := os.ReadDir(marksDir)
+	if e != nil {
+		// Run from somewhere the web application is not beside us: no reminder rather than
+		// a false one.
+		return nil
+	}
+	have := map[string]bool{}
+	for _, entry := range entries {
+		have[strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))] = true
+	}
+	var missing []string
+	for _, brand := range brands {
+		if brand.LocatorKind != "none" && brand.LocatorKind != "" && !have[brand.Slug] {
+			missing = append(missing, brand.Slug)
+		}
+	}
+	return missing
 }
