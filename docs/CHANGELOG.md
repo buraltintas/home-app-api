@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The panel's totals stopped being a guess
+
+Two problems with the same shape, one after the other.
+
+The catalogue tripled and the panel went on showing the figure it had before any of it
+arrived. Those totals are a maintained counter, kept current by the events the product
+raises as people use it, and an import raises none -- it writes stores straight into the
+table. So every run left the counter further behind. An applied import now recounts when it
+finishes: one query at the end of a run that took minutes.
+
+And there is one store count again instead of two. The second card split the catalogue by
+where its rows came from, which mattered while we were leaving a provider and stopped
+mattering the moment we had left. Every row in the table is ours now; a panel that still
+sorts them by origin only invites the question of which of the two numbers is the real one.
+
+
 ## Seven more chains, and the four defects that were keeping them out
 
 The catalogue had three brands in it. It now has ten, and getting there turned up four

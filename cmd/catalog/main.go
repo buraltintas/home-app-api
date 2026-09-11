@@ -22,6 +22,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/catalog"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
+	"github.com/burakaltintas/home-app-api/internal/reporting"
 )
 
 func main() {
@@ -131,6 +132,20 @@ func main() {
 	}
 	if ran == 0 {
 		fmt.Println("nothing to do: no registered brand has a mapped store locator yet")
+		return
+	}
+	// The panel's totals are a maintained counter, kept up to date by the events the
+	// product raises as people use it. An import raises none: it writes stores straight
+	// into the table, so every run left the counter further behind -- after this catalogue
+	// tripled in size the panel still showed the figure it had before any of it arrived.
+	// Recounting here costs one query at the end of a run that took minutes.
+	if *apply {
+		reports, e := reporting.NewService(db, cfg.ReportingTimezone)
+		if e != nil {
+			log.Printf("stores imported, but the panel's totals could not be recounted: %v", e)
+		} else if e = reports.RebuildSnapshot(ctx); e != nil {
+			log.Printf("stores imported, but the panel's totals could not be recounted: %v", e)
+		}
 	}
 }
 

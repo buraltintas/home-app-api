@@ -77,7 +77,20 @@ brands:
     tier: 1
     categories: [home_textile, bedding, kitchenware, tableware]
     store_count_estimate: 300
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Karaca renders its list into the page rather than serving it: each shop is a JSON
+      # object in its own hidden div. "state" is the district; the province is in "city".
+      url: https://www.karaca.com/magazalarimiz
+      extract: 'class="store-find-change-map\d+">(\{.*?\})</div>'
+      id: store_id
+      name: name
+      address: address
+      city: city
+      district: state
+      phone: phone
+      latitude: lat
+      longitude: lng
 
   - slug: bellona
     name: Bellona

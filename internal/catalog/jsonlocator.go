@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -19,6 +20,7 @@ import (
 type JSONLocator struct {
 	spec    BrandSpec
 	config  JSONLocatorConfig
+	extract *regexp.Regexp
 	fetcher *Fetcher
 }
 
@@ -37,6 +39,17 @@ type JSONLocatorConfig struct {
 	// is eighty-one of the same request.
 	URL   string `json:"url"`
 	Pages int    `json:"pages"`
+	// Extract pulls the store data out of a page that is not itself JSON. Plenty of chains
+	// render their list into the HTML rather than serving it from an endpoint -- there is
+	// nothing to call, and the data is right there in the markup.
+	//
+	// It is a regular expression with one capturing group. Every match contributes: a page
+	// that carries one object per shop (Karaca puts each in its own hidden div) yields as
+	// many rows as it has shops, and a page carrying the whole list in one array yields
+	// that array. Either way what comes out is parsed as JSON and mapped by the fields
+	// below, so a page-rendered locator costs a line of configuration rather than a second
+	// adapter.
+	Extract string `json:"extract"`
 	// List is the dotted path to the array of stores, empty when the body is the array.
 	List string `json:"list"`
 	// Field names inside one store object.
@@ -66,7 +79,18 @@ func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
 	if config.URL == "" {
 		return nil, fmt.Errorf("%s has no locator url", spec.Slug)
 	}
-	return &JSONLocator{spec: spec, config: config, fetcher: fetcher}, nil
+	locator := &JSONLocator{spec: spec, config: config, fetcher: fetcher}
+	if config.Extract != "" {
+		compiled, e := regexp.Compile(config.Extract)
+		if e != nil {
+			return nil, fmt.Errorf("%s extract pattern: %w", spec.Slug, e)
+		}
+		if compiled.NumSubexp() != 1 {
+			return nil, fmt.Errorf("%s extract pattern needs exactly one capturing group", spec.Slug)
+		}
+		locator.extract = compiled
+	}
+	return locator, nil
 }
 
 func (l *JSONLocator) Brand() BrandSpec { return l.spec }
@@ -109,8 +133,8 @@ func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, 
 		if e != nil {
 			return nil, e
 		}
-		var document any
-		if e = json.Unmarshal(body, &document); e != nil {
+		document, e := l.document(body)
+		if e != nil {
 			return nil, fmt.Errorf("%s page %d: %w", l.spec.Slug, page, e)
 		}
 		items, e := listAt(document, l.config.List)
@@ -133,6 +157,49 @@ func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, 
 	}
 	return out, nil
 }
+
+// document turns a fetched body into something listAt can walk: the body itself when the
+// endpoint answers with JSON, or whatever Extract finds when it does not.
+func (l *JSONLocator) document(body []byte) (any, error) {
+	if l.extract == nil {
+		var out any
+		return out, json.Unmarshal(body, &out)
+	}
+	matches := l.extract.FindAllSubmatch(unprotectEmails(body), -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("nothing matched the extract pattern")
+	}
+	// One match is taken as the whole published list, exactly as an endpoint's body would
+	// be, so `list` can point into it. Several are the shops themselves.
+	if len(matches) == 1 {
+		var out any
+		return out, json.Unmarshal(matches[0][1], &out)
+	}
+	out := make([]any, 0, len(matches))
+	for _, match := range matches {
+		var item any
+		if e := json.Unmarshal(match[1], &item); e != nil {
+			// One unreadable block is one shop missing, not a failed import; a page holds
+			// markup we did not anticipate far more often than an endpoint does.
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%d block(s) matched the extract pattern and none held JSON", len(matches))
+	}
+	return out, nil
+}
+
+// cloudflareEmail matches the markup Cloudflare's email obfuscation leaves behind. It
+// rewrites addresses everywhere in a document, including inside JSON a page had already
+// serialised into itself, and the unescaped quotes in the anchor it substitutes make that
+// JSON unparseable -- Karaca's entire store list fails on its first shop's mail field. The
+// anchor is removed before extraction. This is a fact about Cloudflare, not about any one
+// chain, and holds for every site behind it.
+var cloudflareEmail = regexp.MustCompile(`(?s)<a[^>]*class="__cf_email__"[^>]*>.*?</a>`)
+
+func unprotectEmails(body []byte) []byte { return cloudflareEmail.ReplaceAll(body, nil) }
 
 func (l *JSONLocator) mapRow(object map[string]any) RawStore {
 	raw, _ := json.Marshal(object)
