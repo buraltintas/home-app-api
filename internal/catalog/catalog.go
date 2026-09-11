@@ -10,7 +10,10 @@ package catalog
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 
 	"github.com/burakaltintas/home-app-api/internal/textnorm"
 )
@@ -101,4 +104,21 @@ func CompactName(name string) string {
 		}
 	}
 	return string(out)
+}
+
+// DerivedID stands in for the identifier a chain did not publish.
+//
+// It is built from the two things about a shop that do not drift between runs: its name,
+// folded so that a change of case or of diacritics is not a change of shop, and its point
+// rounded to about ten metres, which is finer than any of these locators is accurate and
+// coarser than the noise they publish. A shop that moves across the street gets a new id
+// and is matched on name and distance like any other row, which is the right outcome: it
+// is, for our purposes, a different shop until somebody says otherwise.
+func DerivedID(row RawStore) string {
+	var point string
+	if row.Latitude != nil && row.Longitude != nil {
+		point = fmt.Sprintf("%.4f,%.4f", *row.Latitude, *row.Longitude)
+	}
+	sum := sha256.Sum256([]byte(textnorm.Key(row.Name) + "|" + point))
+	return "derived:" + hex.EncodeToString(sum[:8])
 }

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,25 +64,88 @@ func (f *Fetcher) Get(ctx context.Context, rawURL string) ([]byte, error) {
 	if !allowed {
 		return nil, ErrDisallowed{URL: rawURL}
 	}
+	// A host that says "too many" is telling us our pace is wrong, and the honest answer is
+	// to slow down and ask again rather than to abandon the brand. One province of a store
+	// list failing is one province missing from the catalogue, and it fails on a schedule
+	// nobody watches, so a retry here is the difference between a complete import and a
+	// quietly partial one.
+	var last error
+	for attempt := 0; attempt < backoffAttempts; attempt++ {
+		body, retryAfter, e := f.get(ctx, rawURL)
+		if e == nil {
+			return body, nil
+		}
+		last = e
+		if retryAfter <= 0 {
+			return nil, e
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(retryAfter):
+		}
+	}
+	return nil, last
+}
+
+// How many times a throttled request is retried before the brand is reported as failed.
+// Five doublings from two seconds is about a minute of patience, which is more than any
+// of these locators has needed and still finite.
+const backoffAttempts = 5
+
+// get performs one request. The second return value is how long to wait before trying
+// again, and is zero for every failure that waiting would not fix.
+func (f *Fetcher) get(ctx context.Context, rawURL string) ([]byte, time.Duration, error) {
+	target, e := url.Parse(rawURL)
+	if e != nil {
+		return nil, 0, e
+	}
 	f.wait(target.Host)
 	request, e := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if e != nil {
-		return nil, e
+		return nil, 0, e
 	}
 	request.Header.Set("User-Agent", UserAgent)
 	request.Header.Set("Accept", "application/json, text/html;q=0.9, */*;q=0.5")
 	response, e := f.client.Do(request)
 	if e != nil {
-		return nil, e
+		return nil, 0, e
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", rawURL, response.Status)
+		return nil, retryDelay(response), fmt.Errorf("%s: %s", rawURL, response.Status)
 	}
 	// A store list is tens of kilobytes. A cap keeps a misconfigured URL from pulling a
 	// whole site into memory.
-	return io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	body, e := io.ReadAll(io.LimitReader(response.Body, 16<<20))
+	return body, 0, e
 }
+
+// retryDelay reads how long the server asked us to wait, and otherwise picks a delay for
+// the statuses that are about pace or a momentary fault. A 403 or a 404 is an answer, not
+// a wait; repeating it only wastes the host's time and ours.
+func retryDelay(response *http.Response) time.Duration {
+	switch response.StatusCode {
+	case http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
+	default:
+		return 0
+	}
+	// The header is the host's own instruction and outranks our guess, in either direction.
+	if header := strings.TrimSpace(response.Header.Get("Retry-After")); header != "" {
+		if seconds, e := strconv.Atoi(header); e == nil && seconds >= 0 {
+			if wait := time.Duration(seconds) * time.Second; wait <= maxRetryWait {
+				return wait
+			}
+			return maxRetryWait
+		}
+	}
+	return defaultRetryWait
+}
+
+const (
+	defaultRetryWait = 4 * time.Second
+	maxRetryWait     = 60 * time.Second
+)
 
 // wait spaces requests to one host. Politeness, and also self-preservation: a burst is what
 // gets a fetcher blocked and turns a working adapter into a silent one.

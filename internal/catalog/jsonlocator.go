@@ -26,6 +26,15 @@ type JSONLocator struct {
 // publisher's own, in the publisher's own language; mapping them here is the whole job.
 type JSONLocatorConfig struct {
 	// URL is fetched once per page. When Pages is set, "{page}" in the URL is replaced.
+	//
+	// "{province}" is replaced with each of Turkey's 81 province codes, "1" through "81",
+	// one request each. Unpadded, which is what these endpoints want: the store pages
+	// themselves strip the leading zero before asking, and a padded "07" answers with an
+	// empty list rather than an error -- so Antalya and eight other provinces come back
+	// silently empty if this is got wrong. A chain whose locator answers per province rather than all at once
+	// is common enough here that it belongs in the shared adapter: the customer picks a
+	// province from a dropdown and the page asks for that province, so the whole country
+	// is eighty-one of the same request.
 	URL   string `json:"url"`
 	Pages int    `json:"pages"`
 	// List is the dotted path to the array of stores, empty when the body is the array.
@@ -41,9 +50,10 @@ type JSONLocatorConfig struct {
 	Image     string `json:"image"`
 	Latitude  string `json:"latitude"`
 	Longitude string `json:"longitude"`
-	// NamePrefix is prepended when a chain publishes branch names without its own name --
-	// "ANK ACITY AVM" is not a shop sign anyone would recognise on its own.
-	NamePrefix string `json:"name_prefix"`
+	// Coordinates is the alternative to the pair above, for the many locators that publish
+	// one string -- "40.99736,28.87229", or the contents of a maps link. Whichever the
+	// publisher chose, the row that reaches the catalogue is the same.
+	Coordinates string `json:"coordinates"`
 }
 
 func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
@@ -62,13 +72,39 @@ func NewJSONLocator(spec BrandSpec, fetcher *Fetcher) (*JSONLocator, error) {
 func (l *JSONLocator) Brand() BrandSpec { return l.spec }
 
 func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
+	var out []RawStore
+	for _, province := range l.provinces() {
+		url := strings.ReplaceAll(l.config.URL, "{province}", province)
+		rows, e := l.fetchPages(ctx, url)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, rows...)
+	}
+	return out, nil
+}
+
+// provinces is the list of substitutions for "{province}", or a single empty one when the
+// URL does not ask for it.
+func (l *JSONLocator) provinces() []string {
+	if !strings.Contains(l.config.URL, "{province}") {
+		return []string{""}
+	}
+	out := make([]string, 0, 81)
+	for code := 1; code <= 81; code++ {
+		out = append(out, strconv.Itoa(code))
+	}
+	return out
+}
+
+func (l *JSONLocator) fetchPages(ctx context.Context, base string) ([]RawStore, error) {
 	pages := l.config.Pages
 	if pages < 1 {
 		pages = 1
 	}
 	var out []RawStore
 	for page := 1; page <= pages; page++ {
-		url := strings.ReplaceAll(l.config.URL, "{page}", strconv.Itoa(page))
+		url := strings.ReplaceAll(base, "{page}", strconv.Itoa(page))
 		body, e := l.fetcher.Get(ctx, url)
 		if e != nil {
 			return nil, e
@@ -82,7 +118,8 @@ func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
 			return nil, fmt.Errorf("%s page %d: %w", l.spec.Slug, page, e)
 		}
 		// A page that answers with nothing is the end of the list, not a failure; several
-		// locators keep answering 200 past their last page.
+		// locators keep answering 200 past their last page. A province with no branch
+		// answers the same way, and simply contributes nothing.
 		if len(items) == 0 {
 			break
 		}
@@ -103,21 +140,27 @@ func (l *JSONLocator) mapRow(object map[string]any) RawStore {
 	// in that order. Cased before the prefix is added rather than after, because a shouted
 	// branch name with a styled prefix in front of it reads as mixed case, and the caser
 	// then leaves the whole thing alone: "Madame Coco ADANA CEYHAN CADDE".
-	name := TidyName(StripPlaceCode(text(object, l.config.Name), text(object, l.config.City)))
-	if l.config.NamePrefix != "" {
-		name = strings.TrimSpace(l.config.NamePrefix + " - " + name)
+	city, district := text(object, l.config.City), text(object, l.config.District)
+	// Only the branch name, cased and with the chain's internal city code removed. What a
+	// shop is finally called is decided in DisplayName, once the town has been resolved to
+	// a real one -- a locator publishes its own sales regions ("İstanbul - Avrupa"), which
+	// are no use to anybody reading a list of shops.
+	name := TidyName(StripPlaceCode(text(object, l.config.Name), city))
+	latitude, longitude := number(object, l.config.Latitude), number(object, l.config.Longitude)
+	if latitude == nil && longitude == nil {
+		latitude, longitude = pair(text(object, l.config.Coordinates))
 	}
 	return RawStore{
 		ExternalID: text(object, l.config.ID),
 		Name:       name,
 		Address:    text(object, l.config.Address),
-		City:       text(object, l.config.City),
-		District:   text(object, l.config.District),
+		City:       city,
+		District:   district,
 		Phone:      text(object, l.config.Phone),
 		Website:    text(object, l.config.Website),
 		ImageURL:   text(object, l.config.Image),
-		Latitude:   number(object, l.config.Latitude),
-		Longitude:  number(object, l.config.Longitude),
+		Latitude:   latitude,
+		Longitude:  longitude,
 		Raw:        raw,
 	}
 }
@@ -206,4 +249,23 @@ func number(object map[string]any, path string) *float64 {
 		return nil
 	}
 	return &parsed
+}
+
+// pair reads a coordinate published as one string: "40.99736, 28.87229", latitude first,
+// which is the order every mapping service writes and every locator that does this copies.
+// Anything that is not two numbers is not a coordinate, and says so by returning nothing.
+func pair(value string) (*float64, *float64) {
+	first, second, found := strings.Cut(strings.TrimSpace(value), ",")
+	if !found {
+		return nil, nil
+	}
+	latitude, e := strconv.ParseFloat(strings.TrimSpace(first), 64)
+	if e != nil {
+		return nil, nil
+	}
+	longitude, e := strconv.ParseFloat(strings.TrimSpace(second), 64)
+	if e != nil {
+		return nil, nil
+	}
+	return &latitude, &longitude
 }

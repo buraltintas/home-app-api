@@ -176,9 +176,10 @@ func TestJSONLocatorMapsAPublishedListToRows(t *testing.T) {
 	if rows[0].ExternalID != "3771" {
 		t.Errorf("external id=%q", rows[0].ExternalID)
 	}
-	// A branch code is not a shop sign: the chain's own city code comes off the front and
-	// its name goes on.
-	if rows[0].Name != "English Home - 365 1 AVM" {
+	// A branch code is not a shop sign: the chain's own city code comes off the front. What
+	// goes back on -- the town, the chain's name -- is DisplayName's job, once the town has
+	// been resolved to a real one.
+	if rows[0].Name != "365 1 AVM" {
 		t.Errorf("name=%q", rows[0].Name)
 	}
 	if rows[0].Latitude == nil || *rows[0].Latitude < 39.8 || *rows[0].Latitude > 39.9 {

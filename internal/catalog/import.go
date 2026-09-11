@@ -76,13 +76,33 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 
 	matcher := NewMatcher(tx)
 	seen := map[string]bool{}
+	// A row thrown out before matching is recorded like any other decision. It used to be
+	// counted and nothing more, so a dry run that rejected every row said only "515
+	// skipped" and left the reason to be guessed at -- which is the opposite of what a dry
+	// run is for.
+	reject := func(row RawStore, reason string) error {
+		report.Skipped++
+		decision := Decision{Raw: row, Action: ActionSkipped, Reason: reason}
+		report.Decisions = append(report.Decisions, decision)
+		return record(ctx, tx, runID, row, decision)
+	}
 	for _, raw := range published {
 		row := i.resolver.Normalize(raw)
+		// Named here rather than in the adapter, because only here are both facts known:
+		// which chain this is, and which real town the row resolved to.
+		row.Name = DisplayName(brand.Name, row.Name, row.City, row.District)
+		// Not every chain publishes an id for every shop. Where one is missing, it is
+		// derived from what the row itself says, so the same shop derives the same id on
+		// every run and a re-import updates it instead of adding a second copy. Without
+		// this a locator like Bellona's -- which publishes an id for a handful of its
+		// branches and nothing for the other five hundred -- loses almost all of them.
+		if row.ExternalID == "" {
+			row.ExternalID = DerivedID(row)
+		}
 		// A list that repeats a shop is the publisher's problem, not ours; the first one
 		// wins and the rest are recorded as skipped rather than fought over.
-		if row.ExternalID == "" || seen[row.ExternalID] {
-			report.Skipped++
-			if e = record(ctx, tx, runID, row, Decision{Raw: row, Action: ActionSkipped, Reason: "repeated in the published list"}); e != nil {
+		if seen[row.ExternalID] {
+			if e = reject(row, "repeated in the published list"); e != nil {
 				return report, e
 			}
 			continue
@@ -91,15 +111,13 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 
 		// A chain's own list is not a promise that everything on it belongs here.
 		if row.Outside {
-			report.Skipped++
-			if e = record(ctx, tx, runID, row, Decision{Raw: row, Action: ActionSkipped, Reason: "published at a point outside Turkey"}); e != nil {
+			if e = reject(row, "published at a point outside Turkey"); e != nil {
 				return report, e
 			}
 			continue
 		}
 		if NamesAnApparelDepartment(row.Name) {
-			report.Skipped++
-			if e = record(ctx, tx, runID, row, Decision{Raw: row, Action: ActionSkipped, Reason: "the branch name says this department sells clothing, not homeware"}); e != nil {
+			if e = reject(row, "the branch name says this department sells clothing, not homeware"); e != nil {
 				return report, e
 			}
 			continue

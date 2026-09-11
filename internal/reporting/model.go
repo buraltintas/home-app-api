@@ -46,19 +46,19 @@ type Event struct {
 // NormalizedQuery, which no reader expects and no client had matched: the query tables
 // rendered a column of dashes over data that was there all along.
 type Snapshot struct {
-	RegisteredUsersTotal      int64     `json:"registered_users_total"`
-	StoresTotal               int64     `json:"stores_total"`
-	GoogleImportedStoresTotal int64     `json:"google_imported_stores_total"`
-	PostsCurrentTotal         int64     `json:"posts_current_total"`
-	PostsCreatedLifetime      int64     `json:"posts_created_lifetime"`
-	PostsDeletedLifetime      int64     `json:"posts_deleted_lifetime"`
-	CommentsCurrentTotal      int64     `json:"comments_current_total"`
-	LikesCurrentTotal         int64     `json:"likes_current_total"`
-	FollowsCurrentTotal       int64     `json:"follows_current_total"`
-	FavoritesCurrentTotal     int64     `json:"favorites_current_total"`
-	SearchesLifetime          int64     `json:"searches_lifetime"`
-	MediaCurrentTotal         int64     `json:"media_current_total"`
-	UpdatedAt                 time.Time `json:"updated_at"`
+	RegisteredUsersTotal     int64     `json:"registered_users_total"`
+	StoresTotal              int64     `json:"stores_total"`
+	BrandVerifiedStoresTotal int64     `json:"brand_verified_stores_total"`
+	PostsCurrentTotal        int64     `json:"posts_current_total"`
+	PostsCreatedLifetime     int64     `json:"posts_created_lifetime"`
+	PostsDeletedLifetime     int64     `json:"posts_deleted_lifetime"`
+	CommentsCurrentTotal     int64     `json:"comments_current_total"`
+	LikesCurrentTotal        int64     `json:"likes_current_total"`
+	FollowsCurrentTotal      int64     `json:"follows_current_total"`
+	FavoritesCurrentTotal    int64     `json:"favorites_current_total"`
+	SearchesLifetime         int64     `json:"searches_lifetime"`
+	MediaCurrentTotal        int64     `json:"media_current_total"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 type DailyMetrics struct {
 	Date                  time.Time `json:"date"`

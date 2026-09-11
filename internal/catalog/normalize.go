@@ -309,3 +309,43 @@ func NamesAnApparelDepartment(name string) bool {
 	}
 	return false
 }
+
+// DisplayName is what a shop is finally called in this catalogue.
+//
+// Three things have to be true of it at once, and a chain's own branch name is reliably
+// none of them. It must say which chain this is, because "Ahsen Mobilya" tells nobody it is
+// where you buy an İstikbal bed. It must say where it is, because "Forum AVM" is nine
+// different shops in nine cities and "Merkez CAD" is five. And it must say each of those
+// once: a chain that already names itself in its branches does not need saying twice, and a
+// branch already named for its town does not need its town again.
+//
+// So each part is added only when it is missing, tested on the folded name so that case and
+// diacritics cannot let the same word through twice.
+func DisplayName(brand, branch, province, district string) string {
+	name := placeInName(Tidy(branch), province, district)
+	if key, brandKey := textnorm.Key(name), textnorm.Key(brand); brandKey != "" && !strings.Contains(key, brandKey) {
+		name = strings.TrimSpace(brand + " - " + name)
+	}
+	return name
+}
+
+// placeInName puts the shop's town into its name when the branch name does not already say
+// where it is, city before town -- the order a Turkish address is read aloud in, and the
+// order the chains that do publish it already use ("Antalya Kepez Kültür").
+func placeInName(name, province, district string) string {
+	key := textnorm.Key(name)
+	var missing []string
+	for _, place := range []string{province, district} {
+		place = strings.TrimSpace(place)
+		if place == "" {
+			continue
+		}
+		if folded := textnorm.Key(place); folded != "" && !strings.Contains(key, folded) {
+			missing = append(missing, TidyName(place))
+		}
+	}
+	if len(missing) == 0 {
+		return name
+	}
+	return strings.TrimSpace(strings.Join(missing, " ") + " " + name)
+}

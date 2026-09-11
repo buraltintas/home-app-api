@@ -43,7 +43,6 @@ brands:
       longitude: longitude
       # Branch names are published as internal codes -- "ANK ACITY AVM" -- so the chain's
       # own name goes in front of them or no one would recognise the shop.
-      name_prefix: English Home
 
   - slug: madame-coco
     name: Madame Coco
@@ -71,7 +70,6 @@ brands:
       longitude: longitude
       # Branch names are published as places -- "Adana Ceyhan Cadde" -- with no chain name
       # in them at all.
-      name_prefix: Madame Coco
 
   - slug: karaca-home
     name: Karaca Home
@@ -87,7 +85,23 @@ brands:
     tier: 1
     categories: [furniture, bedding, home_textile]
     store_count_estimate: 700
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Erciyes Holding publishes its chains' dealer networks through one API, one
+      # province at a time -- which is what the store page itself does when a customer
+      # picks a province from its dropdown. Its robots.txt allows us and signals
+      # "search=yes, use=reference", which is what this catalogue is.
+      url: https://brandapi.erciyes.com/api/FirmApi/GetProvBrFirms?Brand=BELLONA&Code={province}&District=
+      id: Id
+      name: FirmName
+      address: Adres
+      city: Province
+      district: District
+      phone: Telephone
+      latitude: Latitude
+      longitude: Longitude
+      # These are dealerships trading under their own signs, so the chain's name goes in
+      # front: "Ahsen Mobilya" alone tells nobody it is where you buy an İstikbal bed.
 
   - slug: istikbal
     name: İstikbal
@@ -95,7 +109,19 @@ brands:
     tier: 1
     categories: [furniture, bedding, home_textile]
     store_count_estimate: 800
-    locator: {kind: none}
+    locator:
+      kind: json
+      url: https://brandapi.erciyes.com/api/FirmApi/GetProvBrFirms?Brand=%C4%B0ST%C4%B0KBAL&Code={province}&District=
+      id: Id
+      name: FirmName
+      address: Adres
+      city: Province
+      district: District
+      phone: Telephone
+      latitude: Latitude
+      longitude: Longitude
+      # These are dealerships trading under their own signs, so the chain's name goes in
+      # front: "Ahsen Mobilya" alone tells nobody it is where you buy an İstikbal bed.
 
   - slug: mondi
     name: Mondi
@@ -103,7 +129,19 @@ brands:
     tier: 1
     categories: [furniture, bedding]
     store_count_estimate: 250
-    locator: {kind: none}
+    locator:
+      kind: json
+      url: https://brandapi.erciyes.com/api/FirmApi/GetProvBrFirms?Brand=MOND%C4%B0&Code={province}&District=
+      id: Id
+      name: FirmName
+      address: Adres
+      city: Province
+      district: District
+      phone: Telephone
+      latitude: Latitude
+      longitude: Longitude
+      # These are dealerships trading under their own signs, so the chain's name goes in
+      # front: "Ahsen Mobilya" alone tells nobody it is where you buy an İstikbal bed.
 
   - slug: dogtas
     name: Doğtaş
@@ -111,7 +149,20 @@ brands:
     tier: 1
     categories: [furniture, bedding]
     store_count_estimate: 300
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Doğtaş and Kelebek share a dealer panel, so one mapping covers both: the whole
+      # network comes back in one request, with the town as a nested object and the point
+      # as a single "lat, lon" string.
+      url: https://services.dmgpanel.com/ajax/new-shops?mark=dogtas&zone=
+      list: shops
+      id: id
+      name: name
+      address: address
+      city: city.name
+      district: district.name
+      phone: phone_number
+      coordinates: google_maps_link
 
   - slug: kelebek-mobilya
     name: Kelebek Mobilya
@@ -119,7 +170,17 @@ brands:
     tier: 1
     categories: [furniture, bedding]
     store_count_estimate: 200
-    locator: {kind: none}
+    locator:
+      kind: json
+      url: https://services.dmgpanel.com/ajax/new-shops?mark=kelebek&zone=
+      list: shops
+      id: id
+      name: name
+      address: address
+      city: city.name
+      district: district.name
+      phone: phone_number
+      coordinates: google_maps_link
 
   - slug: cilek
     name: Çilek
@@ -193,7 +254,6 @@ brands:
       image: image
       latitude: latitude
       longitude: longitude
-      name_prefix: Mudo Concept
 
   - slug: linens
     name: Linens
@@ -201,7 +261,21 @@ brands:
     tier: 1
     categories: [home_textile, bedding, decoration]
     store_count_estimate: 100
-    locator: {kind: none}
+    locator:
+      kind: json
+      # Linens and Taç run the same commerce platform, so one mapping covers both: the
+      # whole country in one request, filtered to Türkiye by countryId. The publisher
+      # spells its longitude field "longtitude"; the field name is theirs to choose.
+      url: https://www.linens.com.tr/api/inventory/inventoryGetStoreFilter?countryId=1&cityId=0&countyId=0&storeType=0
+      list: data
+      id: id
+      name: name
+      address: address
+      city: city
+      district: county
+      phone: phone
+      latitude: latitude
+      longitude: longtitude
 
   - slug: tac
     name: Taç
@@ -209,7 +283,18 @@ brands:
     tier: 1
     categories: [home_textile, bedding, curtain]
     store_count_estimate: 200
-    locator: {kind: none}
+    locator:
+      kind: json
+      url: https://www.tac.com.tr/api/inventory/inventoryGetStoreFilter?countryId=1&cityId=0&countyId=0&storeType=0
+      list: data
+      id: id
+      name: name
+      address: address
+      city: city
+      district: county
+      phone: phone
+      latitude: latitude
+      longitude: longtitude
 
   - slug: deco-home
     name: Deco Home

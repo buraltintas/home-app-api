@@ -19,6 +19,18 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 | English Home | 305 | `/api/Store/GetStoriesLite` — JSON, every field |
 | Madame Coco | 673 | `/magazalar` — JSON, nested place object |
 | Mudo Concept | 73 | `/stores` — same platform as Madame Coco |
+| Bellona | ~515 | `brandapi.erciyes.com` — one request per province |
+| İstikbal | ~700 | same API, `Brand=İSTİKBAL` |
+| Mondi | ~250 | same API, `Brand=MONDİ` |
+| Doğtaş | 252 | `services.dmgpanel.com/ajax/new-shops?mark=dogtas` |
+| Kelebek Mobilya | 236 | same panel, `mark=kelebek` |
+| Linens | 85 | `/api/inventory/inventoryGetStoreFilter` |
+| Taç | 364 | same platform as Linens |
+
+**Look for the shared one first.** Three mappings covered seven brands: Bellona, İstikbal
+and Mondi are all Erciyes Holding; Doğtaş and Kelebek share a dealer panel; Linens and Taç
+share a commerce platform. Whoever maps the next one should check the page's own scripts for
+a third-party host before assuming the chain runs its own endpoint.
 
 ## Not mapped, and why
 
@@ -26,10 +38,14 @@ go run ./cmd/catalog -source <slug>     # dry run once mapped
 scripts, or sits at a path the probe does not guess. These need a person to watch the
 network panel once.
 
-Bellona · İstikbal · Doğtaş · Kelebek Mobilya · Çilek · Yataş Bedding · Karaca Home ·
-Koçtaş · IKEA · Tepe Home · Özdilek Home · Linens · Taç · Boyner Ev (its locator is a
+Çilek · Yataş Bedding · Koçtaş · IKEA · Özdilek Home · Boyner Ev (its locator is a
 single-page application; every path answers with the same 527 KB shell) · Chakra ·
 Paşabahçe · Enza Home · Alfemo · Nurus · Merinos · Dinarsu · Emsan · Korkmaz
+
+**Published inside the page, not behind an endpoint.** Karaca Home and Tepe Home render
+their store lists into the HTML -- Karaca as `data-` attributes on each row, Tepe Home as a
+preloaded state object. Neither fits the JSON adapter as it stands; both want a locator that
+reads a page rather than an endpoint, which is the next thing worth building.
 
 **The site refuses us.** A 403 on `robots.txt` itself, which this fetcher treats as "we do
 not know what is allowed" and therefore does not proceed.
@@ -49,7 +65,8 @@ Deco Home (`decohome.com.tr`) · Mondi (`mondi.com.tr`) · Padişah Halı (`padi
 Nineteen brands have a usable mark, collected by `cmd/brand-logos`. The others publish
 none their own markup identifies, or are among the unreachable above.
 
-**English Home has no mark on purpose.** Its first image whose path says "logo" is a
-photograph of a phone and the next is a pair of app-store badges; a screenshot would be
-worse than the initial letter its stores show now. Somebody can drop a real file into
-`ui/public/brands/english-home.png` and rerun the collector to refresh the manifest.
+**English Home's mark is inline SVG.** The collector looks for an image file; English Home
+draws its wordmark directly in the page's markup, so the collector found only a photograph
+of a phone and a pair of app-store badges and reported none. The mark is now in the web
+application. A chain that does this is not rare, and the collector should learn to read an
+inline `<svg>` out of the masthead.

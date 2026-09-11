@@ -1,0 +1,2 @@
+ALTER TABLE platform_daily_metrics DROP COLUMN IF EXISTS brand_verified_stores_total;
+ALTER TABLE platform_stats RENAME COLUMN brand_verified_stores_total TO google_imported_stores_total;

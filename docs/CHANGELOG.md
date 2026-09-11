@@ -6,6 +6,52 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Seven more chains, and the four defects that were keeping them out
+
+The catalogue had three brands in it. It now has ten, and getting there turned up four
+things that were wrong for every brand rather than for the ones being added.
+
+**Shops had names that did not identify them.** Nine different shops were called
+"English Home - Forum AVM" and five were called "Merkez CAD", because a chain names its
+branches for staff who already know which city they are standing in. `DisplayName` now
+decides what a shop is called, in the importer, where both the chain and the row's resolved
+town are known: each part is added only when the published name is missing it, so
+"Forum AVM" becomes "English Home - Mersin Yenişehir Forum AVM" while Madame Coco's
+"Antalya Kepez Kültür Pop-Up Cadde" is left exactly as published and Doğtaş's own
+"Doğtaş Exclusive - Adana Çukurova" is not made to say Doğtaş twice.
+
+**A chain that publishes no id lost almost all of its shops.** Bellona publishes an `Id` for
+a handful of branches and `null` for the other five hundred; every one of those was thrown
+out as "no identifier". Where a publisher gives none, one is now derived from the row's own
+folded name and its point rounded to about ten metres -- stable across runs, so a re-import
+updates the shop instead of adding a second copy of it.
+
+**A dry run would not say why it rejected anything.** The three checks that run before
+matching counted their rejections and recorded nothing, so a run that threw out all 515 rows
+printed "515 skipped" and left the reason to be guessed at. They are ordinary decisions now
+and print like any other.
+
+**A throttled host ended the import.** One 429 abandoned the brand and, with it, every
+province after the one that failed -- silently, on a schedule nobody watches. Requests now
+back off and retry, honouring `Retry-After`, for the statuses that are about pace; a 403 or
+a 404 is still an answer and is not repeated.
+
+Two general capabilities came out of the mappings themselves, both in the shared JSON
+adapter rather than in any brand's entry: `{province}` in a locator URL is fetched once per
+Turkish province, for the many chains whose store page asks per province (unpadded -- a
+padded "07" answers with an empty list rather than an error, which would have lost Antalya
+and eight other provinces in silence); and `coordinates` reads a point published as one
+"lat, lon" string, which is as common as the separate pair.
+
+Newly mapped: Bellona, İstikbal and Mondi through Erciyes Holding's shared dealer API;
+Doğtaş and Kelebek Mobilya through the dealer panel they share; Linens and Taç through the
+commerce platform they share. Seven brands, three mappings -- chains that share an owner or
+a platform share a locator, which is worth looking for before writing a new one.
+
+**English Home has a logo after all.** The collector looks for an image file and this one is
+an inline `<svg>` in the page's own markup, so it reported none. It is now in the web
+application beside the other marks.
+
 ## Search asks the model only what it cannot answer itself
 
 Every search made an OpenAI call, and the latency of a search was mostly that call. Worse,

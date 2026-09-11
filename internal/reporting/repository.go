@@ -8,7 +8,7 @@ import (
 
 func (s *Service) GetPlatformSnapshot(ctx context.Context) (Snapshot, error) {
 	var x Snapshot
-	e := s.db.QueryRow(ctx, `SELECT registered_users_total,stores_total,google_imported_stores_total,posts_current_total,posts_created_lifetime,posts_deleted_lifetime,comments_current_total,likes_current_total,follows_current_total,favorites_current_total,searches_lifetime,media_current_total,updated_at FROM platform_stats WHERE id=1`).Scan(&x.RegisteredUsersTotal, &x.StoresTotal, &x.GoogleImportedStoresTotal, &x.PostsCurrentTotal, &x.PostsCreatedLifetime, &x.PostsDeletedLifetime, &x.CommentsCurrentTotal, &x.LikesCurrentTotal, &x.FollowsCurrentTotal, &x.FavoritesCurrentTotal, &x.SearchesLifetime, &x.MediaCurrentTotal, &x.UpdatedAt)
+	e := s.db.QueryRow(ctx, `SELECT registered_users_total,stores_total,brand_verified_stores_total,posts_current_total,posts_created_lifetime,posts_deleted_lifetime,comments_current_total,likes_current_total,follows_current_total,favorites_current_total,searches_lifetime,media_current_total,updated_at FROM platform_stats WHERE id=1`).Scan(&x.RegisteredUsersTotal, &x.StoresTotal, &x.BrandVerifiedStoresTotal, &x.PostsCurrentTotal, &x.PostsCreatedLifetime, &x.PostsDeletedLifetime, &x.CommentsCurrentTotal, &x.LikesCurrentTotal, &x.FollowsCurrentTotal, &x.FavoritesCurrentTotal, &x.SearchesLifetime, &x.MediaCurrentTotal, &x.UpdatedAt)
 	return x, e
 }
 func (s *Service) GetDailyMetrics(ctx context.Context, from, to time.Time) ([]DailyMetrics, error) {
