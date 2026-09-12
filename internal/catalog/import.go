@@ -171,7 +171,7 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		if e != nil {
 			return report, e
 		}
-		if strings.HasPrefix(row.PointFrom, "placed at the centre") {
+		if Derived(row.PointFrom) {
 			decision.Reason = decision.Reason + "; " + row.PointFrom
 		}
 		if apply {

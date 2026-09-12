@@ -384,6 +384,13 @@ func (r *Resolver) placePoint(in RawStore) RawStore {
 	return in
 }
 
+// Derived reports whether a coordinate was put there by us rather than published. The
+// wording is the provenance a row carries in the catalogue, so this is the one place that
+// reads it.
+func Derived(pointFrom string) bool {
+	return strings.HasPrefix(pointFrom, "placed at the centre")
+}
+
 func kilometres(metres float64) string {
 	return strconv.FormatFloat(metres/1000, 'f', 0, 64) + " km"
 }

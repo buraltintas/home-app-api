@@ -6,6 +6,30 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The matching queue was asking the wrong questions, and too many of them
+
+Two hundred and ninety-one rows sat waiting for a person. Most of them should never have
+been asked about.
+
+**A coordinate we invented is not evidence of where a shop is.** When a chain publishes no
+coordinate the row is stood at the centre of its town -- right for a map, wrong for a tape
+measure, because every shop that chain has in that town then stands on the same spot: nought
+metres from each other and nought metres from whichever old row is nearest the town centre.
+Boyner publishes no coordinates at all, so its entire list arrived competing for one row per
+town, and the loser of each fight went to the queue. A derived point is now treated as no
+point, and the row is compared by name inside its own district, which is what we actually
+know about it. Boyner's undecided rows went from five to two, and the two left are three
+shops in Şişli that really do need looking at.
+
+**The queue was a log, not a queue.** Every run records every row it read, and the undecided
+ones were all shown, from every run there had ever been. A row a later run resolved -- because
+the matcher improved, or because the shop it was confused with was merged away -- stayed
+there forever, and the pile grew with every import whether or not anything new was in doubt.
+It shows what each brand's most recent import could not decide. 291 became 178 without a
+single decision being made.
+
+---
+
 ## "Which of these have I liked" is now a question a page can ask
 
 A page that is cached and served to everybody alike cannot carry a reader's own state in its

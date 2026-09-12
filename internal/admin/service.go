@@ -749,7 +749,16 @@ type MatchQueueRow struct {
 // Only rows whose matched store still exists are worth showing: if that store has since
 // been merged away or deleted, the question the queue was holding has answered itself.
 func (s *Service) MatchQueue(ctx context.Context, limit, offset int) ([]MatchQueueRow, error) {
+	// Only what each brand's most recent import could not decide.
+	//
+	// Every run writes a record for every row it read, and the undecided ones were all
+	// shown, from every run there had ever been. So a row a later run resolved -- because
+	// the matcher was improved, or because the shop it was confused with was merged away --
+	// stayed in the queue forever, and the queue grew with every import whether or not
+	// anything new was undecided. A person working through it was being asked the same
+	// question about rows that no longer ask it.
 	rows, e := s.db.Query(ctx, `
+WITH latest AS (SELECT DISTINCT ON (brand_id) id FROM store_import_runs ORDER BY brand_id, started_at DESC)
 SELECT r.id,coalesce(b.name,''),r.name,
        coalesce(r.raw->>'address',''),coalesce(r.raw->>'city',''),coalesce(r.raw->>'district',''),
        coalesce(r.reason,''),coalesce(r.similarity,0),coalesce(r.distance_meters,0),r.created_at,
@@ -758,7 +767,7 @@ SELECT r.id,coalesce(b.name,''),r.name,
   JOIN store_import_runs run ON run.id=r.run_id
   LEFT JOIN brands b ON b.id=run.brand_id
   LEFT JOIN stores m ON m.id=r.matched_store_id AND m.deleted_at IS NULL
- WHERE r.action='needs_review'
+ WHERE r.action='needs_review' AND r.run_id IN (SELECT id FROM latest)
  ORDER BY r.created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
 	if e != nil {
 		return nil, e

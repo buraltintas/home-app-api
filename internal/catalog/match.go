@@ -72,6 +72,22 @@ func containment(a, b string) bool {
 	return strings.Contains(a, b) || strings.Contains(b, a)
 }
 
+// located reports whether this row's coordinate is the publisher's own.
+//
+// A point we put there ourselves is not evidence of where the shop is. When a chain
+// publishes no coordinate the row is stood at the centre of its town, which is the right
+// thing to show on a map and the wrong thing to measure with: every shop that chain has in
+// that town is then standing on the same spot, nought metres from the others and nought
+// metres from whichever old row happens to be nearest the town centre. Boyner publishes no
+// coordinates at all, and its whole list arrived competing for one row per town -- two
+// hundred and twenty of the review queue's two hundred and ninety-one entries were that.
+//
+// So a derived point is treated as no point: the row is compared by name inside its own
+// district, which is what we actually know about it.
+func located(in RawStore) bool {
+	return in.Latitude != nil && in.Longitude != nil && !Derived(in.PointFrom)
+}
+
 // Match returns the decision for one row. It never writes.
 func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Decision, error) {
 	decision := Decision{Raw: in}
@@ -122,7 +138,7 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 		// metres apart do not resemble each other at all. So a near, same-named shop under
 		// another brand is this shop, and the brand being imported is recorded as one it
 		// carries rather than as a second shop.
-		near := in.Latitude != nil && in.Longitude != nil && candidate.Distance <= mergeMeters
+		near := located(in) && candidate.Distance <= mergeMeters
 		alike := candidate.Similarity >= mergeSimilarity || containment(CompactName(in.Name), candidate.CompactName)
 		if near && alike {
 			decision.Action = ActionUpdated
@@ -165,7 +181,7 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 		return decision, nil
 	}
 
-	hasPoint := in.Latitude != nil && in.Longitude != nil
+	hasPoint := located(in)
 	// One name containing the other is identity evidence that similarity scores badly:
 	// "englishhome" inside "englishhomeantlaracad" is 0.42 by trigram and obviously the
 	// same shop on the ground. It counts only alongside proximity, never on its own.
@@ -218,7 +234,7 @@ func (m *Matcher) closest(ctx context.Context, in RawStore, provider string) (Ca
 		return Candidate{}, false, nil
 	}
 	var row pgx.Row
-	if in.Latitude != nil && in.Longitude != nil {
+	if located(in) {
 		// Ranked by name, not by distance: the nearest shop is frequently not the one with
 		// the same sign, and it is the sign that decides identity. The radius here is wider
 		// than the merge radius on purpose, so that a near-miss can still be reported for
