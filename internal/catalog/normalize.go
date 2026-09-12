@@ -461,7 +461,11 @@ func (r *Resolver) placePoint(in RawStore) RawStore {
 	}
 	if in.Latitude == nil || in.Longitude == nil {
 		in.Latitude, in.Longitude = &fallback.lat, &fallback.lon
-		in.PointFrom = "placed at the centre of " + where + "; none published"
+		why := "none published"
+		if in.Stacked {
+			why = "the publisher gave this point to many of its shops at once"
+		}
+		in.PointFrom = "placed at the centre of " + where + "; " + why
 		return in
 	}
 	away := metresBetween(*in.Latitude, *in.Longitude, province.lat, province.lon)
@@ -479,6 +483,29 @@ func (r *Resolver) placePoint(in RawStore) RawStore {
 // reads it.
 func Derived(pointFrom string) bool {
 	return strings.HasPrefix(pointFrom, "placed at the centre")
+}
+
+// FallbackPoint is where a shop goes when its own coordinate cannot be used: the
+// neighbourhood its address names, then its district's centre, then its province's. The
+// second return says which, in the words the catalogue stores as provenance.
+//
+// Exported because the same question is asked of rows already in the database, not only of
+// rows arriving from a publisher.
+func (r *Resolver) FallbackPoint(city, district, address string) (lat, lon float64, where string, ok bool) {
+	province, found := r.centres[city]
+	if !found {
+		return 0, 0, "", false
+	}
+	at, where := province, city
+	if district != "" {
+		if centre, found := r.centres[city+"|"+district]; found {
+			at, where = centre, district
+		}
+		if neighbourhood, found := r.neighbourhoodIn(city, district, address); found {
+			at, where = neighbourhood, "the neighbourhood named in its address in "+district
+		}
+	}
+	return at.lat, at.lon, where, true
 }
 
 func kilometres(metres float64) string {

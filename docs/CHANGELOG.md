@@ -6,6 +6,31 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A hundred shops on one doorstep
+
+Merinos gives 104 of its dealers a single point in Bursa and 45 more a single point in
+İstanbul -- its own address, presumably, filled in wherever the dealer's was not known. The
+catalogue believed every one of them. A hundred shops stood on one doorstep, all the same
+distance from any visitor, and "the nearest one to me" answered with whichever of them the
+sort happened to put first.
+
+A coordinate a publisher has given to a great many of its shops at once is not any of their
+addresses -- the same test the neighbourhood table already gets, where a centre shared
+across districts stands for no district. Five shops of one chain on one point to the metre
+is the line: two shops in a shopping centre can honestly share a point, five cannot. Such a
+row is treated as publishing no coordinate at all and is placed from the rest of its
+address: its neighbourhood, then its district, then its province, saying so in its
+provenance.
+
+The importer refuses these on the way in. `cmd/unstack-stores` applies the same rule to rows
+already held, and fetches nothing -- the address was always in the row. 296 shops moved, 139
+of them to the neighbourhood their own address names; 4 were left where they were because
+their row does not say which province they are in, and inventing one is worse than a bad
+point. Shops sharing a point with four or more others: 339 before, 170 after, and every one
+of those remaining is a district centre we placed and marked as ours.
+
+---
+
 ## The last brand that could not be imported, and why it could not
 
 Vivense was refused by the twin guard on every run: seven of its hundred and one shops could

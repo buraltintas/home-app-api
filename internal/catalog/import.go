@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/burakaltintas/home-app-api/internal/textnorm"
@@ -49,6 +50,33 @@ type Importer struct {
 
 func NewImporter(db *pgxpool.Pool, resolver *Resolver) *Importer {
 	return &Importer{db: db, resolver: resolver}
+}
+
+// How many shops have to share one published coordinate before it stops being a coordinate.
+// Two shops in one shopping centre can honestly share a point to the metre; five cannot.
+const stackedPointLimit = 5
+
+func pointKey(lat, lon float64) string {
+	return strconv.FormatFloat(lat, 'f', 6, 64) + "," + strconv.FormatFloat(lon, 'f', 6, 64)
+}
+
+// stackedPoints reports which of a brand's published coordinates it has repeated so often
+// that the coordinate cannot be an address.
+func stackedPoints(rows []RawStore) map[string]bool {
+	count := map[string]int{}
+	for _, row := range rows {
+		if row.Latitude == nil || row.Longitude == nil {
+			continue
+		}
+		count[pointKey(*row.Latitude, *row.Longitude)]++
+	}
+	out := map[string]bool{}
+	for key, n := range count {
+		if n >= stackedPointLimit {
+			out[key] = true
+		}
+	}
+	return out
 }
 
 func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, error) {
@@ -121,8 +149,23 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		report.Decisions = append(report.Decisions, decision)
 		return record(ctx, tx, runID, row, decision)
 	}
+	// A coordinate the publisher has given to a great many of its shops at once is not any
+	// of their addresses. Merinos gives 104 of its dealers one point in Bursa and 45 more a
+	// single point in İstanbul -- its own, presumably, filled in wherever the dealer's was
+	// not known. Kept, it stands a hundred shops on one doorstep and answers "the nearest
+	// one to me" with whichever of them the sort happened to put first.
+	//
+	// The test is the same one the neighbourhood table gets: a point that stands for many
+	// places stands for none of them. Such a row is treated as publishing no coordinate at
+	// all, which puts it where the rest of the address says -- its neighbourhood, then its
+	// district -- and says so in its provenance.
+	stacked := stackedPoints(published)
 	for _, raw := range published {
 		raw.Name = RepairSpelling(raw.Name, spellings)
+		if raw.Latitude != nil && raw.Longitude != nil && stacked[pointKey(*raw.Latitude, *raw.Longitude)] {
+			raw.Latitude, raw.Longitude = nil, nil
+			raw.Stacked = true
+		}
 		// Derived from what the publisher wrote, before any of our naming touches it. It
 		// used to be derived from the finished display name, which is ours -- so every time
 		// the naming rules improved, the identifier of every shop of every chain that

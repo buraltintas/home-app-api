@@ -54,6 +54,10 @@ type RawStore struct {
 	// PointFrom records where the coordinate finally used came from, so a store standing
 	// at its district's centre is distinguishable from one the brand actually placed.
 	PointFrom string
+	// Stacked marks a row whose published coordinate the brand had given to so many of its
+	// shops that it cannot be any of their addresses. The coordinate is dropped before
+	// anything else happens, and the row is placed from its address instead.
+	Stacked bool
 	// Outside marks a branch the brand publishes abroad. Several Turkish chains do, and
 	// their foreign cities sometimes carry names a Turkish district also has.
 	Outside bool
