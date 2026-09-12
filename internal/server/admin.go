@@ -9,6 +9,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/admin"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
 
@@ -542,4 +543,22 @@ func (s *Server) adminBrands(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"items": items})
+}
+
+// adminImportBrand runs one brand's import from the panel and answers with what it did.
+func (s *Server) adminImportBrand(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	report, e := s.admin.ImportBrand(r.Context(), actor, email, chi.URLParam(r, "slug"))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{
+		"fetched": report.Fetched, "inserted": report.Inserted, "updated": report.Updated,
+		"review": report.Review, "skipped": report.Skipped,
+	})
 }

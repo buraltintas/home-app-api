@@ -43,10 +43,12 @@ type Candidate struct {
 	SourceKind  string
 	Verified    bool
 	BrandID     *string
-	// BrandExternalID is the id this brand's own list already gave this store, when it
-	// gave one. Two rows the brand numbers differently are two shops, whatever they are
-	// called and however close together they stand.
-	BrandExternalID string
+	// BrandExternalIDs are the identifiers this brand's own list has already given this
+	// store. Usually one; two when the chain listed one shop twice and the rows have since
+	// been merged, which is a fact about the chain's list and not a fault to be scanned as
+	// a single value. Two rows the brand numbers differently are two shops, whatever they
+	// are called and however close together they stand.
+	BrandExternalIDs []string
 }
 
 // Matcher decides, for one published row, which of three things is true: we already have
@@ -145,7 +147,7 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// considers two rows distinct -- so two different derived identifiers must never be read
 	// as the chain distinguishing them. They differ whenever the derivation changes, and the
 	// first time it did, this rule wanted to insert all 652 İstikbal dealers a second time.
-	if published(candidate.BrandExternalID) && published(in.ExternalID) && candidate.BrandExternalID != in.ExternalID {
+	if published(in.ExternalID) && listedSeparately(candidate.BrandExternalIDs, in.ExternalID) {
 		decision.Action = ActionInserted
 		decision.Reason = fmt.Sprintf("the brand lists this separately from %q", candidate.Name)
 		decision.StoreID = ""
@@ -225,7 +227,11 @@ func (m *Matcher) closest(ctx context.Context, in RawStore, provider string) (Ca
 SELECT id::text, name, compact_name, similarity(compact_name,$1) AS sim,
        ST_Distance(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) AS metres,
        source_kind, data_verified_at IS NOT NULL, brand_id::text,
-       coalesce((SELECT external_id FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$5),'')
+       -- Every identifier this shop already carries from this chain's list, not one of
+       -- them. A shop can carry two once the chain has listed it twice and the two rows
+       -- have been merged, and reading "the" identifier then fails outright -- it did, on
+       -- Merinos, after the duplicate cleanup gave one dealer both of its entries.
+       coalesce((SELECT array_agg(external_id) FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$5),'{}')
 FROM stores
 WHERE deleted_at IS NULL
   AND ST_DWithin(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography, $4)
@@ -238,14 +244,14 @@ LIMIT 1`, compact, *in.Latitude, *in.Longitude, mergeMeters*6, provider)
 		}
 		row = m.tx.QueryRow(ctx, `
 SELECT id::text, name, compact_name, similarity(compact_name,$1) AS sim, 0::float8 AS metres, source_kind, data_verified_at IS NOT NULL, brand_id::text,
-       coalesce((SELECT external_id FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$4),'')
+       coalesce((SELECT array_agg(external_id) FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$4),'{}')
 FROM stores
 WHERE deleted_at IS NULL AND city=$2 AND district=$3 AND compact_name <> ''
 ORDER BY similarity(compact_name,$1) DESC
 LIMIT 1`, compact, in.City, in.District, provider)
 	}
 	var c Candidate
-	e := row.Scan(&c.ID, &c.Name, &c.CompactName, &c.Similarity, &c.Distance, &c.SourceKind, &c.Verified, &c.BrandID, &c.BrandExternalID)
+	e := row.Scan(&c.ID, &c.Name, &c.CompactName, &c.Similarity, &c.Distance, &c.SourceKind, &c.Verified, &c.BrandID, &c.BrandExternalIDs)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return Candidate{}, false, nil
 	}
@@ -253,6 +259,22 @@ LIMIT 1`, compact, in.City, in.District, provider)
 		return Candidate{}, false, e
 	}
 	return c, true, nil
+}
+
+// listedSeparately reports whether the chain has given this store identifiers of its own
+// and none of them is this row's -- which is the chain saying these are two shops.
+func listedSeparately(carried []string, incoming string) bool {
+	any := false
+	for _, id := range carried {
+		if !published(id) {
+			continue
+		}
+		if id == incoming {
+			return false
+		}
+		any = true
+	}
+	return any
 }
 
 // published reports whether an identifier came from the chain rather than from us.

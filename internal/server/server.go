@@ -156,6 +156,9 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Post("/feedback/{id}/reply", s.adminReplyFeedback)
 			r.Get("/categories", s.adminCategories)
 			r.Get("/brands", s.adminBrands)
+			// An import fetches a chain's whole list; it is slow by nature and must not
+			// share the ordinary admin rate limit with the pages beside it.
+			r.With(appmw.NewLimiter(6, 2).Middleware).Post("/brands/{slug}/import", s.adminImportBrand)
 			r.Get("/match-queue", s.adminMatchQueue)
 			r.Post("/match-queue/{id}", s.adminResolveMatch)
 			r.Get("/stores/nearby", s.adminNearbyStores)

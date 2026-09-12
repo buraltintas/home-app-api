@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/burakaltintas/home-app-api/internal/catalog"
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
 	"github.com/burakaltintas/home-app-api/internal/textnorm"
@@ -859,4 +860,47 @@ SELECT b.slug,b.name,coalesce(b.website,''),b.tier,b.locator_kind,b.active,
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+// ImportBrand runs one brand's import and returns what it did.
+//
+// The command line stays the way a catalogue is rebuilt in bulk; this is for the ordinary
+// case of one brand whose list has changed, started by the person who noticed. It is
+// synchronous on purpose: an import that reports "started" and then fails somewhere nobody
+// is looking is exactly the shape of the mistakes this catalogue has already made. The
+// caller waits, and gets the counts.
+func (s *Service) ImportBrand(ctx context.Context, actor uuid.UUID, email, slug string) (catalog.Report, error) {
+	brands, e := catalog.Brands(ctx, s.db, slug)
+	if e != nil {
+		return catalog.Report{}, e
+	}
+	if len(brands) != 1 {
+		return catalog.Report{}, httpapi.E(404, "BRAND_NOT_FOUND", "Brand not found")
+	}
+	source, ok, e := catalog.SourceFor(brands[0], catalog.NewFetcher())
+	if e != nil {
+		return catalog.Report{}, httpapi.E(400, "LOCATOR_BROKEN", e.Error())
+	}
+	if !ok {
+		return catalog.Report{}, httpapi.E(409, "NO_LOCATOR", "This brand has no store list we can read yet")
+	}
+	resolver, e := catalog.NewResolver(ctx, s.db)
+	if e != nil {
+		return catalog.Report{}, e
+	}
+	report, e := catalog.NewImporter(s.db, resolver).Run(ctx, source, true)
+	if e != nil {
+		return report, httpapi.E(502, "IMPORT_FAILED", e.Error())
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return report, nil
+	}
+	defer tx.Rollback(ctx)
+	if e = record(ctx, tx, actor, email, "catalog.import", "brand", uuid.MustParse(brands[0].ID), map[string]any{
+		"slug": slug, "fetched": report.Fetched, "inserted": report.Inserted, "updated": report.Updated, "review": report.Review,
+	}); e == nil {
+		_ = tx.Commit(ctx)
+	}
+	return report, nil
 }
