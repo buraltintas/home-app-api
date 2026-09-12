@@ -6,6 +6,18 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The admin store list says where each row came from
+
+A thousand rows in the catalogue are left over from the provider the product no longer uses:
+their name and address are still there and nothing stands behind them any more. Until now
+the only way to find one was to query the database. The store list carries each row's origin
+-- the chain's own published list, typed in here, from a visitor, or an unverified leftover
+-- with the brand under it, and can be filtered down to any one of them. The filter is in the
+address, so the list of leftovers can be bookmarked and handed to whoever is working through
+it.
+
+---
+
 ## Koçtaş, and two things its locator taught the adapter
 
 Koçtaş sat in the registry as a tier-one chain with no locator and no shops. Its store

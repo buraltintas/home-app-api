@@ -80,17 +80,25 @@ type StoreRow struct {
 	ReviewCount    int       `json:"review_count"`
 	Rating         float64   `json:"average_rating"`
 	CreatedAt      time.Time `json:"created_at"`
+	// Where the row came from and whether anything still stands behind it. A shop taken
+	// from a chain's own published list is backed by that list and can be refreshed from
+	// it; a row left over from the provider we no longer use is not backed by anything,
+	// and the only way to find that out used to be to read the database.
+	SourceKind string `json:"source_kind"`
+	BrandSlug  string `json:"brand_slug"`
+	Verified   bool   `json:"verified"`
 }
 
-func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, limit, offset int) ([]StoreRow, error) {
+func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, source string, limit, offset int) ([]StoreRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
 	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,s.is_catalog_store,coalesce(s.cover_media_id::text,''),
  coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),
- ss.review_count,ss.average_rating,s.created_at
- FROM stores s JOIN store_stats ss ON ss.store_id=s.id
+ ss.review_count,ss.average_rating,s.created_at,s.source_kind,coalesce(b.slug,''),s.data_verified_at IS NOT NULL
+ FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN brands b ON b.id=s.brand_id
  WHERE s.deleted_at IS NULL AND (NOT $1 OR s.is_premium)
  AND ($2='' OR lower(s.name) LIKE '%'||$2||'%' OR lower(s.city) LIKE '%'||$2||'%')
- ORDER BY s.is_premium DESC, ss.review_count DESC, s.created_at DESC LIMIT $3 OFFSET $4`, premiumOnly, query, clamp(limit), offset)
+ AND ($5='' OR s.source_kind=$5)
+ ORDER BY s.is_premium DESC, ss.review_count DESC, s.created_at DESC LIMIT $3 OFFSET $4`, premiumOnly, query, clamp(limit), offset, source)
 	if e != nil {
 		return nil, e
 	}
@@ -98,7 +106,7 @@ func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, li
 	out := []StoreRow{}
 	for rows.Next() {
 		var x StoreRow
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.IsCatalogStore, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.IsCatalogStore, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt, &x.SourceKind, &x.BrandSlug, &x.Verified); e != nil {
 			return nil, e
 		}
 		out = append(out, x)

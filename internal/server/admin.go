@@ -136,7 +136,7 @@ func (s *Server) adminUsers(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) adminStores(w http.ResponseWriter, r *http.Request) {
 	limit, offset := adminPage(r)
-	items, e := s.admin.Stores(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("premium") == "true", limit, offset)
+	items, e := s.admin.Stores(r.Context(), r.URL.Query().Get("q"), r.URL.Query().Get("premium") == "true", r.URL.Query().Get("source"), limit, offset)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
