@@ -529,3 +529,17 @@ func (s *Server) adminResolveMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	JSON(w, 200, map[string]any{"id": id, "merged": body.Merge})
 }
+
+// adminBrands is the registry with what each brand's last import did.
+func (s *Server) adminBrands(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := s.adminActor(r); !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	items, e := s.admin.Brands(r.Context())
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}

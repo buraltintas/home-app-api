@@ -809,3 +809,54 @@ SELECT r.matched_store_id, run.brand_id, r.name FROM store_import_records r
 	}
 	return tx.Commit(ctx)
 }
+
+// BrandRow is the registry as an operator sees it: what we carry, how many shops it has,
+// whether we can read its list, and when we last did.
+type BrandRow struct {
+	Slug        string     `json:"slug"`
+	Name        string     `json:"name"`
+	Website     string     `json:"website"`
+	Tier        int        `json:"tier"`
+	LocatorKind string     `json:"locator_kind"`
+	Active      bool       `json:"active"`
+	Stores      int        `json:"stores"`
+	Carried     int        `json:"carried"`
+	LastRun     *time.Time `json:"last_run"`
+	LastFetched int        `json:"last_fetched"`
+	LastNew     int        `json:"last_new"`
+	LastUpdated int        `json:"last_updated"`
+	LastReview  int        `json:"last_review"`
+	LastError   string     `json:"last_error"`
+}
+
+// Brands lists the registry with what each brand's last import actually did.
+//
+// The counts are the point. A brand whose last run inserted nothing and updated everything
+// is working; one that inserted as many shops as it already had has just been duplicated,
+// and that is visible here before anybody searches for a shop and sees it twice.
+func (s *Service) Brands(ctx context.Context) ([]BrandRow, error) {
+	rows, e := s.db.Query(ctx, `
+SELECT b.slug,b.name,coalesce(b.website,''),b.tier,b.locator_kind,b.active,
+       (SELECT count(*) FROM stores s WHERE s.brand_id=b.id AND s.deleted_at IS NULL),
+       (SELECT count(*) FROM store_carried_brands c JOIN stores s ON s.id=c.store_id AND s.deleted_at IS NULL WHERE c.brand_id=b.id),
+       r.finished_at,coalesce(r.fetched,0),coalesce(r.inserted,0),coalesce(r.updated,0),coalesce(r.review,0),coalesce(r.error,'')
+  FROM brands b
+  LEFT JOIN LATERAL (
+    SELECT finished_at,fetched,inserted,updated,review,error FROM store_import_runs
+     WHERE brand_id=b.id AND applied ORDER BY started_at DESC LIMIT 1) r ON true
+ ORDER BY b.tier, b.name`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []BrandRow{}
+	for rows.Next() {
+		var x BrandRow
+		if e = rows.Scan(&x.Slug, &x.Name, &x.Website, &x.Tier, &x.LocatorKind, &x.Active, &x.Stores, &x.Carried,
+			&x.LastRun, &x.LastFetched, &x.LastNew, &x.LastUpdated, &x.LastReview, &x.LastError); e != nil {
+			return nil, e
+		}
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
