@@ -397,12 +397,18 @@ brands:
       latitude: latitude
       longitude: longtitude
 
+  # Carried as a tier-one chain of eighty shops; there is no such chain to carry. The
+  # domain stopped resolving (SERVFAIL, September 2026, checked from two resolvers), and the
+  # name belongs to several unrelated local shops rather than one network -- an Antalya
+  # accessory shop, a Gaziantep one, an online seller at another address. Nothing publishes
+  # a store list, so there is nothing to import. Set active again if a network appears.
   - slug: deco-home
     name: Deco Home
     website: https://www.decohome.com.tr
     tier: 1
     categories: [home_textile, bedding, decoration]
     store_count_estimate: 80
+    active: false
     locator: {kind: none}
 
   - slug: vivense
@@ -578,11 +584,15 @@ brands:
       latitude: 'data-latitude=([0-9.]+)'
       longitude: 'data-longitude=([0-9.]+)'
 
+  # The domain is gone (SERVFAIL, September 2026). The maker is still trading, at
+  # ipekcarpet.com.tr, and publishes no dealer list at all: its dealers are behind a login.
+  # A brand that does not publish where its shops are cannot be imported from.
   - slug: ipek-hali
     name: İpek Halı
     website: https://www.ipekhali.com.tr
     tier: 2
     categories: [carpet]
+    active: false
     locator: {kind: none}
 
   - slug: dinarsu
@@ -613,18 +623,23 @@ brands:
       latitude: latitude
       longitude: longitude
 
+  # Domain gone (SERVFAIL, September 2026); no other address answers for it.
   - slug: padisah-hali
     name: Padişah Halı
     website: https://www.padisahhali.com
     tier: 2
     categories: [carpet]
+    active: false
     locator: {kind: none}
 
+  # The domain resolves and the host accepts nothing: no answer on 80 or 443, to the name
+  # or to the address behind it (September 2026). Nothing to read.
   - slug: neva-home
     name: Neva Home
     website: https://www.nevahome.com
     tier: 2
     categories: [home_textile, bedding]
+    active: false
     locator: {kind: none}
 
   - slug: pierre-cardin-home
