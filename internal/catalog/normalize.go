@@ -352,6 +352,27 @@ func (r *Resolver) ResolveAt(city, district, address string, lat, lon *float64) 
 	return place
 }
 
+// DistrictInText finds a district of this province named anywhere in a piece of text.
+//
+// A chain's branch name routinely says which town it is in -- "Vivense - Antalya Kepez
+// Satış Noktası", "Doğtaş Exclusive - Çukurova" -- and that is the row's own word on the
+// subject, which beats anything read off a coordinate. Held inside the province the row is
+// already known to be in, so a word that happens to be a district somewhere else in Turkey
+// cannot move the shop: this is the rule whose unbounded version once filed an İstanbul
+// shop in Diyarbakır.
+func (r *Resolver) DistrictInText(province, text string) string {
+	districts := r.districts[textnorm.Key(province)]
+	if districts == nil || text == "" {
+		return ""
+	}
+	for _, word := range strings.Fields(textnorm.Key(text)) {
+		if name, ok := districts[word]; ok {
+			return name
+		}
+	}
+	return ""
+}
+
 func (r *Resolver) fromAddress(address string) Place {
 	key := textnorm.Key(address)
 	if key == "" {

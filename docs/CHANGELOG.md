@@ -6,6 +6,25 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A branch name says which town it is in, and that beats a coordinate we invented
+
+Reading a district off a point we had placed ourselves left rows filed in the wrong town,
+and once written, the wrong district is indistinguishable from a published one -- the rule
+that stopped doing it could not undo what it had already done. The row's own name is the way
+back: Vivense calls its shop "Antalya Kepez Satış Noktası" while the coordinate we invented
+for it says Muratpaşa, because Muratpaşa is what lies nearest the middle of Antalya.
+
+For a row standing on a coordinate we placed, a district named in its own name or address now
+wins. Held inside the province the row is already known to be in, so a word that happens to
+be a district somewhere else in Turkey cannot move a shop -- that unbounded version once
+filed an İstanbul shop in Diyarbakır.
+
+Sixteen rows moved, every one of them into the town it is actually in: Alfemo's Masko shops
+from Fatih to Başakşehir, its Forum Bornova shop from Konak to Bornova, Ankara Siteler from
+Çankaya to Altındağ, Boyner's Çiğli Kipa from Konak to Çiğli.
+
+---
+
 ## A place must not be read off a point we placed ourselves
 
 The rule that lets a shop's coordinate name its city and district was applied to rows whose

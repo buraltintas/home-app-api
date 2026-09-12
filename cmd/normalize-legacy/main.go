@@ -71,7 +71,8 @@ func main() {
 		// the place in the first place, and reading the place back off it is a circle. It
 		// put Vivense's Kepez shop in Muratpaşa, because that is what is nearest the middle
 		// of Antalya, and then the next import could not recognise its own row.
-		if catalog.Derived(pointFrom) {
+		derived := catalog.Derived(pointFrom)
+		if derived {
 			latitude, longitude = nil, nil
 		}
 		total++
@@ -85,6 +86,16 @@ func main() {
 			c.city, c.district = c.oldCity, c.oldDistrict
 		} else if c.district == "" {
 			c.district = c.oldDistrict
+		}
+		// A row standing on a coordinate we invented has a district that may have been read
+		// off that same coordinate -- which is how Vivense's Kepez shop came to be filed in
+		// Muratpaşa, and the stored value now looks exactly like a published one. Its own
+		// name is the way back: it says Kepez, and a district named in the row's own text
+		// beats one derived from a point we placed.
+		if derived && c.city != "" {
+			if named := resolver.DistrictInText(c.city, c.oldName+" "+address); named != "" {
+				c.district = named
+			}
 		}
 		changes = append(changes, c)
 	}
