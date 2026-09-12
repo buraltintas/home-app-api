@@ -189,6 +189,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.With(writeLimit.Middleware).Put("/me/discovery-location", s.updateDiscoveryLocation)
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/favorites", s.myFavorites)
+			r.Get("/me/likes", s.myLikes)
 			r.Get("/me/messages", s.myMessages)
 			r.With(writeLimit.Middleware).Post("/posts", s.createPost)
 			r.With(writeLimit.Middleware).Post("/stores/{id}/visit-verifications", s.verifyStoreVisit)
@@ -695,6 +696,29 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// myLikes answers "which of these have I liked" for a page that could not be rendered with
+// the answer in it. At most fifty ids, which is more than any one page shows.
+func (s *Server) myLikes(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	var posts []uuid.UUID
+	for _, raw := range strings.Split(r.URL.Query().Get("posts"), ",") {
+		id, e := uuid.Parse(strings.TrimSpace(raw))
+		if e != nil {
+			continue
+		}
+		if posts = append(posts, id); len(posts) == 50 {
+			break
+		}
+	}
+	liked, e := s.social.LikedAmong(r.Context(), p.UserID, posts)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"liked": liked})
+}
+
 func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
 	p, _ := appmw.PrincipalFrom(r.Context())
 	x, e := s.stores.Favorites(r.Context(), p.UserID, queryInt(r, "limit", 50))

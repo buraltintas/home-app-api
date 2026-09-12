@@ -558,6 +558,32 @@ func nilUUID(id uuid.UUID) any {
 	return id
 }
 
+// LikedAmong answers which of these posts this viewer has liked.
+//
+// A page that is cached and served to everybody alike cannot carry the answer in its
+// markup: whoever's state was rendered into it would be shown to the next reader, and a
+// review somebody liked would come back to them un-liked. So the page renders the posts and
+// asks this afterwards, once for all of them rather than once each.
+func (s *Service) LikedAmong(ctx context.Context, user uuid.UUID, posts []uuid.UUID) ([]uuid.UUID, error) {
+	out := []uuid.UUID{}
+	if user == uuid.Nil || len(posts) == 0 {
+		return out, nil
+	}
+	rows, e := s.db.Query(ctx, `SELECT post_id FROM likes WHERE user_id=$1 AND post_id=ANY($2)`, user, posts)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id uuid.UUID
+		if e = rows.Scan(&id); e != nil {
+			return nil, e
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 func (s *Service) Like(ctx context.Context, user, post uuid.UUID, add bool) error {
 	event := reporting.LikeRemoved
 	if add {

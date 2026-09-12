@@ -6,6 +6,18 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## "Which of these have I liked" is now a question a page can ask
+
+A page that is cached and served to everybody alike cannot carry a reader's own state in its
+markup -- whoever's state was rendered into it is what the next reader sees. The store page
+carried exactly one such thing after favourites were fixed: whether this reader had liked
+each review on it, which meant the page could not be cached at all.
+
+`GET /v1/me/likes?posts=…` answers it for up to fifty posts at once, so the page asks once
+after it arrives rather than once per card.
+
+---
+
 ## The admin store list says where each row came from
 
 A thousand rows in the catalogue are left over from the provider the product no longer uses:
