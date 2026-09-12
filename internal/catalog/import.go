@@ -162,16 +162,21 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	stacked := stackedPoints(published)
 	for _, raw := range published {
 		raw.Name = RepairSpelling(raw.Name, spellings)
-		if raw.Latitude != nil && raw.Longitude != nil && stacked[pointKey(*raw.Latitude, *raw.Longitude)] {
-			raw.Latitude, raw.Longitude = nil, nil
-			raw.Stacked = true
-		}
 		// Derived from what the publisher wrote, before any of our naming touches it. It
 		// used to be derived from the finished display name, which is ours -- so every time
 		// the naming rules improved, the identifier of every shop of every chain that
 		// publishes none changed with them, and the next import inserted the lot again.
 		// Ninety-nine shops stood duplicated at zero metres because of it.
 		derived := DerivedID(raw)
+		// Only now, with the identifier already taken from what the publisher wrote. Doing
+		// this before it cost 353 Merinos shops their identity in a dry run: the id is a
+		// hash of the published name and point, so dropping the point changed every one of
+		// them and the next import would have added the lot again. This is the second time
+		// that mistake has been made here and the comment above is the first one's.
+		if raw.Latitude != nil && raw.Longitude != nil && stacked[pointKey(*raw.Latitude, *raw.Longitude)] {
+			raw.Latitude, raw.Longitude = nil, nil
+			raw.Stacked = true
+		}
 		row := i.resolver.Normalize(raw)
 		// The whole of naming, here rather than in the adapter, because only here are both
 		// facts known: which chain this is, and which real town the row resolved to. The
@@ -198,7 +203,26 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 
 		// A chain's own list is not a promise that everything on it belongs here.
 		if row.Outside {
-			if e = reject(row, "published at a point outside Turkey"); e != nil {
+			why := "published at a point outside Turkey"
+			if row.PointFrom != "" {
+				why = row.PointFrom
+			}
+			// And a row we have already got has to leave, not merely stop arriving. This
+			// rule is newer than the catalogue, so shops it would have refused are sitting
+			// in it -- Weltew's Georgian branches, Madame Coco's Iraqi ones -- and a chain
+			// that closes a Turkish branch and opens one abroad would otherwise leave the
+			// old row behind forever. Soft-deleted, so anything anybody wrote about it is
+			// still there if the decision turns out to be wrong.
+			if apply {
+				if _, e = tx.Exec(ctx, `
+UPDATE stores SET deleted_at=now(), updated_at=now()
+ WHERE deleted_at IS NULL AND id IN (
+   SELECT store_id FROM store_external_sources WHERE provider=$1 AND external_id=$2)`,
+					brand.Provider(), row.ExternalID); e != nil {
+					return report, e
+				}
+			}
+			if e = reject(row, why); e != nil {
 				return report, e
 			}
 			continue

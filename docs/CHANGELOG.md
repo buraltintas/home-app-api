@@ -101,6 +101,34 @@ website because a laptop was left running.
 
 ---
 
+## Three provinces of Merinos dealers had been thrown away
+
+A point outside Turkey's bounding box meant the row was not a Turkish shop and was dropped.
+That is right for Weltew's Tbilisi branch and Madame Coco's Erbil ones. It is wrong for a
+Konya shop a chain published at a coordinate in Iraq -- and Merinos does that to hundreds of
+its dealers. Merinos had no shops at all in Bilecik, Yozgat or Ağrı: every dealer there
+carried a junk coordinate, and the catalogue quietly refused the lot.
+
+A row's own words come before its coordinate here as everywhere else. A branch name routinely
+says where it is -- "Cihanbeyli Konya - Yeniceoba" -- so when nothing else names a place the
+name is read the way an address is: a province must be named before a district inside it is
+looked for, which is exactly what stops "Özbekistan - Taşkent" becoming Konya's Taşkent. A
+point outside the box is still never used; what changes is that the row goes with it only
+when the row names no Turkish place either.
+
+Measured on Merinos: 407 rows skipped before, 48 after -- 353 real dealers recovered,
+including the first ones this catalogue has ever had in three provinces. Foreign branches are
+still refused: Georgia, Iraq, Libya, Uzbekistan and Tajikistan all still drop out by name.
+
+**And a point we cannot place in Turkey at all now says so.** Turkey's bounding box takes in a
+good part of four neighbours -- Batumi, Tbilisi, Erbil and Duhok all sit inside it -- and the
+open sea, which is where a coordinate rounded to whole degrees lands. A row that resolves to
+no Turkish town within fifteen kilometres and names no place of its own is not a Turkish
+shop; it is refused, and an existing row carrying the same identifier is soft-deleted, so a
+rule newer than the catalogue can clean up after itself instead of only refusing new arrivals.
+
+---
+
 ## A hundred shops on one doorstep
 
 Merinos gives 104 of its dealers a single point in Bursa and 45 more a single point in

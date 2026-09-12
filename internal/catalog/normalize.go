@@ -340,6 +340,13 @@ func (r *Resolver) Resolve(city, district, address string) Place {
 // likely to get wrong; the point answers only what the name left empty.
 func (r *Resolver) ResolveAt(city, district, address, name string, lat, lon *float64) Place {
 	place := r.Resolve(city, district, address)
+	// Nothing in the place fields or the address, but a branch name routinely says where it
+	// is: "Cihanbeyli Konya - Yeniceoba". Read the same way an address is, so a province has
+	// to be named before a district inside it is looked for, which is what keeps "Özbekistan
+	// - Taşkent" from becoming Konya's Taşkent.
+	if place.City == "" {
+		place = r.fromAddress(name)
+	}
 	// The row's own words come before its coordinate. A chain that leaves the district
 	// field empty has often put the town in the branch name instead -- Vivense publishes
 	// "Antalya Kepez Satış Noktası" with no district at all -- and that is the publisher
@@ -434,14 +441,39 @@ func (r *Resolver) Normalize(in RawStore) RawStore {
 // fails silently. So a point too far from the named place is replaced by that place's own
 // centre, which is right to within a few kilometres instead of wrong by a thousand.
 func (r *Resolver) placePoint(in RawStore) RawStore {
-	// Checked before anything else, and on the published point rather than the resolved
-	// place: a foreign branch often resolves to a Turkish name by coincidence.
+	// A point outside the country is never used. Whether the row goes with it depends on
+	// whether anything else about the row puts it in Turkey: a chain publishing a genuine
+	// branch abroad names a foreign town and nothing resolves, while a chain publishing a
+	// Konya shop at a coordinate in Iraq still calls it Cihanbeyli Konya. The first is not
+	// ours; the second is ours with a bad coordinate, and dropping it loses a real shop.
+	//
+	// The place is trusted here and not the point because it is the field a chain is least
+	// likely to get wrong, and because the names are checked against the administrative
+	// table: "Özbekistan - Taşkent" resolves to nothing, having named no province.
 	if in.Latitude != nil && in.Longitude != nil && !insideTurkey(*in.Latitude, *in.Longitude) {
-		in.Outside = true
-		in.PointFrom = "published outside Turkey"
-		return in
+		if in.City == "" {
+			in.Outside = true
+			in.PointFrom = "published outside Turkey"
+			return in
+		}
+		in.Latitude, in.Longitude = nil, nil
 	}
 	if in.City == "" {
+		// Nothing published named a place, and the point could not name one either -- which,
+		// for a point that passed the box above, means it is not in Turkey's populated
+		// territory at all. Turkey's bounding box takes in a good part of four neighbours:
+		// Batumi, Tbilisi, Erbil and Duhok all sit inside it, and several chains publish
+		// branches there. So does the open sea, which is where a coordinate rounded to whole
+		// degrees lands -- 37.000, 27.000 is off the coast of Bodrum, and Merinos publishes
+		// four dealers at points like it.
+		//
+		// Either way the row cannot be placed in Turkey, and a shop with no city answers no
+		// search for a city: it sits in the catalogue doing nothing and counting as coverage
+		// it does not provide.
+		if in.Latitude != nil && in.Longitude != nil {
+			in.Outside = true
+			in.PointFrom = "no Turkish town within " + kilometres(maxMetresFromNeighbourhood) + " of the published point"
+		}
 		return in
 	}
 	province, ok := r.centres[in.City]
