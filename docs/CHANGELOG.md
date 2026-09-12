@@ -6,6 +6,42 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A shop with a coordinate is never a shop with no city
+
+Three hundred and sixty-three shops stood in no city, and two and a half thousand in no
+district. Every one of them had a coordinate. They answered no search for a place, sat under
+no province in the catalogue, and were invisible to anyone browsing by city -- because the
+place a shop is in was only ever read from what the publisher wrote, and Merinos and two
+hundred other rows write nothing.
+
+A row says where it is in two ways, and either can answer for the other. The name is still
+asked first: it comes with a street address a person can read, and it is the field a chain
+is least likely to get wrong. The point now answers what the name left empty -- the nearest
+neighbourhood out of seventy thousand, not the nearest district centre, because a district
+centre is the middle of its neighbourhoods and a large district reaches tens of kilometres
+past it. Where the name gives a province but no district, the search is held inside that
+province, so a bad coordinate can cost a district but never a province.
+
+**A fifth of the neighbourhood table cannot say where anything is, and is now left out.**
+Fifteen thousand of its sixty-nine thousand rows share a centre with a neighbourhood of a
+different district -- where the real centre was not known something else was put there, and
+one coordinate now stands for two places. Believing them put a shop on Lara, in Antalya, into
+Manavgat, eighty kilometres away, because a Manavgat neighbourhood had been given a
+Muratpaşa coordinate. Fifty thousand honest points remain, one every few hundred metres in
+a town.
+
+A point further than fifteen kilometres from every neighbourhood in the country is in open
+country, at sea, or over a border, and is still told to say nothing.
+
+Measured on the whole catalogue before it was written: 199 shops given a city they did not
+have, 2,296 given a district they did not have, and 19 moved out of a district they were
+already filed under -- each of those printed in full for a person to read, and each of them
+a correction (an "Antalya Merkez" that is Muratpaşa, a Mardin "Merkez" that is Artuklu, a
+Şanlıurfa shop filed under a district of Iğdır, and one shop whose district was the words
+"yemek masası"). Afterwards: 14 shops without a city, 31 without a district, out of 8,589.
+
+---
+
 ## The mark collector was throwing away marks
 
 Forty-two percent of the catalogue -- Merinos, İstikbal, Bellona, Taç, Mondi, Doğtaş, nine

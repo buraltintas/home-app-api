@@ -119,7 +119,22 @@ type Resolver struct {
 	// must not be guessed at.
 	districtOnly map[string]Place
 	ambiguous    map[string]bool
+	// Every neighbourhood in the country with its own centre, for the row that publishes a
+	// coordinate and no readable place name. Around seventy thousand of them: a few
+	// megabytes held for the length of one import, and accurate to within a kilometre or
+	// two, where the nearest district centre would be accurate to within a district.
+	neighbourhoods []placed
 }
+
+type placed struct {
+	at    point
+	place Place
+}
+
+// How far the nearest neighbourhood may be before a point stops telling us anything. A shop
+// standing more than this from every neighbourhood in Turkey is in open country, at sea, or
+// across a border, and naming it would be a guess dressed up as a fact.
+const maxMetresFromNeighbourhood = 15000
 
 func NewResolver(ctx context.Context, db *pgxpool.Pool) (*Resolver, error) {
 	r := &Resolver{
@@ -158,7 +173,80 @@ func NewResolver(ctx context.Context, db *pgxpool.Pool) (*Resolver, error) {
 		}
 		r.districtOnly[districtKey] = Place{City: province, District: district}
 	}
-	return r, rows.Err()
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	return r, r.loadNeighbourhoods(ctx, db)
+}
+
+func (r *Resolver) loadNeighbourhoods(ctx context.Context, db *pgxpool.Pool) error {
+	// A fifth of the neighbourhood table -- fifteen thousand rows -- shares its centre with
+	// a neighbourhood of another district: where the real centre was not known, something
+	// else was put there, and the same coordinate now stands for two places at once. Those
+	// rows cannot say where a point is, whichever of them is nearest, and they are left out
+	// rather than believed. Fifty thousand remain, which is still one every few hundred
+	// metres in a town.
+	rows, e := db.Query(ctx, `
+WITH shared AS (
+  SELECT ST_AsText(location::geometry) AS at FROM tr_locations WHERE kind='mahalle'
+  GROUP BY 1 HAVING count(DISTINCT coalesce(district_name,'')) > 1
+)
+SELECT province_name,coalesce(district_name,''),ST_Y(location::geometry),ST_X(location::geometry)
+FROM tr_locations
+WHERE kind='mahalle' AND ST_AsText(location::geometry) NOT IN (SELECT at FROM shared)`)
+	if e != nil {
+		return e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var province, district string
+		var latitude, longitude float64
+		if e = rows.Scan(&province, &district, &latitude, &longitude); e != nil {
+			return e
+		}
+		// The canonical spellings are the ones already held, so the names share their
+		// backing strings with the province and district maps rather than being copied
+		// seventy thousand times.
+		if canonical, ok := r.provinces[textnorm.Key(province)]; ok {
+			province = canonical
+		}
+		if canonical, ok := r.districts[textnorm.Key(province)][textnorm.Key(district)]; ok {
+			district = canonical
+		}
+		r.neighbourhoods = append(r.neighbourhoods, placed{point{latitude, longitude}, Place{City: province, District: district}})
+	}
+	return rows.Err()
+}
+
+// placeFromPoint answers the question the other way round: not where a named place is, but
+// what place a coordinate stands in. It is the rule for the row that publishes a point and
+// nothing readable beside it -- Merinos publishes hundreds, every one of them a real shop
+// that would otherwise belong to no city and answer no search.
+//
+// The nearest neighbourhood, not the nearest district centre. A district centre is the
+// middle of its neighbourhoods and a large district reaches tens of kilometres past it, so
+// the nearest centre is regularly in the district next door; the nearest neighbourhood, out
+// of seventy thousand, is almost always the one the shop is standing in.
+func (r *Resolver) placeFromPoint(lat, lon float64, withinProvince string) Place {
+	best, nearest := Place{}, math.MaxFloat64
+	for _, candidate := range r.neighbourhoods {
+		if withinProvince != "" && candidate.place.City != withinProvince {
+			continue
+		}
+		// A cheap box test first: the full distance for seventy thousand rows per shop is
+		// the difference between an import that takes a minute and one that takes an hour.
+		if math.Abs(candidate.at.lat-lat) > 0.2 || math.Abs(candidate.at.lon-lon) > 0.25 {
+			continue
+		}
+		away := metresBetween(lat, lon, candidate.at.lat, candidate.at.lon)
+		if away < nearest {
+			best, nearest = candidate.place, away
+		}
+	}
+	if nearest > maxMetresFromNeighbourhood {
+		return Place{}
+	}
+	return best
 }
 
 // Resolve canonicalises whatever the brand published. It answers with what it can prove and
@@ -185,6 +273,25 @@ func (r *Resolver) Resolve(city, district, address string) Place {
 	// Last resort: read the address. Turkish addresses end with the province, so the
 	// province is looked for first and the district only inside it.
 	return r.fromAddress(address)
+}
+
+// ResolveAt is Resolve with the row's own coordinate to fall back on.
+//
+// What a row says about where it is comes in two forms, and a row missing one of them can
+// be read from the other. The name is asked first, because it is the field a chain is least
+// likely to get wrong; the point answers only what the name left empty.
+func (r *Resolver) ResolveAt(city, district, address string, lat, lon *float64) Place {
+	place := r.Resolve(city, district, address)
+	if lat == nil || lon == nil || !insideTurkey(*lat, *lon) {
+		return place
+	}
+	if place.City == "" {
+		return r.placeFromPoint(*lat, *lon, "")
+	}
+	if place.District == "" {
+		place.District = r.placeFromPoint(*lat, *lon, place.City).District
+	}
+	return place
 }
 
 func (r *Resolver) fromAddress(address string) Place {
@@ -228,7 +335,7 @@ func (r *Resolver) Normalize(in RawStore) RawStore {
 	in.Address = Tidy(in.Address)
 	in.Phone = Tidy(in.Phone)
 	in.Website = Tidy(in.Website)
-	place := r.Resolve(in.City, in.District, in.Address)
+	place := r.ResolveAt(in.City, in.District, in.Address, in.Latitude, in.Longitude)
 	in.City, in.District = place.City, place.District
 	return r.placePoint(in)
 }

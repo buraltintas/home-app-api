@@ -108,3 +108,25 @@ func TestDerivedIdentifiersAreNotTheChainSpeaking(t *testing.T) {
 		t.Error("no identifier at all was read as the chain's own")
 	}
 }
+
+// A point with no readable place beside it is still a shop somewhere, and the place it is
+// in is a fact about the point. The nearest neighbourhood answers it; a point far from
+// every neighbourhood in the country answers nothing rather than guessing.
+func TestAPointNamesItsOwnPlaceOrSaysNothing(t *testing.T) {
+	r := &Resolver{neighbourhoods: []placed{
+		{point{40.9923, 29.0275}, Place{City: "İstanbul", District: "Kadıköy"}},
+		{point{40.9780, 29.0900}, Place{City: "İstanbul", District: "Maltepe"}},
+		{point{39.9200, 32.8540}, Place{City: "Ankara", District: "Çankaya"}},
+	}}
+	if got := r.placeFromPoint(40.9910, 29.0290, ""); got.District != "Kadıköy" {
+		t.Fatalf("a point in Kadıköy was placed in %q", got.District)
+	}
+	// Restricted to a province, the neighbourhoods of every other one are not candidates.
+	if got := r.placeFromPoint(39.9210, 32.8550, "İstanbul"); got.District != "" {
+		t.Fatalf("a point in Ankara was given the İstanbul district %q", got.District)
+	}
+	// The Black Sea, 100 km off the coast: no neighbourhood is near it and none is claimed.
+	if got := r.placeFromPoint(42.4000, 31.0000, ""); got.City != "" {
+		t.Fatalf("a point at sea was placed in %q", got.City)
+	}
+}

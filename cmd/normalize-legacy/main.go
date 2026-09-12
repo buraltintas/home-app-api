@@ -16,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/catalog"
@@ -45,7 +46,7 @@ func main() {
 		log.Fatal(e)
 	}
 
-	rows, e := db.Query(ctx, `SELECT id::text,name,coalesce(city,''),coalesce(district,''),coalesce(address,''),coalesce(compact_name,'') FROM stores WHERE deleted_at IS NULL ORDER BY created_at`)
+	rows, e := db.Query(ctx, `SELECT id::text,name,coalesce(city,''),coalesce(district,''),coalesce(address,''),coalesce(compact_name,''),ST_Y(location::geometry),ST_X(location::geometry) FROM stores WHERE deleted_at IS NULL ORDER BY created_at`)
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -61,13 +62,14 @@ func main() {
 	for rows.Next() {
 		var c change
 		var address string
-		if e = rows.Scan(&c.id, &c.oldName, &c.oldCity, &c.oldDistrict, &address, &c.compact); e != nil {
+		var latitude, longitude *float64
+		if e = rows.Scan(&c.id, &c.oldName, &c.oldCity, &c.oldDistrict, &address, &c.compact, &latitude, &longitude); e != nil {
 			log.Fatal(e)
 		}
 		total++
 		c.name = catalog.TidyName(c.oldName)
 		c.compact = catalog.CompactName(c.name)
-		place := resolver.Resolve(c.oldCity, c.oldDistrict, address)
+		place := resolver.ResolveAt(c.oldCity, c.oldDistrict, address, latitude, longitude)
 		c.city, c.district = place.City, place.District
 		// A place the administrative table cannot confirm is left exactly as it was. A
 		// wrong district is worse than an untidy one: the catalogue is grouped by it.
@@ -99,7 +101,33 @@ func main() {
 			fmt.Printf("  %-46s -> %-46s  %s/%s -> %s/%s\n", trim(c.oldName), trim(c.name), c.oldCity, c.oldDistrict, c.city, c.district)
 		}
 	}
+	// Broken out, because "places canonicalised" covers two very different things: a
+	// district spelled the way the administrative table spells it, and a district this row
+	// did not have at all. The second is the one worth watching, and a district that was
+	// already readable and comes out different is the one worth stopping for.
+	var gainedCity, gainedDistrict, movedDistrict int
+	var moved []change
+	for _, c := range changes {
+		if c.oldCity == "" && c.city != "" {
+			gainedCity++
+		}
+		if c.oldDistrict == "" && c.district != "" {
+			gainedDistrict++
+		}
+		if c.oldDistrict != "" && c.district != "" && c.district != c.oldDistrict &&
+			!strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(c.oldDistrict, c.oldCity)), c.district) {
+			movedDistrict++
+			moved = append(moved, c)
+		}
+	}
 	fmt.Printf("%d stores: %d names retitled, %d places canonicalised, %d compact names written\n", total, renamed, replaced, len(changes))
+	fmt.Printf("  of those: %d given a city they did not have, %d given a district they did not have, %d moved to a different district\n",
+		gainedCity, gainedDistrict, movedDistrict)
+	// These are printed in full however few they are: a row that is being taken out of the
+	// district it was filed under is the one change here a person should look at.
+	for _, c := range moved {
+		fmt.Printf("  moved: %-44s %s/%s -> %s/%s\n", trim(c.oldName), c.oldCity, c.oldDistrict, c.city, c.district)
+	}
 
 	if !*apply {
 		fmt.Println("dry run; pass -apply to write")
