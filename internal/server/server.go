@@ -191,6 +191,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/favorites", s.myFavorites)
 			r.Get("/me/likes", s.myLikes)
+			r.With(writeLimit.Middleware).Post("/me/email", s.changeEmail)
 			r.Get("/me/messages", s.myMessages)
 			r.With(writeLimit.Middleware).Post("/posts", s.createPost)
 			r.With(writeLimit.Middleware).Post("/stores/{id}/visit-verifications", s.verifyStoreVisit)
@@ -981,4 +982,28 @@ func (s *Server) storeCategories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"items": items})
+}
+
+// changeEmail completes a change of the address this account signs in with. The code it
+// takes is an ordinary login code, requested for the new address through the endpoint that
+// already exists: proving you can read that address is the whole of what is being asked, and
+// it is the same proof sign-in asks for.
+func (s *Server) changeEmail(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	var in struct {
+		Email string `json:"email"`
+		Code  string `json:"code"`
+	}
+	if e := Decode(w, r, &in, 16<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	email, e := s.auth.ChangeEmail(r.Context(), p.UserID, in.Email, in.Code)
+	if e != nil {
+		observability.Auth("email_change", "failure")
+		WriteError(w, e, r.Context())
+		return
+	}
+	observability.Auth("email_change", "success")
+	JSON(w, 200, map[string]any{"email": email})
 }

@@ -449,3 +449,89 @@ func (s *Service) Logout(ctx context.Context, user, session uuid.UUID, all bool)
 
 func IPHash(key []byte, ip string) []byte { return security.Hash(key, ip) }
 func Unexpected(err error) error          { return fmt.Errorf("auth: %w", err) }
+
+// ChangeEmail moves a signed-in account to an address whose owner has just proved they can
+// read it.
+//
+// The address is not a preference: it is how somebody gets back into this account, because
+// signing in means asking for a code and reading it. So a change saved on the strength of
+// the session alone would hand a borrowed phone permanent ownership of the account -- the
+// person it belongs to would stop receiving the codes and have no way back -- and a typo
+// would lock somebody out of their own reviews with nothing to appeal to.
+//
+// What proves the new address is the same thing that proves it at sign-in: a code sent to it
+// and read back. So the code this consumes is an ordinary login code requested for the new
+// address, and consuming it here is what makes this safe -- the code is spent either way, so
+// the same code cannot then be used to sign in as somebody else.
+func (s *Service) ChangeEmail(ctx context.Context, user uuid.UUID, email, code string) (string, error) {
+	norm, e := NormalizeEmail(email)
+	if e != nil {
+		return "", e
+	}
+	if len(code) != 6 {
+		return "", httpapi.E(401, "INVALID_CODE", "The verification code is invalid or expired")
+	}
+	tx, e := s.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if e != nil {
+		return "", e
+	}
+	defer tx.Rollback(ctx)
+
+	// Somebody else's address is not available, and saying so is not a leak: whoever is
+	// asking has just proved they can read the codes sent to it.
+	var owner uuid.UUID
+	e = tx.QueryRow(ctx, `SELECT id FROM users WHERE primary_email=$1 AND deleted_at IS NULL`, norm).Scan(&owner)
+	if e == nil && owner != user {
+		return "", httpapi.E(409, "EMAIL_TAKEN", "That address is already used by another account")
+	}
+	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
+		return "", e
+	}
+
+	var id uuid.UUID
+	var hash []byte
+	var attempts, max int
+	var expires time.Time
+	var locale i18n.Locale
+	invalid := httpapi.E(401, "INVALID_CODE", "The verification code is invalid or expired")
+	e = tx.QueryRow(ctx, `SELECT id,code_hash,attempts,max_attempts,expires_at,locale::text FROM email_verification_codes
+ WHERE normalized_email=$1 AND consumed_at IS NULL AND invalidated_at IS NULL ORDER BY created_at DESC LIMIT 1 FOR UPDATE`, norm).
+		Scan(&id, &hash, &attempts, &max, &expires, &locale)
+	if errors.Is(e, pgx.ErrNoRows) || s.now().After(expires) || attempts >= max {
+		return "", invalid
+	}
+	if e != nil {
+		return "", e
+	}
+	if !security.EqualHash(hash, security.Hash(s.cfg.HashKey, code)) {
+		_, _ = tx.Exec(ctx, `UPDATE email_verification_codes SET attempts=attempts+1 WHERE id=$1`, id)
+		if e = tx.Commit(ctx); e != nil {
+			return "", e
+		}
+		return "", invalid
+	}
+	if _, e = tx.Exec(ctx, `UPDATE email_verification_codes SET consumed_at=$2 WHERE id=$1`, id, s.now()); e != nil {
+		return "", e
+	}
+
+	if _, e = tx.Exec(ctx, `UPDATE users SET primary_email=$2, updated_at=now() WHERE id=$1`, user, norm); e != nil {
+		return "", e
+	}
+	// The identity is what the next sign-in looks itself up by, so it moves with the
+	// address. An account that reached this point some other way -- signed up with Google
+	// and never held an email identity -- gets one, verified, because it has just been.
+	if _, e = tx.Exec(ctx, `
+INSERT INTO auth_identities(user_id,provider,provider_subject,normalized_email,email_verified)
+VALUES($1,'email',$2,$2,true)
+ON CONFLICT (provider,provider_subject) DO UPDATE SET user_id=excluded.user_id,normalized_email=excluded.normalized_email,email_verified=true,updated_at=now()`,
+		user, norm); e != nil {
+		return "", e
+	}
+	if _, e = tx.Exec(ctx, `DELETE FROM auth_identities WHERE user_id=$1 AND provider='email' AND provider_subject<>$2`, user, norm); e != nil {
+		return "", e
+	}
+	if e = tx.Commit(ctx); e != nil {
+		return "", e
+	}
+	return norm, nil
+}

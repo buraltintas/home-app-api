@@ -101,6 +101,28 @@ website because a laptop was left running.
 
 ---
 
+## Changing the address you sign in with
+
+The profile could not show somebody their own email address, let alone change it -- a name
+chosen at sign-up was the only editable thing about an account.
+
+It is now shown and changeable, and the change asks for the same proof signing in asks for: a
+code sent to the new address and read back. That is not ceremony. Signing in here means
+asking for a code and reading it, so the address is not a preference, it is how somebody gets
+back into the account. Saved on the strength of the session alone, a borrowed phone would own
+an account for good -- the person it belongs to would simply stop receiving the codes -- and
+a typo would lock somebody out of their own reviews with nobody to appeal to.
+
+`POST /v1/me/email` takes an ordinary login code requested for the new address through the
+endpoint that already exists, and spends it: the code is consumed here, so the same code
+cannot then be used to sign in as somebody else. An address already belonging to another
+account is refused, and saying so is not a leak -- whoever is asking has just proved they can
+read the codes sent to it. The email identity moves with the address, so the next sign-in
+finds the account, and an account that never held one -- signed up with Google -- gets one,
+verified, because it has just been.
+
+---
+
 ## Three provinces of Merinos dealers had been thrown away
 
 A point outside Turkey's bounding box meant the row was not a Turkish shop and was dropped.
