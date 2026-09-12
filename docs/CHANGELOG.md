@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A shop we placed ourselves says so
+
+Five hundred shops in the catalogue stand where we put them, not where their chain says
+they are: the chain publishes no usable coordinate, so the row is stood at the centre of the
+smallest place its address names. The database has recorded that all along, in
+`location_from`, and the product said nothing -- the map pin and the distance looked exactly
+as certain as everybody else's.
+
+The store DTO carries `location_approximate` now, the store page says it under the address,
+and a distance to such a shop is written with a tilde and a line saying why. One more thing
+follows from it: "close enough to review" is a claim about where the reader is standing, and
+it cannot be made from a point we invented, so that badge no longer appears on an
+approximate shop. The shop could be half a kilometre from where we put it.
+
+---
+
 ## The catalogue re-reads itself now
 
 Every shop in it came from a list a chain publishes and keeps changing: branches open, move

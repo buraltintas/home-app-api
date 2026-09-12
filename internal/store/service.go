@@ -74,10 +74,15 @@ type Item struct {
 	BrandSlug            string            `json:"brand_slug,omitempty"`
 	IsPremium            bool              `json:"is_premium"`
 	IsCatalogStore       bool              `json:"is_catalog_store"`
-	ViewerFavorited      bool              `json:"viewer_has_favorited"`
-	ViewerHasReviewed    bool              `json:"viewer_has_reviewed"`
-	ExternalSources      []ExternalSource  `json:"external_sources,omitempty"`
-	Photo                *Photo            `json:"photo,omitempty"`
+	// True when the coordinate is ours rather than the chain's: the shop publishes no usable
+	// point and has been stood at the centre of the smallest place its address names. The
+	// distance shown for such a shop is right to a few hundred metres, not to the doorway,
+	// and a reader who is not told that reads it as exact.
+	LocationApproximate bool             `json:"location_approximate"`
+	ViewerFavorited     bool             `json:"viewer_has_favorited"`
+	ViewerHasReviewed   bool             `json:"viewer_has_reviewed"`
+	ExternalSources     []ExternalSource `json:"external_sources,omitempty"`
+	Photo               *Photo           `json:"photo,omitempty"`
 }
 
 // Photo is the single effective store image: an administrator's upload, and after that the
@@ -116,14 +121,14 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 	var coverMedia string
 	e := s.db.QueryRow(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $3::float8 IS NULL OR $4::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography) END,
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2),
  EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
  coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources, &x.BrandSlug, &coverMedia)
+ WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources, &x.BrandSlug, &coverMedia)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return x, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
@@ -232,7 +237,7 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  ST_Distance(s.location,ST_SetSRID(ST_MakePoint($2,$1),4326)::geography),
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$4),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
@@ -251,7 +256,7 @@ func (s *Service) PremiumNearby(ctx context.Context, lat, lon *float64, radius, 
 	for rows.Next() {
 		var x Item
 		var coverMedia string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
 			return nil, e
 		}
 		assignPhoto(&x, coverMedia)
@@ -364,7 +369,7 @@ func anyWordQuery(raw string) string {
 func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon *float64, limit int, viewer *uuid.UUID) ([]Item, error) {
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$5),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
@@ -407,7 +412,7 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
 	for rows.Next() {
 		var x Item
 		var coverMedia string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
 			return nil, e
 		}
 		assignPhoto(&x, coverMedia)
@@ -426,7 +431,7 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$9),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$9 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$9),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$9 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$9),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
 	 EXISTS(SELECT 1 FROM favorites vf WHERE vf.store_id=s.id AND vf.user_id=$6),
 	 coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
@@ -465,7 +470,7 @@ func (s *Service) Search(ctx context.Context, q string, categories []string, loc
 	for rows.Next() {
 		var x Item
 		var coverMedia string
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.DistanceMeters, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.BrandSlug, &coverMedia); e != nil {
 			return nil, e
 		}
 		assignPhoto(&x, coverMedia)
@@ -480,7 +485,7 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 		limit = 50
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$3),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
- coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$3 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$3),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,
+ coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$3 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$3),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,''),
@@ -496,7 +501,7 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 		var x Item
 		var coverMedia string
 		var savedAt time.Time
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.ExternalSources, &x.BrandSlug, &coverMedia, &x.ViewerHasReviewed, &savedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ExternalSources, &x.BrandSlug, &coverMedia, &x.ViewerHasReviewed, &savedAt); e != nil {
 			return nil, e
 		}
 		x.ViewerFavorited = true
