@@ -406,6 +406,17 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
    -- already folded on write, and $7 is the same folding applied to the query, so the two
    -- meet. The trigram index on compact_name serves this.
    OR ($7<>'' AND s.compact_name LIKE '%'||$7||'%')
+   -- A shop that sells a chain's goods without carrying its sign. One dealer holds two
+   -- franchises and appears in both chains' published lists; the importer records the
+   -- second as a brand this shop carries rather than adding the shop twice, and that record
+   -- is the answer to "where can I buy a Yataş bed round here" for a shop called something
+   -- else entirely. Matched on the brand's own folded name, so it costs nothing when the
+   -- query names no brand.
+   OR ($7<>'' AND EXISTS(
+        SELECT 1 FROM store_carried_brands cb JOIN brands cbb ON cbb.id=cb.brand_id
+         WHERE cb.store_id=s.id
+           AND regexp_replace(lower(cbb.name),'[^[:alnum:]]','','g')<>''
+           AND $7 LIKE '%'||regexp_replace(lower(translate(cbb.name,'çğıöşüÇĞİÖŞÜ','cgiosucgiosu')),'[^[:alnum:]]','','g')||'%'))
  )
  GROUP BY s.id,ss.store_id
  ORDER BY

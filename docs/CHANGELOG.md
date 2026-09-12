@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## "Where can I buy a Yataş bed round here" now has an answer
+
+One dealer holds two franchises and appears in both chains' published lists. The importer
+already handles that without adding the shop twice: it records the second chain as a brand
+the shop carries. Nothing read that record, so a search for a chain found only shops wearing
+its sign -- and "Gülseven Mobilya" in Tekirdağ, which sells İstikbal, answered an İstikbal
+search with nothing.
+
+A search naming a chain now also finds the shops that carry it. Matched on the brand's own
+folded name against the folded query, which is the same comparison the rest of this search
+already makes, so it costs nothing when the query names no brand. Four Bellona dealers that
+also sell İstikbal answer an İstikbal search today; the number grows on its own as more
+cross-brand dealers are recognised.
+
+---
+
 ## Two rows that are one shop can be made one shop
 
 The matcher is deliberately cautious about joining rows on its own -- a wrong merge is
