@@ -968,6 +968,17 @@ func (s *Service) MergeStores(ctx context.Context, actor uuid.UUID, email string
 	// rather than in a loop that could half-finish.
 	for _, move := range []struct{ what, sql string }{
 		{"posts", `UPDATE posts SET store_id=$1 WHERE store_id=$2`},
+		// Moved rather than copied, unlike everything else below, because this table's
+		// uniqueness is on the identifier alone and not on the shop holding it: copying a
+		// row that already exists conflicts with itself, does nothing, and the original is
+		// then deleted with the shop. That loses the chain's own second identifier for a
+		// dealer it listed twice -- the one piece of evidence that would have let the next
+		// import recognise the row instead of proposing it again. The condition keeps the
+		// move safe where the survivor somehow already carries the same identifier.
+		{"sources", `UPDATE store_external_sources d SET store_id=$1
+ WHERE d.store_id=$2
+   AND NOT EXISTS (SELECT 1 FROM store_external_sources k
+                    WHERE k.store_id=$1 AND k.provider=d.provider AND k.external_id=d.external_id)`},
 		{"visits", `UPDATE store_visit_verifications SET store_id=$1 WHERE store_id=$2`},
 		{"search results", `UPDATE search_results SET store_id=$1 WHERE store_id=$2`},
 		{"search interactions", `UPDATE search_interactions SET store_id=$1 WHERE store_id=$2`},
@@ -980,7 +991,6 @@ func (s *Service) MergeStores(ctx context.Context, actor uuid.UUID, email string
 	for _, move := range []struct{ what, sql string }{
 		{"favourites", `INSERT INTO favorites(user_id,store_id,created_at) SELECT user_id,$1,created_at FROM favorites WHERE store_id=$2 ON CONFLICT DO NOTHING`},
 		{"categories", `INSERT INTO store_category_links(store_id,category_id) SELECT $1,category_id FROM store_category_links WHERE store_id=$2 ON CONFLICT DO NOTHING`},
-		{"sources", `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) SELECT $1,provider,external_id,attribution,refreshed_at FROM store_external_sources WHERE store_id=$2 ON CONFLICT DO NOTHING`},
 		{"carried brands", `INSERT INTO store_carried_brands(store_id,brand_id,source,confidence) SELECT $1,brand_id,source,confidence FROM store_carried_brands WHERE store_id=$2 ON CONFLICT DO NOTHING`},
 		{"attributes", `INSERT INTO store_attributes(store_id,key,value,source) SELECT $1,key,value,source FROM store_attributes WHERE store_id=$2 ON CONFLICT DO NOTHING`},
 		{"translations", `INSERT INTO store_translations(store_id,locale,description) SELECT $1,locale,description FROM store_translations WHERE store_id=$2 ON CONFLICT DO NOTHING`},

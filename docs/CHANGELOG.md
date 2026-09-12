@@ -46,6 +46,22 @@ Counts are recomputed from what is actually there afterwards rather than added u
 two rows, which is the only version that stays right when a review moved and a favourite did
 not.
 
+**It shipped with a defect and the first exercise of it found one.** Source identifiers were
+copied and then the originals deleted, like everything else -- but that table's uniqueness is
+on the identifier alone and not on the shop holding it, so copying a row that already exists
+conflicts with itself, does nothing, and the original goes with the shop. A dealer a chain
+had listed twice lost the second of its two identifiers: the one piece of evidence that would
+have let the next import recognise the row instead of proposing it all over again. Sources
+are moved now, not copied. Measured on a real pair inside a transaction that was rolled back:
+before the fix the survivor ended with one identifier, after it with both (2301 and 2302).
+
+`cmd/merge-stores` runs the same service the panel's button does, and exists for the cases
+the panel is awkward for -- a cleanup pass over rows found by a query, and exercising code
+that deletes things somewhere a person can read the result rather than in production on the
+first press. It records the merge against the administrator who ran it, by email, and refuses
+if that is not somebody real: an unattributable entry in the audit log is worse than no tool,
+because the next person reading it cannot ask anybody what they were looking at.
+
 ---
 
 ## A shop we placed ourselves says so
