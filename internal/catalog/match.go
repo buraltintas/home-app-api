@@ -255,14 +255,20 @@ WHERE deleted_at IS NULL
 ORDER BY similarity(compact_name,$1) DESC, metres
 LIMIT 1`, compact, *in.Latitude, *in.Longitude, mergeMeters*6, provider)
 	} else {
-		if in.City == "" || in.District == "" {
+		// A district narrows the search and is not required to make one. A chain that
+		// publishes neither a usable coordinate nor a district -- Vivense's Erzurum,
+		// Karabük and Kastamonu shops name only their province -- would otherwise find
+		// nothing to compare itself with and be added a second time on every run. The city
+		// alone is enough to look in, because what decides a merge here is the name, and
+		// it has to clear a much higher bar than a merge backed by a coordinate does.
+		if in.City == "" {
 			return Candidate{}, false, nil
 		}
 		row = m.tx.QueryRow(ctx, `
 SELECT id::text, name, compact_name, similarity(compact_name,$1) AS sim, 0::float8 AS metres, source_kind, data_verified_at IS NOT NULL, brand_id::text,
        coalesce((SELECT array_agg(external_id) FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$4),'{}')
 FROM stores
-WHERE deleted_at IS NULL AND city=$2 AND district=$3 AND compact_name <> ''
+WHERE deleted_at IS NULL AND city=$2 AND ($3='' OR district=$3) AND compact_name <> ''
 ORDER BY similarity(compact_name,$1) DESC
 LIMIT 1`, compact, in.City, in.District, provider)
 	}

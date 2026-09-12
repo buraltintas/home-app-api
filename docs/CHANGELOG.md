@@ -6,6 +6,30 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The last brand that could not be imported, and why it could not
+
+Vivense was refused by the twin guard on every run: seven of its hundred and one shops could
+not find the rows they already had, and would have been added a second time. Two things were
+in the way, both of them general.
+
+**A chain that leaves the district field empty has often put the town in the branch name.**
+Vivense publishes "Antalya Kepez Satış Noktası" with no district at all. The importer read
+the district from the row's coordinate instead -- and Vivense's coordinates are wrong by
+hundreds of kilometres, so the shop was filed in Muratpaşa and stopped recognising itself.
+The row's own words now come before its coordinate. Four of the seven.
+
+**A district narrows a search; it is not required to make one.** A row with neither a usable
+coordinate nor a district -- Vivense's Erzurum, Karabük and Kastamonu shops name only their
+province -- found nothing to compare itself with and was added again every time. The city
+alone is enough to look in, because what decides a merge there is the name, and it has to
+clear 0.75 similarity rather than the 0.55 that a merge backed by a coordinate needs. The
+other three.
+
+Vivense now imports: 101 fetched, 0 new, 101 updated. Every mapped brand in the registry
+imports cleanly.
+
+---
+
 ## A branch name says which town it is in, and that beats a coordinate we invented
 
 Reading a district off a point we had placed ourselves left rows filed in the wrong town,

@@ -338,8 +338,15 @@ func (r *Resolver) Resolve(city, district, address string) Place {
 // What a row says about where it is comes in two forms, and a row missing one of them can
 // be read from the other. The name is asked first, because it is the field a chain is least
 // likely to get wrong; the point answers only what the name left empty.
-func (r *Resolver) ResolveAt(city, district, address string, lat, lon *float64) Place {
+func (r *Resolver) ResolveAt(city, district, address, name string, lat, lon *float64) Place {
 	place := r.Resolve(city, district, address)
+	// The row's own words come before its coordinate. A chain that leaves the district
+	// field empty has often put the town in the branch name instead -- Vivense publishes
+	// "Antalya Kepez Satış Noktası" with no district at all -- and that is the publisher
+	// saying where the shop is, which a geocoded point only estimates.
+	if place.City != "" && place.District == "" {
+		place.District = r.DistrictInText(place.City, name+" "+address)
+	}
 	if lat == nil || lon == nil || !insideTurkey(*lat, *lon) {
 		return place
 	}
@@ -414,7 +421,7 @@ func (r *Resolver) Normalize(in RawStore) RawStore {
 	in.Address = Tidy(in.Address)
 	in.Phone = Tidy(in.Phone)
 	in.Website = Tidy(in.Website)
-	place := r.ResolveAt(in.City, in.District, in.Address, in.Latitude, in.Longitude)
+	place := r.ResolveAt(in.City, in.District, in.Address, in.Name, in.Latitude, in.Longitude)
 	in.City, in.District = place.City, place.District
 	return r.placePoint(in)
 }

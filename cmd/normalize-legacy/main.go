@@ -78,7 +78,7 @@ func main() {
 		total++
 		c.name = catalog.TidyName(c.oldName)
 		c.compact = catalog.CompactName(c.name)
-		place := resolver.ResolveAt(c.oldCity, c.oldDistrict, address, latitude, longitude)
+		place := resolver.ResolveAt(c.oldCity, c.oldDistrict, address, c.oldName, latitude, longitude)
 		c.city, c.district = place.City, place.District
 		// A place the administrative table cannot confirm is left exactly as it was. A
 		// wrong district is worse than an untidy one: the catalogue is grouped by it.
