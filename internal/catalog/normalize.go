@@ -433,17 +433,41 @@ func NamesAnApparelDepartment(name string) bool {
 // So each part is added only when it is missing, tested on the folded name so that case and
 // diacritics cannot let the same word through twice.
 func DisplayName(brand, branch, province, district string) string {
-	name := placeInName(Tidy(branch), province, district)
+	branch = Tidy(branch)
+	missing := missingPlaces(branch, province, district)
+	// A chain that has already put its own name at the front of a branch name has it in the
+	// right place, and the town then goes after it rather than in front of it: Koçtaş
+	// publishes "Koçtaş Ankara Eryaman", and the shop is in Etimesgut, so it is "Koçtaş
+	// Etimesgut Ankara Eryaman" and never "Etimesgut Koçtaş Ankara Eryaman".
+	if head, rest, ok := cutLeading(branch, brand); ok && len(missing) > 0 {
+		return strings.TrimSpace(head + " " + strings.Join(missing, " ") + " " + rest)
+	}
+	name := strings.TrimSpace(strings.Join(missing, " ") + " " + branch)
 	if key, brandKey := textnorm.Key(name), textnorm.Key(brand); brandKey != "" && !strings.Contains(key, brandKey) {
 		name = strings.TrimSpace(brand + " - " + name)
 	}
 	return name
 }
 
-// placeInName puts the shop's town into its name when the branch name does not already say
-// where it is, city before town -- the order a Turkish address is read aloud in, and the
-// order the chains that do publish it already use ("Antalya Kepez Kültür").
-func placeInName(name, province, district string) string {
+// cutLeading splits a name that begins with the chain's own name into that name and the
+// rest of it. Compared word by word on the folded forms, because "Koçtaş" and "KOCTAS" are
+// the same word and neither is as long as the other in bytes.
+func cutLeading(name, brand string) (head, rest string, ok bool) {
+	words, brandWords := strings.Fields(name), strings.Fields(brand)
+	if len(brandWords) == 0 || len(words) <= len(brandWords) {
+		return "", "", false
+	}
+	head = strings.Join(words[:len(brandWords)], " ")
+	if textnorm.Key(head) != textnorm.Key(brand) {
+		return "", "", false
+	}
+	return head, strings.Join(words[len(brandWords):], " "), true
+}
+
+// missingPlaces is the part of the shop's address its name does not already carry, city
+// before town -- the order a Turkish address is read aloud in, and the order the chains that
+// do publish it already use ("Antalya Kepez Kültür").
+func missingPlaces(name, province, district string) []string {
 	key := textnorm.Key(name)
 	var missing []string
 	for _, place := range []string{province, district} {
@@ -455,10 +479,7 @@ func placeInName(name, province, district string) string {
 			missing = append(missing, TidyName(place))
 		}
 	}
-	if len(missing) == 0 {
-		return name
-	}
-	return strings.TrimSpace(strings.Join(missing, " ") + " " + name)
+	return missing
 }
 
 // HouseWords are the tokens a chain uses in its own branch names that tell a shopper

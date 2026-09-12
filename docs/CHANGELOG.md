@@ -6,6 +6,33 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Koçtaş, and two things its locator taught the adapter
+
+Koçtaş sat in the registry as a tier-one chain with no locator and no shops. Its store
+finder submits a plate code to an endpoint that answers with the province's shops as JSON --
+128 of them, now in the catalogue.
+
+**A plate code is written two ways and only one of them works.** The adapter substituted
+"1" through "81"; Koçtaş's dropdown submits "01" through "81", and the wrong spelling
+answers with an empty list rather than an error. Nine provinces -- every code beginning with
+a zero -- would have come back silently empty and nobody would have seen it. The
+configuration now says which spelling a publisher wants, `{province}` or `{province2}`,
+instead of the adapter guessing.
+
+**Koçtaş's own district field is not about the shop.** Ankamall is filed under Hamamözü,
+which is in Amasya; Gordion under Haymana, sixty kilometres from where it stands. The field
+is left unmapped and the district is read from the shop's coordinate, which is right. This
+is what the registry is for: the publisher says what it is willing to say, and a field it
+does not maintain is not evidence.
+
+**The chain's name leads, and the town follows it.** A branch name that already begins with
+the chain's own name had the town pushed in front of it -- "Etimesgut Koçtaş Ankara
+Eryaman". The town now goes after the name the chain put there: "Koçtaş Etimesgut Ankara
+Eryaman", and "Doğtaş Adana Exclusive - Çukurova" rather than "Adana Doğtaş Exclusive -
+Çukurova".
+
+---
+
 ## A shop with a coordinate is never a shop with no city
 
 Three hundred and sixty-three shops stood in no city, and two and a half thousand in no

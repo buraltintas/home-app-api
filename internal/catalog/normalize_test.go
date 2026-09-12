@@ -13,8 +13,10 @@ func TestDisplayNameCarriesTheChainAndTheTownExactlyOnce(t *testing.T) {
 		// nine distinguishable shops.
 		{"English Home", "Forum AVM", "Mersin", "Yenişehir", "English Home - Mersin Yenişehir Forum AVM"},
 		{"English Home", "Forum AVM", "Kayseri", "Kocasinan", "English Home - Kayseri Kocasinan Forum AVM"},
-		// The chain already names itself, so it is not repeated.
-		{"Doğtaş", "Doğtaş Exclusive - Çukurova", "Adana", "Çukurova", "Adana Doğtaş Exclusive - Çukurova"},
+		// The chain already names itself, so it is not repeated -- and because it has put
+		// its name at the front, the town goes after it rather than in front of it.
+		{"Doğtaş", "Doğtaş Exclusive - Çukurova", "Adana", "Çukurova", "Doğtaş Adana Exclusive - Çukurova"},
+		{"Koçtaş", "Koçtaş Ankara Eryaman", "Ankara", "Etimesgut", "Koçtaş Etimesgut Ankara Eryaman"},
 		// The branch is already named for its town, in both halves.
 		{"Madame Coco", "Antalya Kepez Kültür Pop-Up Cadde", "Antalya", "Kepez", "Madame Coco - Antalya Kepez Kültür Pop-Up Cadde"},
 		// A dealership trading under its own sign.

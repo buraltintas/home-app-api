@@ -34,10 +34,12 @@ type JSONLocatorConfig struct {
 	// URL is fetched once per page. When Pages is set, "{page}" in the URL is replaced.
 	//
 	// "{province}" is replaced with each of Turkey's 81 province codes, "1" through "81",
-	// one request each. Unpadded, which is what these endpoints want: the store pages
-	// themselves strip the leading zero before asking, and a padded "07" answers with an
-	// empty list rather than an error -- so Antalya and eight other provinces come back
-	// silently empty if this is got wrong. A chain whose locator answers per province rather than all at once
+	// one request each, unpadded; "{province2}" is the same eighty-one padded to two
+	// digits, "01" through "81". Which one a publisher wants is not a matter of taste: the
+	// wrong spelling answers with an empty list rather than an error, so the nine provinces
+	// whose code begins with a zero come back silently empty and nobody notices. English
+	// Home's pages strip the leading zero before asking; Koçtaş's dropdown carries it.
+	// A chain whose locator answers per province rather than all at once
 	// is common enough here that it belongs in the shared adapter: the customer picks a
 	// province from a dropdown and the page asks for that province, so the whole country
 	// is eighty-one of the same request.
@@ -157,10 +159,10 @@ func (l *JSONLocator) Fetch(ctx context.Context) ([]RawStore, error) {
 	var out []RawStore
 	var missing int
 	var last error
-	fanned := len(requests) > 1 || strings.Contains(requests[0].url+requests[0].body, "{province}")
+	fanned := len(requests) > 1 || asksByProvince(requests[0].url+requests[0].body)
 	for _, request := range requests {
 		for _, province := range l.provinces(request.url + request.body) {
-			rows, e := l.fetchPages(ctx, request.fill("{province}", province))
+			rows, e := l.fetchPages(ctx, request.fill("{province2}", pad2(province)).fill("{province}", province))
 			if e != nil {
 				// One of many questions answering "not found" is a province or a city this
 				// chain does not serve, not a broken locator: Dinarsu's own site answers 404
@@ -261,10 +263,28 @@ func (l *JSONLocator) requests() []request {
 	return out
 }
 
+// asksByProvince reports whether an address wants the country walked province by province,
+// in either of the two forms a plate code is written in.
+func asksByProvince(address string) bool {
+	return strings.Contains(address, "{province}") || strings.Contains(address, "{province2}")
+}
+
+// pad2 writes a plate code the way a numberplate does: "1" is "01". Both spellings are in
+// use -- some locators strip the leading zero before asking and answer an empty list to a
+// padded code, and others do exactly the reverse, Koçtaş among them -- so the configuration
+// says which one this publisher wants rather than the adapter guessing and losing the nine
+// provinces whose code begins with a zero.
+func pad2(code string) string {
+	if len(code) == 1 {
+		return "0" + code
+	}
+	return code
+}
+
 // provinces is the list of substitutions for "{province}", or a single empty one when the
 // URL does not ask for it.
 func (l *JSONLocator) provinces(address string) []string {
-	if !strings.Contains(address, "{province}") {
+	if !asksByProvince(address) {
 		return []string{""}
 	}
 	out := make([]string, 0, 81)

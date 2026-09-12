@@ -270,7 +270,25 @@ brands:
     tier: 1
     categories: [household, garden, bathroom, lighting, kitchenware]
     store_count_estimate: 60
-    locator: {kind: none}
+    locator:
+      kind: json
+      # The dropdown on Koçtaş's own store finder submits a plate code to this address and
+      # gets that province's shops back as JSON. Padded, unlike the others here: "7" answers
+      # with an empty list and "07" with Antalya's six shops, which is why there are two
+      # spellings of the token rather than one guess.
+      url: https://www.koctas.com.tr/store-finder/findPOSByCity?addressCity={province2}
+      id: name
+      name: displayName
+      address: address.formattedAddress
+      city: address.addressCity.name
+      # The district field is deliberately not mapped. Koçtaş fills it from somewhere that
+      # is not the shop: Ankamall is filed under Hamamözü, which is in Amasya, and Gordion
+      # under Haymana, sixty kilometres from where it stands. The shops' own coordinates
+      # are right, so the district is read from those instead of from a field the publisher
+      # demonstrably does not maintain.
+      phone: address.phone
+      latitude: geoPoint.latitude
+      longitude: geoPoint.longitude
 
   - slug: tepe-home
     name: Tepe Home
