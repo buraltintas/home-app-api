@@ -6,6 +6,25 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A shop with no coordinate stands in its own neighbourhood, not in the middle of town
+
+A chain that publishes an address and no coordinate has still said, in the first phrase of
+that address, where in the town its shop is: a Turkish address begins with its
+neighbourhood. That was being thrown away -- the shop was stood at the centre of its
+district, which in İstanbul can be ten kilometres from where it actually is, and the
+distance shown to a visitor was wrong by that much.
+
+The fallback is now the neighbourhood the address names, then the district, then the
+province. Looked up only inside the district the row is already known to be in, so a name as
+ordinary as "Cumhuriyet" or "Merkez" can only mean the one place it means there; a name that
+is not unique even inside its own district is not guessed at. Twenty-two of Boyner's
+fifty-nine shops moved from the middle of a district to the street they are on.
+
+It is still a derived point and still says so, so the matcher goes on refusing to measure
+with it.
+
+---
+
 ## The matching queue was asking the wrong questions, and too many of them
 
 Two hundred and ninety-one rows sat waiting for a person. Most of them should never have

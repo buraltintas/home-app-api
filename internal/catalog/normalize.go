@@ -124,6 +124,9 @@ type Resolver struct {
 	// megabytes held for the length of one import, and accurate to within a kilometre or
 	// two, where the nearest district centre would be accurate to within a district.
 	neighbourhoods []placed
+	// The same neighbourhoods, found by the name an address calls them. Empty point means
+	// the name is not unique inside its district and cannot be used.
+	byName map[string]point
 }
 
 type placed struct {
@@ -143,6 +146,7 @@ func NewResolver(ctx context.Context, db *pgxpool.Pool) (*Resolver, error) {
 		districtOnly: map[string]Place{},
 		ambiguous:    map[string]bool{},
 		centres:      map[string]point{},
+		byName:       map[string]point{},
 	}
 	rows, e := db.Query(ctx, `SELECT kind,name,province_name,coalesce(district_name,''),ST_Y(location::geometry),ST_X(location::geometry) FROM tr_locations WHERE kind IN ('il','ilce')`)
 	if e != nil {
@@ -191,7 +195,7 @@ WITH shared AS (
   SELECT ST_AsText(location::geometry) AS at FROM tr_locations WHERE kind='mahalle'
   GROUP BY 1 HAVING count(DISTINCT coalesce(district_name,'')) > 1
 )
-SELECT province_name,coalesce(district_name,''),ST_Y(location::geometry),ST_X(location::geometry)
+SELECT province_name,coalesce(district_name,''),name,ST_Y(location::geometry),ST_X(location::geometry)
 FROM tr_locations
 WHERE kind='mahalle' AND ST_AsText(location::geometry) NOT IN (SELECT at FROM shared)`)
 	if e != nil {
@@ -199,9 +203,9 @@ WHERE kind='mahalle' AND ST_AsText(location::geometry) NOT IN (SELECT at FROM sh
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var province, district string
+		var province, district, name string
 		var latitude, longitude float64
-		if e = rows.Scan(&province, &district, &latitude, &longitude); e != nil {
+		if e = rows.Scan(&province, &district, &name, &latitude, &longitude); e != nil {
 			return e
 		}
 		// The canonical spellings are the ones already held, so the names share their
@@ -214,8 +218,62 @@ WHERE kind='mahalle' AND ST_AsText(location::geometry) NOT IN (SELECT at FROM sh
 			district = canonical
 		}
 		r.neighbourhoods = append(r.neighbourhoods, placed{point{latitude, longitude}, Place{City: province, District: district}})
+		// Indexed by the district it is in, so a name as ordinary as "Cumhuriyet" or
+		// "Merkez" can only ever be looked up inside the one district where it means
+		// something. A name that is not unique even there is dropped rather than guessed at.
+		key := textnorm.Key(province) + "|" + textnorm.Key(district) + "|" + textnorm.Key(name)
+		if _, seen := r.byName[key]; seen {
+			r.byName[key] = point{}
+			continue
+		}
+		r.byName[key] = point{latitude, longitude}
 	}
 	return rows.Err()
+}
+
+// How many words a neighbourhood's name can run to. "Yeni" is one, "Mustafa Kemal Paşa" is
+// three; past that an address is being read as a name.
+const longestNeighbourhoodName = 4
+
+// neighbourhoodIn finds the point of the neighbourhood this address names, inside the
+// district the row is already known to be in.
+//
+// A Turkish address begins with its neighbourhood -- "19 Mayıs Mh. Büyükdere Cad." -- and
+// a chain that publishes an address and no coordinate has still told us, in that first
+// phrase, where in the town its shop is. Standing the shop at the centre of the whole town
+// throws that away and can be ten kilometres out in İstanbul; its own neighbourhood is a few
+// hundred metres.
+//
+// The longest run of words that names a neighbourhood of this district wins, so "Mustafa
+// Kemal" is preferred over a "Mustafa" that happens to exist as well.
+func (r *Resolver) neighbourhoodIn(province, district, address string) (point, bool) {
+	if province == "" || district == "" || address == "" {
+		return point{}, false
+	}
+	prefix := textnorm.Key(province) + "|" + textnorm.Key(district) + "|"
+	words := strings.Fields(textnorm.Key(address))
+	best, found := point{}, false
+	for start := 0; start < len(words); start++ {
+		for length := longestNeighbourhoodName; length >= 1; length-- {
+			if start+length > len(words) {
+				continue
+			}
+			at, ok := r.byName[prefix+strings.Join(words[start:start+length], " ")]
+			if !ok || (at.lat == 0 && at.lon == 0) {
+				continue
+			}
+			// The first phrase of the address is the neighbourhood; a match later on is a
+			// street or a building named after somewhere, so the earliest one is kept.
+			if !found {
+				best, found = at, true
+			}
+			break
+		}
+		if found {
+			break
+		}
+	}
+	return best, found
 }
 
 // placeFromPoint answers the question the other way round: not where a named place is, but
@@ -362,11 +420,15 @@ func (r *Resolver) placePoint(in RawStore) RawStore {
 	if !ok {
 		return in
 	}
-	// The most precise centre we can stand a store at when its own point cannot be used.
+	// The most precise centre we can stand a store at when its own point cannot be used:
+	// the neighbourhood its address names, then its district, then its province.
 	fallback, where := province, in.City
 	if in.District != "" {
 		if district, ok := r.centres[in.City+"|"+in.District]; ok {
 			fallback, where = district, in.District
+		}
+		if at, ok := r.neighbourhoodIn(in.City, in.District, in.Address); ok {
+			fallback, where = at, "the neighbourhood named in its address in "+in.District
 		}
 	}
 	if in.Latitude == nil || in.Longitude == nil {
