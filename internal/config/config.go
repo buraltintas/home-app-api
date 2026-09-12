@@ -46,7 +46,9 @@ type Config struct {
 	StoreVisitProofTTL                                      time.Duration
 	SearchLocationDecimals                                  int
 	ReportingTimezone                                       string
-	SearchAttributionWindow                                 time.Duration
+	// How often the worker re-reads one brand's published store list. Zero turns it off.
+	CatalogRefreshEvery     time.Duration
+	SearchAttributionWindow time.Duration
 	// Local-first search. This is enabled by default so a deployment without the optional
 	// tuning variables never pays the provider for an answer already held in PostgreSQL.
 	// The switch remains as an emergency rollback control.
@@ -162,6 +164,18 @@ func Load() (Config, error) {
 		return c, errors.New("SEARCH_ATTRIBUTION_WINDOW_HOURS must be between 1 and 720")
 	}
 	c.SearchAttributionWindow = time.Duration(attributionHours) * time.Hour
+	// One brand every few hours brings a registry of thirty round about every four days,
+	// which is faster than a chain opens branches and gentle enough that nobody's site sees
+	// us twice in a morning. Zero turns the refresh off, which is what a development machine
+	// wants: it should not fetch anybody's website because somebody left it running.
+	refreshHours, err := integer("CATALOG_REFRESH_HOURS", 3)
+	if err != nil {
+		return c, err
+	}
+	if refreshHours < 0 || refreshHours > 24*30 {
+		return c, errors.New("CATALOG_REFRESH_HOURS must be between 0 and 720")
+	}
+	c.CatalogRefreshEvery = time.Duration(refreshHours) * time.Hour
 	// Conservative on purpose. The first version of the gate is not trying to reach the
 	// ceiling the historical data suggests; it is trying not to make search worse.
 	// A shadow call costs what a real one costs. Sampling everything would spend the

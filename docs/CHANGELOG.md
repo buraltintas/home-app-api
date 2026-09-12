@@ -6,6 +6,27 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The catalogue re-reads itself now
+
+Every shop in it came from a list a chain publishes and keeps changing: branches open, move
+and close. Re-reading one meant a person running the command or pressing the button, so the
+honest answer to "how fresh is this" was "as fresh as the last time somebody remembered".
+Today's full sweep was started by hand.
+
+The worker now re-reads one brand every three hours -- the one read longest ago. One at a
+time, and the oldest first, for three reasons: it spreads the load over days instead of
+hammering thirty sites in an hour; a failure costs that brand its turn rather than the whole
+sweep; and it levels itself, because a brand registered today is the oldest thing in the
+table and is read first, after which everything drifts into the same rotation with no
+schedule written down anywhere. A registry of thirty comes round about every four days.
+
+It is in the worker rather than the API because it is slow, it is nobody's request, and it
+must not be doubled by the API running more than one instance. `CATALOG_REFRESH_HOURS=0`
+turns it off, which is what a development machine wants: it should not fetch somebody's
+website because a laptop was left running.
+
+---
+
 ## A hundred shops on one doorstep
 
 Merinos gives 104 of its dealers a single point in Bursa and 45 more a single point in

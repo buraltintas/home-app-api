@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/catalog"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/burakaltintas/home-app-api/internal/email"
@@ -51,10 +52,16 @@ func main() {
 		log.Error("reporting unavailable", "error", e)
 		os.Exit(1)
 	}
+	// The catalogue is a copy of lists other people keep changing, so something has to go
+	// back and read them. It lives here rather than in the API because it is slow, it is not
+	// anybody's request, and it must not be doubled by the API running more than one
+	// instance.
+	refresher := catalog.NewRefresher(db, log, cfg.CatalogRefreshEvery)
 	log.Info("worker started", "email_provider", cfg.EmailProvider)
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 	go func() { errCh <- w.Run(ctx) }()
 	go func() { errCh <- reportSvc.Run(ctx) }()
+	go func() { errCh <- refresher.Run(ctx) }()
 	e = <-errCh
 	if e != nil && e != context.Canceled {
 		log.Error("worker stopped", "error", e)
