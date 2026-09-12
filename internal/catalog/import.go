@@ -103,6 +103,12 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 	// the dot itself.
 	spellings := Spellings(published0)
 
+	// How much of this brand already shares a name, measured before anything is written.
+	twinsBefore, e := twinNames(ctx, tx, brand.ID)
+	if e != nil {
+		return report, e
+	}
+
 	matcher := NewMatcher(tx)
 	seen := map[string]bool{}
 	// A row thrown out before matching is recorded like any other decision. It used to be
@@ -191,25 +197,27 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 		}
 	}
 
-	// An import that has produced twins takes itself back.
+	// An import that makes duplication worse takes itself back.
 	//
-	// This is a net under a mistake already made and fixed: the identifier derived for a
-	// chain that publishes none used to be hashed from the name we build, so improving the
-	// naming rules changed every such shop's identity and the next run inserted the lot
-	// again -- 448 shops, in one pass, with nobody watching. The cause is gone. The net
-	// stays, because the next cause will be something nobody predicted either, and the whole
-	// run is one transaction: catching it here costs one query and loses nothing.
+	// A net under a mistake already made: the identifier derived for a chain that publishes
+	// none used to be hashed from the name we build, so improving the naming rules changed
+	// every such shop's identity and the next run inserted the lot again -- 448 shops, in
+	// one pass, with nobody watching.
+	//
+	// It compares before with after rather than demanding none, which is the version that
+	// first shipped and was wrong in a way worth recording: a brand whose list genuinely
+	// repeats a dealer already had twins, so the guard refused every run of it -- including
+	// the run carrying the fix that would have told those dealers apart. A rule that blocks
+	// its own remedy is not a safety net.
+	twinsAfter := twinsBefore
 	if apply {
-		var twins int
-		if e = tx.QueryRow(ctx, `
-SELECT count(*) FROM (
-  SELECT 1 FROM stores WHERE deleted_at IS NULL AND brand_id=$1
-   GROUP BY compact_name HAVING count(*)>1) x`, brand.ID).Scan(&twins); e != nil {
+		if twinsAfter, e = twinNames(ctx, tx, brand.ID); e != nil {
 			return report, e
 		}
-		if twins > 0 {
-			return report, fmt.Errorf("%s: this run would leave %d name(s) on more than one shop; rolled back", brand.Slug, twins)
-		}
+	}
+	if apply && twinsAfter > twinsBefore {
+		return report, fmt.Errorf("%s: this run would leave %d name(s) on more than one shop, up from %d; rolled back",
+			brand.Slug, twinsAfter, twinsBefore)
 	}
 
 	if _, e = tx.Exec(ctx, `UPDATE store_import_runs SET finished_at=now(),inserted=$2,updated=$3,review=$4,skipped=$5 WHERE id=$1`,
@@ -371,4 +379,14 @@ func storeSlug(name string, id uuid.UUID) string {
 		base = strings.Trim(base[:60], "-")
 	}
 	return base + "-" + id.String()[:8]
+}
+
+// twinNames counts how many of a brand's names sit on more than one shop.
+func twinNames(ctx context.Context, tx pgx.Tx, brandID string) (int, error) {
+	var count int
+	e := tx.QueryRow(ctx, `
+SELECT count(*) FROM (
+  SELECT 1 FROM stores WHERE deleted_at IS NULL AND brand_id=$1
+   GROUP BY compact_name HAVING count(*)>1) x`, brandID).Scan(&count)
+	return count, e
 }
