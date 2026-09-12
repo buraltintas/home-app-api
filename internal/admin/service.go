@@ -6,6 +6,7 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -87,13 +88,18 @@ type StoreRow struct {
 	SourceKind string `json:"source_kind"`
 	BrandSlug  string `json:"brand_slug"`
 	Verified   bool   `json:"verified"`
+	// Carried so the list can ask what stands near a row without fetching it again: the
+	// merge control needs a point to look around.
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
 
 func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, source string, limit, offset int) ([]StoreRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
 	rows, e := s.db.Query(ctx, `SELECT s.id,s.name,s.slug,s.city,s.is_premium,s.is_catalog_store,coalesce(s.cover_media_id::text,''),
  coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l JOIN store_categories c ON c.id=l.category_id WHERE l.store_id=s.id),'{}'),
- ss.review_count,ss.average_rating,s.created_at,s.source_kind,coalesce(b.slug,''),s.data_verified_at IS NOT NULL
+ ss.review_count,ss.average_rating,s.created_at,s.source_kind,coalesce(b.slug,''),s.data_verified_at IS NOT NULL,
+ ST_Y(s.location::geometry),ST_X(s.location::geometry)
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN brands b ON b.id=s.brand_id
  WHERE s.deleted_at IS NULL AND (NOT $1 OR s.is_premium)
  AND ($2='' OR lower(s.name) LIKE '%'||$2||'%' OR lower(s.city) LIKE '%'||$2||'%')
@@ -106,7 +112,7 @@ func (s *Service) Stores(ctx context.Context, query string, premiumOnly bool, so
 	out := []StoreRow{}
 	for rows.Next() {
 		var x StoreRow
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.IsCatalogStore, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt, &x.SourceKind, &x.BrandSlug, &x.Verified); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.City, &x.IsPremium, &x.IsCatalogStore, &x.CoverMediaID, &x.Categories, &x.ReviewCount, &x.Rating, &x.CreatedAt, &x.SourceKind, &x.BrandSlug, &x.Verified, &x.Latitude, &x.Longitude); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -920,4 +926,111 @@ func (s *Service) ImportBrand(ctx context.Context, actor uuid.UUID, email, slug 
 		_ = tx.Commit(ctx)
 	}
 	return report, nil
+}
+
+// MergeStores makes two rows one shop.
+//
+// Two rows for one shop happen and always will: a chain lists the same dealer twice under
+// two names, or a shop we already held arrives from a brand's list too differently spelled
+// to match. The matcher is deliberately cautious about joining rows on its own, which means
+// the ones it declines have to be joinable by hand.
+//
+// What matters is which id survives. Reviews, favourites, ratings, verified visits and every
+// search metric hang off it, so the surviving row keeps its own id and everything the other
+// row carried is moved onto it. The other row is not deleted outright: it is soft-deleted
+// with a link to where it went, so a link somebody shared before the merge still opens a
+// shop instead of a dead page.
+//
+// Refused where it would be nonsense rather than silently doing half of it: a row cannot be
+// merged into itself, and neither row may already be gone.
+func (s *Service) MergeStores(ctx context.Context, actor uuid.UUID, email string, keep, drop uuid.UUID) error {
+	if keep == drop {
+		return httpapi.E(422, "SAME_STORE", "A store cannot be merged into itself")
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return e
+	}
+	defer tx.Rollback(ctx)
+
+	var keepName, dropName string
+	if e = tx.QueryRow(ctx, `SELECT name FROM stores WHERE id=$1 AND deleted_at IS NULL`, keep).Scan(&keepName); e != nil {
+		return httpapi.E(404, "STORE_NOT_FOUND", "The store to keep was not found")
+	}
+	if e = tx.QueryRow(ctx, `SELECT name FROM stores WHERE id=$1 AND deleted_at IS NULL`, drop).Scan(&dropName); e != nil {
+		return httpapi.E(404, "STORE_NOT_FOUND", "The store to merge was not found")
+	}
+
+	// Everything that points at a shop, moved. Where the destination already has a row that
+	// would collide -- the same person having favourited both shops, the same category on
+	// both -- the move is skipped for that row and the leftover goes with the dropped shop.
+	// ON CONFLICT DO NOTHING says exactly that, and says it in one statement per table
+	// rather than in a loop that could half-finish.
+	for _, move := range []struct{ what, sql string }{
+		{"posts", `UPDATE posts SET store_id=$1 WHERE store_id=$2`},
+		{"visits", `UPDATE store_visit_verifications SET store_id=$1 WHERE store_id=$2`},
+		{"search results", `UPDATE search_results SET store_id=$1 WHERE store_id=$2`},
+		{"search interactions", `UPDATE search_interactions SET store_id=$1 WHERE store_id=$2`},
+		{"events", `UPDATE platform_events SET store_id=$1 WHERE store_id=$2`},
+	} {
+		if _, e = tx.Exec(ctx, move.sql, keep, drop); e != nil {
+			return fmt.Errorf("moving %s: %w", move.what, e)
+		}
+	}
+	for _, move := range []struct{ what, sql string }{
+		{"favourites", `INSERT INTO favorites(user_id,store_id,created_at) SELECT user_id,$1,created_at FROM favorites WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+		{"categories", `INSERT INTO store_category_links(store_id,category_id) SELECT $1,category_id FROM store_category_links WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+		{"sources", `INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) SELECT $1,provider,external_id,attribution,refreshed_at FROM store_external_sources WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+		{"carried brands", `INSERT INTO store_carried_brands(store_id,brand_id,source,confidence) SELECT $1,brand_id,source,confidence FROM store_carried_brands WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+		{"attributes", `INSERT INTO store_attributes(store_id,key,value,source) SELECT $1,key,value,source FROM store_attributes WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+		{"translations", `INSERT INTO store_translations(store_id,locale,description) SELECT $1,locale,description FROM store_translations WHERE store_id=$2 ON CONFLICT DO NOTHING`},
+	} {
+		if _, e = tx.Exec(ctx, move.sql, keep, drop); e != nil {
+			return fmt.Errorf("moving %s: %w", move.what, e)
+		}
+	}
+	// What did not move is deleted with its row rather than left pointing at a shop that is
+	// no longer there.
+	for _, table := range []string{"favorites", "store_category_links", "store_external_sources", "store_carried_brands", "store_attributes", "store_translations"} {
+		if _, e = tx.Exec(ctx, `DELETE FROM `+table+` WHERE store_id=$1`, drop); e != nil {
+			return fmt.Errorf("clearing %s: %w", table, e)
+		}
+	}
+
+	// A shop the chain confirms is a shop the chain confirms, whichever of the two rows it
+	// arrived on: the survivor takes the stronger of the two provenances rather than losing
+	// one because it happened to be on the row that went.
+	if _, e = tx.Exec(ctx, `
+UPDATE stores k SET
+  brand_id=coalesce(k.brand_id,d.brand_id),
+  brand_name=coalesce(nullif(k.brand_name,''),d.brand_name),
+  phone=coalesce(nullif(k.phone,''),d.phone),
+  website=coalesce(nullif(k.website,''),d.website),
+  address=coalesce(nullif(k.address,''),d.address),
+  district=coalesce(nullif(k.district,''),d.district),
+  source_kind=CASE WHEN k.source_kind='legacy' AND d.source_kind<>'legacy' THEN d.source_kind ELSE k.source_kind END,
+  data_verified_at=greatest(k.data_verified_at,d.data_verified_at),
+  is_catalog_store=k.is_catalog_store OR d.is_catalog_store,
+  updated_at=now()
+FROM stores d WHERE k.id=$1 AND d.id=$2`, keep, drop); e != nil {
+		return e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE stores SET deleted_at=now(), merged_into=$1, updated_at=now() WHERE id=$2`, keep, drop); e != nil {
+		return e
+	}
+	// Counted from what is there now rather than added up from two rows, which is the only
+	// version that stays right when a review moved and a favourite did not.
+	if _, e = tx.Exec(ctx, `
+UPDATE store_stats ss SET
+  rating_count=p.n, review_count=p.n, post_count=p.n, average_rating=p.avg,
+  favorite_count=(SELECT count(*) FROM favorites WHERE store_id=$1), updated_at=now()
+ FROM (SELECT count(*)::int n, coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL) p
+ WHERE ss.store_id=$1`, keep); e != nil {
+		return e
+	}
+	if e = record(ctx, tx, actor, email, "store.merge", "store", keep,
+		map[string]any{"merged": drop.String(), "kept_name": keepName, "merged_name": dropName}); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
 }

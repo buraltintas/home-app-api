@@ -6,6 +6,32 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Two rows that are one shop can be made one shop
+
+The matcher is deliberately cautious about joining rows on its own -- a wrong merge is
+silent and permanent in a way a duplicate is not -- which means the ones it declines have to
+be joinable by hand, and until now they were not.
+
+`POST /v1/admin/stores/{id}/merge` moves everything the other row carried onto this one:
+reviews, verified visits, search results and interactions outright; favourites, categories,
+source identifiers, carried brands, attributes and translations where they do not collide
+with one the survivor already has. The survivor keeps its own id, because that is what every
+review, favourite and rating in the database already points at, and it takes the stronger of
+the two provenances: a brand link, an address, a phone number or a verification date present
+on only the row that went is not lost with it.
+
+The other row is not deleted outright. It is soft-deleted with `merged_into` pointing at the
+survivor, and a request for it -- by slug or by id -- is answered with the survivor, so a
+link somebody shared before the merge still opens a shop. One hop only: a chain of merges is
+something nobody should be able to build, and following one forever is how a loop becomes a
+hung request.
+
+Counts are recomputed from what is actually there afterwards rather than added up from the
+two rows, which is the only version that stays right when a review moved and a favourite did
+not.
+
+---
+
 ## A shop we placed ourselves says so
 
 Five hundred shops in the catalogue stand where we put them, not where their chain says

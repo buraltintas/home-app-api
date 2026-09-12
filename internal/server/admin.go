@@ -562,3 +562,35 @@ func (s *Server) adminImportBrand(w http.ResponseWriter, r *http.Request) {
 		"review": report.Review, "skipped": report.Skipped,
 	})
 }
+
+// adminMergeStores joins two rows that are one shop. The id in the path is the one that
+// survives, because that is the id everything else in the database already points at.
+func (s *Server) adminMergeStores(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	keep, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var body struct {
+		Merge string `json:"merge"`
+	}
+	if e = json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	drop, e := uuid.Parse(body.Merge)
+	if e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if e = s.admin.MergeStores(r.Context(), actor, email, keep, drop); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"id": keep, "merged": drop})
+}

@@ -164,6 +164,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Get("/stores/nearby", s.adminNearbyStores)
 			r.Post("/stores", s.adminCreateStore)
 			r.Post("/stores/{id}/premium", s.adminSetPremium)
+			r.Post("/stores/{id}/merge", s.adminMergeStores)
 			r.Post("/stores/{id}/catalog", s.adminSetCatalogStore)
 			r.Post("/stores/{id}/categories", s.adminSetStoreCategories)
 			r.Put("/stores/{id}/cover", s.adminSetStoreCover)
@@ -368,7 +369,7 @@ func viewer(r *http.Request) *uuid.UUID {
 func parseStoreRef(r *http.Request, s *Server) (uuid.UUID, error) {
 	raw := chi.URLParam(r, "id")
 	if id, e := uuid.Parse(raw); e == nil {
-		return id, nil
+		return s.stores.FollowMerge(r.Context(), id), nil
 	}
 	return s.stores.ResolveSlug(r.Context(), raw)
 }

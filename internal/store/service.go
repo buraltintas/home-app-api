@@ -204,11 +204,32 @@ func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, erro
 		return uuid.Nil, httpapi.ErrInvalidInput
 	}
 	var id uuid.UUID
-	e := s.db.QueryRow(ctx, `SELECT id FROM stores WHERE slug=$1 AND deleted_at IS NULL`, slug).Scan(&id)
+	// A merged row keeps its slug and answers with the shop it was merged into, so a link
+	// somebody shared before the merge still opens a shop rather than a dead page. One hop:
+	// a survivor that is itself merged away is a chain nobody should be able to build, and
+	// following it forever is how a loop becomes a hung request.
+	e := s.db.QueryRow(ctx, `
+SELECT coalesce(m.id, s.id)
+  FROM stores s
+  LEFT JOIN stores m ON m.id=s.merged_into AND m.deleted_at IS NULL
+ WHERE s.slug=$1 AND (s.deleted_at IS NULL OR s.merged_into IS NOT NULL)
+ ORDER BY s.deleted_at NULLS FIRST
+ LIMIT 1`, slug).Scan(&id)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return uuid.Nil, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
 	return id, e
+}
+
+// FollowMerge answers with the shop this id ended up as. A request by uuid for a row that
+// has been merged away is answered with its survivor, for the same reason a request by slug
+// is: the id is in somebody's link.
+func (s *Service) FollowMerge(ctx context.Context, id uuid.UUID) uuid.UUID {
+	var into *uuid.UUID
+	if e := s.db.QueryRow(ctx, `SELECT merged_into FROM stores WHERE id=$1`, id).Scan(&into); e != nil || into == nil {
+		return id
+	}
+	return *into
 }
 
 // PremiumNearby returns promoted stores close to the searcher that match the categories
