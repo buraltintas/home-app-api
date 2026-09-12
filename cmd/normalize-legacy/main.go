@@ -46,7 +46,7 @@ func main() {
 		log.Fatal(e)
 	}
 
-	rows, e := db.Query(ctx, `SELECT id::text,name,coalesce(city,''),coalesce(district,''),coalesce(address,''),coalesce(compact_name,''),ST_Y(location::geometry),ST_X(location::geometry) FROM stores WHERE deleted_at IS NULL ORDER BY created_at`)
+	rows, e := db.Query(ctx, `SELECT id::text,name,coalesce(city,''),coalesce(district,''),coalesce(address,''),coalesce(compact_name,''),ST_Y(location::geometry),ST_X(location::geometry),coalesce(location_from,'') FROM stores WHERE deleted_at IS NULL ORDER BY created_at`)
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -63,8 +63,16 @@ func main() {
 		var c change
 		var address string
 		var latitude, longitude *float64
-		if e = rows.Scan(&c.id, &c.oldName, &c.oldCity, &c.oldDistrict, &address, &c.compact, &latitude, &longitude); e != nil {
+		var pointFrom string
+		if e = rows.Scan(&c.id, &c.oldName, &c.oldCity, &c.oldDistrict, &address, &c.compact, &latitude, &longitude, &pointFrom); e != nil {
 			log.Fatal(e)
+		}
+		// A point we put there ourselves cannot say where the shop is: it was derived from
+		// the place in the first place, and reading the place back off it is a circle. It
+		// put Vivense's Kepez shop in Muratpaşa, because that is what is nearest the middle
+		// of Antalya, and then the next import could not recognise its own row.
+		if catalog.Derived(pointFrom) {
+			latitude, longitude = nil, nil
 		}
 		total++
 		c.name = catalog.TidyName(c.oldName)

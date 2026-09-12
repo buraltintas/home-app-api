@@ -110,7 +110,7 @@ func main() {
 	}
 	importer := catalog.NewImporter(db, resolver)
 
-	var ran int
+	var ran, failed int
 	for _, brand := range brands {
 		if *tier > 0 && brand.Tier != *tier {
 			continue
@@ -118,6 +118,7 @@ func main() {
 		source, ok, e := catalog.SourceFor(brand, fetcher)
 		if e != nil {
 			log.Printf("%s: %v", brand.Slug, e)
+			failed++
 			continue
 		}
 		if !ok {
@@ -126,6 +127,7 @@ func main() {
 		report, e := importer.Run(ctx, source, *apply)
 		if e != nil {
 			log.Printf("%s: %v", brand.Slug, e)
+			failed++
 			continue
 		}
 		ran++
@@ -133,7 +135,15 @@ func main() {
 		printDecisions(report, *verbose)
 	}
 	if ran == 0 {
-		fmt.Println("nothing to do: no registered brand has a mapped store locator yet")
+		// Told apart, because they are not the same news. Nothing mapped is a registry
+		// waiting to be filled in; everything tried and failed is an import that needs
+		// looking at, and saying the first about the second is how a rolled-back run gets
+		// read as a quiet day.
+		if failed > 0 {
+			fmt.Printf("%d brand(s) attempted, none imported -- see the errors above\n", failed)
+		} else {
+			fmt.Println("nothing to do: no registered brand has a mapped store locator yet")
+		}
 		return
 	}
 	// Which of the brands just imported have no mark on disk.

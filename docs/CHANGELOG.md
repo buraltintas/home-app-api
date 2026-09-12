@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A place must not be read off a point we placed ourselves
+
+The rule that lets a shop's coordinate name its city and district was applied to rows whose
+coordinate we had invented -- a shop with no published point is stood at the centre of its
+town, and reading the town back off that point is a circle. It put Vivense's Kepez shop in
+Muratpaşa, because Muratpaşa is what lies nearest the middle of Antalya, and the next import
+then could not recognise its own row. The pass over existing rows now ignores a coordinate
+whose provenance says we placed it.
+
+**And an import that failed no longer reports as an idle one.** A run where every brand
+attempted errored printed "nothing to do: no registered brand has a mapped store locator
+yet", which is a registry waiting to be filled in, not a rolled-back import. It now says how
+many were attempted and points at the errors.
+
+---
+
 ## A shop with no coordinate stands in its own neighbourhood, not in the middle of town
 
 A chain that publishes an address and no coordinate has still said, in the first phrase of
