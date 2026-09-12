@@ -406,16 +406,21 @@ brands:
       coordinates: 'showroom-coordinate="([^"]+)"'
 
   - slug: boyner-ev
-    # Not a store network of its own: "Boyner Ev" is a department inside Boyner's
-    # department stores. Importing their branches would fill a home and living catalogue
-    # with clothing shops, which is what the apparel filter exists to prevent.
-    active: false
-    name: Boyner Ev
+    name: Boyner
     website: https://www.boyner.com.tr
     tier: 1
-    categories: [home_textile, decoration, tableware, home_accessories]
-    store_count_estimate: 100
-    locator: {kind: none}
+    categories: [home_textile, decoration, kitchenware, home_accessories]
+    store_count_estimate: 140
+    locator:
+      kind: html
+      # The list lives on the corporate site, not the shop. Each row is printed twice, once
+      # for each layout the page ships; identical rows collapse on their derived identifier.
+      # No coordinates are published, so each shop is placed at the centre of the town its
+      # address names and the row records that.
+      url: https://kurumsal.boyner.com.tr/magazalarimiz
+      row: '(?s)(<h4 class="font-\[540\]">.*?</p>)'
+      name: '<h4[^>]*>([^<]+)</h4>'
+      address: '<p class="mt-\[4px\][^"]*">([^<]+)</p>'
 
   - slug: chakra
     name: Chakra

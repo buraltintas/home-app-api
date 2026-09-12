@@ -99,23 +99,27 @@ func TestDecodeStorePhotoPreservesEffectiveSource(t *testing.T) {
 	}
 }
 
-// The overall rating is derived, so it has to be derived correctly at the edges: eight
-// identical scores return that score, and a half-way total rounds up rather than sitting
-// between two stars.
+// The overall rating is the average of the eight, kept as an average. It used to round to a
+// whole number, which threw away what the criteria were for: a reader who adds their own
+// answers up gets 1.25 and was shown 1.0.
 func TestReviewCriteriaOverall(t *testing.T) {
 	for score := 1; score <= 5; score++ {
 		c := ReviewCriteria{score, score, score, score, score, score, score, score}
-		if got := c.overall(); got != score {
-			t.Fatalf("eight %ds averaged to %d", score, got)
+		if got := c.overall(); got != float64(score) {
+			t.Fatalf("eight %ds averaged to %v", score, got)
 		}
 	}
-	// 4,4,4,4,5,5,5,5 -> 36/8 = 4.5, which rounds to 5.
-	if got := (ReviewCriteria{4, 4, 4, 4, 5, 5, 5, 5}).overall(); got != 5 {
-		t.Fatalf("4.5 rounded to %d", got)
+	// The case that was reported: ten stars spread over eight answers.
+	if got := (ReviewCriteria{1, 1, 1, 1, 1, 1, 2, 2}).overall(); got != 1.25 {
+		t.Fatalf("ten stars over eight criteria came to %v, want 1.25", got)
 	}
-	// 4,4,4,4,4,4,4,5 -> 33/8 = 4.125, which rounds to 4.
-	if got := (ReviewCriteria{4, 4, 4, 4, 4, 4, 4, 5}).overall(); got != 4 {
-		t.Fatalf("4.125 rounded to %d", got)
+	// 4,4,4,4,5,5,5,5 -> 36/8 = 4.5, and stays 4.5.
+	if got := (ReviewCriteria{4, 4, 4, 4, 5, 5, 5, 5}).overall(); got != 4.5 {
+		t.Fatalf("4.5 became %v", got)
+	}
+	// 33/8 = 4.125, which two decimals name as 4.13 -- eighths need no more than that.
+	if got := (ReviewCriteria{4, 4, 4, 4, 4, 4, 4, 5}).overall(); got != 4.13 {
+		t.Fatalf("4.125 became %v", got)
 	}
 	// A missing criterion is not a shorter review.
 	if (ReviewCriteria{5, 5, 5, 5, 5, 5, 5, 0}).valid() {

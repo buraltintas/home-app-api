@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -70,19 +71,31 @@ func (c ReviewCriteria) valid() bool {
 // overall is the rating the store carries away from this review: the mean of the eight,
 // rounded to the nearest star. Nobody is asked for it separately, because a ninth score
 // that is supposed to summarise the other eight is a ninth thing to disagree with.
-func (c ReviewCriteria) overall() int {
+// overall is the average of the eight criteria, kept as an average.
+//
+// It used to round to a whole number, which threw away exactly what the criteria were for:
+// ten stars across eight answers is 1.25, and a reader who adds their own answers up gets
+// 1.25 and sees 1.0. The store's own rating is an average of these, so the error did not
+// stay in one review either.
+func (c ReviewCriteria) overall() float64 {
 	total := 0
 	for _, score := range c.scores() {
 		total += score
 	}
-	return (total*2 + len(c.scores())) / (len(c.scores()) * 2)
+	scores := c.scores()
+	if len(scores) == 0 {
+		return 0
+	}
+	// Two decimals, which is what the column holds and what a fraction of eight needs:
+	// eighths are .125 apart, so two places name every value this can take.
+	return math.Round(float64(total)/float64(len(scores))*100) / 100
 }
 
 type CreatePost struct {
 	StoreID              uuid.UUID       `json:"store_id"`
 	Text                 string          `json:"text"`
 	Criteria             *ReviewCriteria `json:"criteria"`
-	Rating               int             `json:"rating"`
+	Rating               float64         `json:"rating"`
 	Latitude             float64         `json:"latitude"`
 	Longitude            float64         `json:"longitude"`
 	AccuracyMeters       *float64        `json:"accuracy_meters"`
@@ -106,7 +119,7 @@ type Post struct {
 	StoreID         uuid.UUID `json:"store_id"`
 	Text            string    `json:"text"`
 	ContentLanguage string    `json:"content_language,omitempty"`
-	Rating          int       `json:"rating"`
+	Rating          float64   `json:"rating"`
 	VisitVerified   bool      `json:"visit_verified"`
 	// Nullable: a review written without a location has no distance, and zero would claim
 	// its writer stood in the shop.

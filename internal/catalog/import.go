@@ -215,9 +215,19 @@ func (i *Importer) Run(ctx context.Context, source Source, apply bool) (Report, 
 			return report, e
 		}
 	}
+	// Measured against the size of the brand, because the two things this can catch are not
+	// the same size. A chain duplicated wholesale puts hundreds of names on two shops each;
+	// a publisher that lists one dealer under two entries puts twelve, out of a thousand,
+	// and refusing that refuses the import that carries every other improvement with it.
+	// Growth beyond a twentieth of the brand is the first kind.
 	if apply && twinsAfter > twinsBefore {
-		return report, fmt.Errorf("%s: this run would leave %d name(s) on more than one shop, up from %d; rolled back",
-			brand.Slug, twinsAfter, twinsBefore)
+		grown := twinsAfter - twinsBefore
+		if grown*20 > report.Fetched {
+			return report, fmt.Errorf("%s: this run would leave %d name(s) on more than one shop, up from %d; rolled back",
+				brand.Slug, twinsAfter, twinsBefore)
+		}
+		fmt.Printf("  %s: %d more name(s) now sit on two shops (%d in all) -- the publisher lists them twice\n",
+			brand.Slug, grown, twinsAfter)
 	}
 
 	if _, e = tx.Exec(ctx, `UPDATE store_import_runs SET finished_at=now(),inserted=$2,updated=$3,review=$4,skipped=$5 WHERE id=$1`,
