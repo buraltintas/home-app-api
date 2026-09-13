@@ -30,6 +30,14 @@ is not a home shop. The fix was the registry: the chain we hold is Boyner Ev, an
 named that, the rule refuses the sports shop on its own -- and refuses a bare "Boyner" from the
 map too, which is right, since that name alone does not say which banner it is.
 
+**The shop's own website is the stronger rule.** Twelve more rows name no chain but publish
+one's address, and a host is an identity in a way a name is not: nobody puts a competitor's
+address on their own shop. "Tel Mağazacılık Uncalı" is a Bellona dealer and says so in its
+link. That rule needs no trade guard -- with one exception it cannot see: a group that runs
+several banners from one host. "Boyner Sports" is on boyner.com.tr and is not Boyner Ev; it
+was unlinked by hand afterwards, and it is recorded here because the next such group will do
+the same thing.
+
 **What it exposed.** With the brand known, 130 pairs stand out: the same chain, twice, within
 120 m -- the map's "Mondi" and the chain's own "Mondi - İstanbul Bayrampaşa Hilal Mobilya".
 The matcher could not see these, because it compares names and those two names barely share a

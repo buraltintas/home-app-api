@@ -6,10 +6,14 @@
 // as though it were somebody's independent furniture shop: no mark, no brand page, and no
 // way for search to know that a query for the chain should find it.
 //
-// The rule is the shop's own name, with one guard.
+// There are two rules, and the shop's own website is the stronger one.
 //
-//	the compact name starts with the chain's compact name,
-//	and the shop's categories overlap the chain's own trade.
+//	the shop's website is the chain's website,
+//	or the compact name starts with the chain's compact name
+//	   and the shop's categories overlap the chain's own trade.
+//
+// A host is an identity in a way a name is not: nobody puts a competitor's address on their
+// own shop. So a website match needs no guard, while a name match does.
 //
 // The guard is not decoration. "Korkmaz" is a pot maker and also one of the commonest
 // surnames in the country: "Korkmaz Mobilya" is a furniture shop belonging to a family, not
@@ -51,13 +55,27 @@ type brand struct {
 	id         string
 	name       string
 	compact    string
+	host       string
 	categories map[string]bool
 }
 
 type candidate struct {
 	storeID, name, city, district string
 	brand                         brand
-	shared                        []string
+	why                           string
+}
+
+// host reduces an address to the thing that identifies whose site it is. A shop writing
+// "https://www.yatsan.com/magazalar" and a chain writing "https://yatsan.com" are the same
+// business; the path and the "www." are not part of who it is.
+func host(raw string) string {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	raw = strings.TrimPrefix(strings.TrimPrefix(raw, "https://"), "http://")
+	raw = strings.TrimPrefix(raw, "www.")
+	if i := strings.IndexAny(raw, "/?#"); i >= 0 {
+		raw = raw[:i]
+	}
+	return raw
 }
 
 func main() {
@@ -85,7 +103,7 @@ func main() {
 	// one: a row the chain's own list produced already knows what it is.
 	rows, e := db.Query(ctx, `
 SELECT s.id::text, s.name, s.compact_name, coalesce(s.city,''), coalesce(s.district,''),
-       coalesce(array_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL),'{}')
+       coalesce(s.website,''), coalesce(array_agg(c.slug) FILTER (WHERE c.slug IS NOT NULL),'{}')
   FROM stores s
   LEFT JOIN store_category_links l ON l.store_id=s.id
   LEFT JOIN store_categories c ON c.id=l.category_id
@@ -101,10 +119,14 @@ SELECT s.id::text, s.name, s.compact_name, coalesce(s.city,''), coalesce(s.distr
 	var found []candidate
 	refusedByTrade := 0
 	for rows.Next() {
-		var id, name, compact, city, district string
+		var id, name, compact, city, district, website string
 		var categories []string
-		if e := rows.Scan(&id, &name, &compact, &city, &district, &categories); e != nil {
+		if e := rows.Scan(&id, &name, &compact, &city, &district, &website, &categories); e != nil {
 			log.Fatal(e)
+		}
+		if match := byHost(website, brands); match != nil {
+			found = append(found, candidate{storeID: id, name: name, city: city, district: district, brand: *match, why: "sitesi: " + host(website)})
+			continue
 		}
 		match, shared, refused := pick(compact, categories, brands)
 		if refused {
@@ -113,7 +135,7 @@ SELECT s.id::text, s.name, s.compact_name, coalesce(s.city,''), coalesce(s.distr
 		if match == nil {
 			continue
 		}
-		found = append(found, candidate{storeID: id, name: name, city: city, district: district, brand: *match, shared: shared})
+		found = append(found, candidate{storeID: id, name: name, city: city, district: district, brand: *match, why: "adı + " + strings.Join(shared, ", ")})
 	}
 	if e := rows.Err(); e != nil {
 		log.Fatal(e)
@@ -134,7 +156,7 @@ SELECT s.id::text, s.name, s.compact_name, coalesce(s.city,''), coalesce(s.distr
 
 	for _, c := range found {
 		where := strings.TrimSpace(strings.Join([]string{c.district, c.city}, " "))
-		fmt.Printf("  %-44s %-16s %-22s ortak: %s\n", trim(c.name, 44), trim(where, 16), c.brand.name, strings.Join(c.shared, ", "))
+		fmt.Printf("  %-42s %-16s %-20s %s\n", trim(c.name, 42), trim(where, 16), c.brand.name, c.why)
 	}
 
 	fmt.Printf("toplam: %d şube %d markaya bağlanacak; %d satır adı uydu ama ticareti uymadı\n",
@@ -156,6 +178,20 @@ SELECT s.id::text, s.name, s.compact_name, coalesce(s.city,''), coalesce(s.distr
 		written += int(tag.RowsAffected())
 	}
 	fmt.Printf("%d satır markasına bağlandı\n", written)
+}
+
+// byHost is the rule that needs no guard: the shop publishes the chain's own address.
+func byHost(website string, brands []brand) *brand {
+	h := host(website)
+	if h == "" {
+		return nil
+	}
+	for i := range brands {
+		if brands[i].host != "" && brands[i].host == h {
+			return &brands[i]
+		}
+	}
+	return nil
 }
 
 // pick returns the chain a shop's name claims, if its trade agrees. The second return says
@@ -192,7 +228,7 @@ func pick(compact string, categories []string, brands []brand) (*brand, []string
 }
 
 func readBrands(ctx context.Context, db *pgxpool.Pool) ([]brand, error) {
-	rows, e := db.Query(ctx, `SELECT id::text,name,category_profile FROM brands WHERE active`)
+	rows, e := db.Query(ctx, `SELECT id::text,name,coalesce(website,''),category_profile FROM brands WHERE active`)
 	if e != nil {
 		return nil, e
 	}
@@ -200,11 +236,13 @@ func readBrands(ctx context.Context, db *pgxpool.Pool) ([]brand, error) {
 	var out []brand
 	for rows.Next() {
 		var b brand
+		var website string
 		var profile []string
-		if e := rows.Scan(&b.id, &b.name, &profile); e != nil {
+		if e := rows.Scan(&b.id, &b.name, &website, &profile); e != nil {
 			return nil, e
 		}
 		b.compact = textnorm.Compact(b.name)
+		b.host = host(website)
 		if len([]rune(b.compact)) < shortestBrandName || len(profile) == 0 {
 			continue
 		}
