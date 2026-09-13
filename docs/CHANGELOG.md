@@ -6,6 +6,52 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## One shop, written down twice
+
+We said duplicates were the thing that must not happen, and 194 of them happened. What follows
+is why, because the reason is more useful than the count.
+
+**The rule existed; it was in one import path and not the other.** A chain writes a dealer's
+row as "Bellona - İstanbul Eyüpsultan Balcı Mobilya" -- the dealer's own trading name is most
+of what identifies the branch to the chain. The map writes "Bellona". Those two strings share
+so little of their length that trigram similarity reads 0.17, far under any threshold, while
+the rows stand **one metre apart** with the same sign over the door. The brand importer has
+always treated one name holding the other whole as identity. The map importer compared
+similarity and nothing else. One definition, used in one place: that is the whole defect, and
+`containment` is now called by both paths, with a test that names the case.
+
+**The duplicate measurement I ran before the import was wrong in the same way.** It reported
+five certain duplicates for İstanbul because it asked the question with the same trigram
+comparison the importer used. A check built out of the thing being checked cannot find what
+that thing misses. The honest version of that measurement is the one below: a second identity,
+independent of the name.
+
+**What actually found them.** Not the name -- the brand plus the distance. Two rows of one
+chain at one address are one shop, because a chain does not open two of its own branches in a
+single doorway. That identity only existed after the map's rows were linked to their chains,
+which is why the adoption pass had to come first: 131 pairs, most of them one to three metres
+apart.
+
+**And a second shape underneath it.** A shop can be listed by two chains at once: Taç
+publishes the Linens shops and Linens publishes them too, so one shop stood at one point under
+two brands. 63 more pairs, joined on one name holding the other within 30 m. The survivor is
+decided in the open -- the chain both names agree on wins, then the verified row, then the
+fuller record, then the older one -- and that order is safe because the merge moves every
+identifier to the survivor and takes the stronger provenance with it, so nothing is lost by
+dropping a verified row.
+
+`cmd/merge-twins` does both, through the admin service's own merge: reviews, favourites and
+ratings move, the dropped row is soft-deleted with a redirect so its address does not break,
+and every merge is in the audit log under the operator who ran it. Both queries now return
+nothing.
+
+**What is not a duplicate.** 615 same-chain pairs sit within 120 m because the chain publishes
+an imprecise point, and 210 Dinarsu pairs share a coordinate while being plainly different
+dealers -- different people, different trading names. Merging those would destroy real shops.
+They are a location-precision problem and they stay open as one.
+
+---
+
 ## A branch given back to its chain
 
 A shop the public map or the old provider handed us carries no chain, because neither source

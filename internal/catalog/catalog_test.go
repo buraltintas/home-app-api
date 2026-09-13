@@ -217,3 +217,19 @@ func TestStripPlaceCodeDropsTheChainsOwnCityCode(t *testing.T) {
 		}
 	}
 }
+
+// A dealer's row is mostly the dealer's own trading name, so trigram similarity between it
+// and the plain sign over the same door reads near nothing. Containment is what recognises
+// them, and it is the rule 130 duplicates were built out of when only one import path had it.
+func TestContainmentRecognisesADealerUnderTheChainsSign(t *testing.T) {
+	chain := CompactName("Bellona - İstanbul Eyüpsultan Balcı Mobilya")
+	sign := CompactName("Bellona")
+	if !containment(sign, chain) {
+		t.Fatalf("the chain's dealer row should hold the sign whole: %q in %q", sign, chain)
+	}
+	// And it still refuses what is merely short. "Halı" is in half the carpet shops in the
+	// country and identifies none of them.
+	if containment(CompactName("Halı"), CompactName("Gençler Halı")) {
+		t.Fatal("a word this short must not stand for identity")
+	}
+}

@@ -148,16 +148,20 @@ func (i *OpenMapImporter) decide(ctx context.Context, tx pgx.Tx, row RawStore, c
 		return d, nil
 	}
 
-	var id, name string
+	var id, name, compact string
 	var sim, metres float64
 	var branded bool
 	e = tx.QueryRow(ctx, `
-SELECT id::text, name, similarity(compact_name,$1), ST_Distance(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography), brand_id IS NOT NULL
+SELECT id::text, name, compact_name, similarity(compact_name,$1), ST_Distance(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography), brand_id IS NOT NULL
   FROM stores
  WHERE deleted_at IS NULL AND compact_name <> ''
    AND ST_DWithin(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography, $4)
- ORDER BY similarity(compact_name,$1) DESC
- LIMIT 1`, CompactName(row.Name), *row.Latitude, *row.Longitude, openMapSameMeters).Scan(&id, &name, &sim, &metres, &branded)
+ ORDER BY greatest(similarity(compact_name,$1),
+                   CASE WHEN length($1)>=6 AND length(compact_name)>=6
+                         AND (compact_name LIKE '%'||$1||'%' OR $1 LIKE '%'||compact_name||'%')
+                        THEN 1 ELSE 0 END) DESC,
+          similarity(compact_name,$1) DESC
+ LIMIT 1`, CompactName(row.Name), *row.Latitude, *row.Longitude, openMapSameMeters).Scan(&id, &name, &compact, &sim, &metres, &branded)
 	if errors.Is(e, pgx.ErrNoRows) {
 		d.Action, d.Reason = ActionInserted, "no comparable shop within 150 m"
 		return d, nil
@@ -167,14 +171,26 @@ SELECT id::text, name, similarity(compact_name,$1), ST_Distance(location, ST_Set
 	}
 	d.Similarity, d.Distance = sim, metres
 
+	// A dealer's row is mostly the dealer's own name: "Bellona - İstanbul Eyüpsultan Balcı
+	// Mobilya" against the map's plain "Bellona" shares so little of its length that trigram
+	// similarity reads 0.17 and calls them different shops. They are one shop, one metre
+	// apart, and the sign over the door says so. The brand importer has always treated one
+	// name holding the other whole as identity; this path did not, and 130 duplicates are
+	// what that cost. Same rule, same place, one definition.
+	held := containment(CompactName(row.Name), compact)
+
 	switch {
-	case sim >= openMapSameSimilarity && !claimed[id]:
+	case (sim >= openMapSameSimilarity || held) && !claimed[id]:
 		// Already in the catalogue, from a chain's own list or from an operator. The map is
 		// not the authority on it, so nothing about the shop is overwritten -- the only
 		// thing recorded is that this map object is that shop, so the next run recognises it
 		// without asking again.
 		d.Action, d.StoreID = ActionUpdated, id
-		d.Reason = fmt.Sprintf("already in the catalogue as %q (%.2f, %.0f m); recorded as the same shop", name, sim, metres)
+		why := fmt.Sprintf("%.2f", sim)
+		if held {
+			why = "one name holds the other whole"
+		}
+		d.Reason = fmt.Sprintf("already in the catalogue as %q (%s, %.0f m); recorded as the same shop", name, why, metres)
 		claimed[id] = true
 	case sim >= openMapReviewMinimum:
 		d.Action = ActionReview
