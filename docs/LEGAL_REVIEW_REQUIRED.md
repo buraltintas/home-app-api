@@ -13,8 +13,11 @@ not, so they come from the public map instead. Three things a lawyer should see:
   `source_kind='osm'` and carries its map object id, so the OSM-derived subset can be
   identified exactly, whichever answer we get.
 
-- **Attribution is not yet shown anywhere.** The data is imported and tagged; no page credits
-  OpenStreetMap yet. That has to be in place before these rows are visible to the public.
+- **Attribution is shown on every store that came from the map.** The store page credits
+  "© OpenStreetMap contributors" and links the licence, beside the address the data
+  describes, so the credit travels with the row rather than sitting on one distant page.
+  Rows are driven by `store_external_sources.provider='osm'`, so a row that is later
+  re-sourced from a chain stops claiming a credit it no longer needs.
 
 - **These rows are not verified and are not presented as verified.** Nobody published them
   about themselves; a mapper wrote them down. They carry no `data_verified_at`, search ranks
