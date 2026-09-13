@@ -75,6 +75,11 @@ func NewOpenMapSource(province string, fetcher *Fetcher) *OpenMapSource {
 func (s *OpenMapSource) Province() string { return s.province }
 
 type overpassAnswer struct {
+	// Overpass answers a query it could not finish with 200 and an empty element list, with
+	// the reason in this field. Read as JSON and nothing more, that is indistinguishable
+	// from "this province has no shops" -- and it is how İstanbul, which has about two
+	// thousand, was recorded as having none.
+	Remark   string `json:"remark"`
 	Elements []struct {
 		Type   string                      `json:"type"`
 		ID     int64                       `json:"id"`
@@ -104,22 +109,39 @@ area["name"=%q]["admin_level"="4"]->.a;
 );
 out tags center;`, s.province, filter, filter)
 
-	var body []byte
+	// Asked in turn until one of them answers with something. An answer is not merely a 200:
+	// a loaded instance hands back a complete, well-formed document with an empty element
+	// list and, sometimes, no remark at all. Read as JSON and nothing more, that is
+	// indistinguishable from "this province has no shops" -- and it is how İstanbul, which
+	// has nineteen hundred of them, was twice recorded as having none. A province we have
+	// asked about has shops in it; nothing is the server saying it could not, so the next
+	// mirror is asked.
+	var answer overpassAnswer
 	var failures []string
 	for _, endpoint := range overpassEndpoints {
-		got, e := s.fetcher.Send(ctx, "POST", endpoint, "data="+url.QueryEscape(query))
-		if e == nil {
-			body = got
-			break
+		body, e := s.fetcher.Send(ctx, "POST", endpoint, "data="+url.QueryEscape(query))
+		if e != nil {
+			failures = append(failures, endpoint+": "+e.Error())
+			continue
 		}
-		failures = append(failures, endpoint+": "+e.Error())
+		var got overpassAnswer
+		if e := json.Unmarshal(body, &got); e != nil {
+			failures = append(failures, endpoint+": "+e.Error())
+			continue
+		}
+		if len(got.Elements) == 0 {
+			why := got.Remark
+			if why == "" {
+				why = "answered with no shops at all"
+			}
+			failures = append(failures, endpoint+": "+why)
+			continue
+		}
+		answer = got
+		break
 	}
-	if body == nil {
+	if len(answer.Elements) == 0 {
 		return nil, fmt.Errorf("overpass %s: %s", s.province, strings.Join(failures, "; "))
-	}
-	var answer overpassAnswer
-	if e := json.Unmarshal(body, &answer); e != nil {
-		return nil, fmt.Errorf("overpass %s: %w", s.province, e)
 	}
 
 	out := make([]RawStore, 0, len(answer.Elements))

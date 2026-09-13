@@ -6,6 +6,57 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The shops that are nobody's branch
+
+The catalogue was built from brands' own store lists, which is why nine tenths of it is
+branches of chains: chains are the ones who publish lists. The shops that are nobody's branch
+publish nothing for us to read, and it showed. Measured before any of this was written:
+İstanbul held 70 independent shops, Ankara 3, Bursa 4. Antalya held 664, because that is where
+the data from the provider we dropped was collected.
+
+`cmd/openmap-import` reads them from OpenStreetMap, a province at a time. İstanbul alone holds
+about nineteen hundred home and living shops there.
+
+**It is its own path, not a brand wearing a disguise.** The brand importer carries a chain's
+authority: it renames a shop into the chain's form, writes the chain's website onto it, marks
+it verified and files it under the chain's categories. None of that is true of a shop a mapper
+wrote down. These rows arrive as a fifth provenance, `source_kind='osm'`, with no
+`data_verified_at` -- so search ranks them behind what a chain has confirmed, without a second
+rule being written. What is shared is the part worth sharing: the resolver that turns a point
+into a town, and the same three-way decision at the same thresholds, so the review queue asks
+one kind of question rather than two. A row already in the catalogue is never overwritten by a
+map object; the only thing recorded is that the two are the same shop.
+
+**The duplicate risk was measured before the code was written.** İstanbul's mapped shops were
+compared against the catalogue in SQL: 5 are certainly a shop we already hold, 5 land in the
+band a person settles, 692 are within 150 m of one of ours under a different name -- the next
+unit along a mall floor, not a duplicate -- and 1,226 have nothing of ours within 150 m. The
+import then produced exactly that: 1,912 read, 1,902 new, 5 matched, 5 for review. Ten rows out
+of nearly two thousand need a decision, because our catalogue is chains and the map's mass is
+independents.
+
+**An empty answer is not the same as no shops.** A loaded Overpass instance hands back a
+complete, well-formed document with an empty element list and sometimes no remark at all. Read
+as JSON and nothing more, that is indistinguishable from "this province has no shops" -- and it
+is how İstanbul was twice recorded as having none. A province we have asked about has shops in
+it; nothing means the server could not answer, so the next mirror is asked and the run fails if
+none can.
+
+**Two hosts said no and were believed.** overpass-api.de's robots.txt disallows `/api/`
+outright and Geofabrik's disallows the bulk extracts, so the fetcher refuses both -- correctly.
+The answer to a host that says no is a host that does not: two public mirrors that state no
+rules at all. If either publishes a robots.txt that disallows this path, the fetcher refuses it
+too and the next is tried. `NewFetcherWithTimeout` exists because thirty seconds is right for a
+store locator and wrong for a query engine sweeping a province: giving up and asking again is
+ruder than waiting.
+
+**The licence is a condition, not a footnote.** OSM data is ODbL: attribution wherever it is
+shown, and share-alike on a derived database. Nothing credits OpenStreetMap yet, so these rows
+must not be visible to the public until that is in place. Recorded in
+`docs/LEGAL_REVIEW_REQUIRED.md`.
+
+---
+
 ## "Where can I buy a Yataş bed round here" now has an answer
 
 One dealer holds two franchises and appears in both chains' published lists. The importer
