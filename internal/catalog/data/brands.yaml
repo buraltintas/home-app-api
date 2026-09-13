@@ -430,7 +430,7 @@ brands:
       coordinates: 'showroom-coordinate="([^"]+)"'
 
   - slug: boyner-ev
-    name: Boyner
+    name: Boyner Ev
     website: https://www.boyner.com.tr
     tier: 1
     categories: [home_textile, decoration, kitchenware, home_accessories]

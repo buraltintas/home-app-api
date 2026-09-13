@@ -6,6 +6,38 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A branch given back to its chain
+
+A shop the public map or the old provider handed us carries no chain, because neither source
+says which chain a shop belongs to: a mapper writes "Bellona" and stops. So 358 rows that are
+plainly branches of chains we already hold sat in the catalogue as though each were somebody's
+independent furniture shop -- no mark, no chain, and no way for a search for the chain to find
+them.
+
+`cmd/adopt-branches` links them on the shop's own name, with one guard: the compact name
+starts with the chain's, **and** the shop's categories overlap the chain's trade. The guard is
+the load-bearing half. "Korkmaz" is a pot maker and also one of the commonest surnames in the
+country; "Korkmaz Mobilya" is a family's furniture shop, and only the trade separates the two.
+Thirty rows matched a chain's name and were refused on trade.
+
+It writes one column. The shop is not renamed, not marked verified, and its point is not
+moved -- a mapper's row stays a mapper's row. What changes is that it shows its chain's mark
+and answers to its chain's name.
+
+**A sloppy registry entry, not a sloppy rule.** The first run adopted "Boyner Sports
+Markantalya" into Boyner Ev, because the registry called that chain "Boyner" and a sports shop
+is not a home shop. The fix was the registry: the chain we hold is Boyner Ev, and once it is
+named that, the rule refuses the sports shop on its own -- and refuses a bare "Boyner" from the
+map too, which is right, since that name alone does not say which banner it is.
+
+**What it exposed.** With the brand known, 130 pairs stand out: the same chain, twice, within
+120 m -- the map's "Mondi" and the chain's own "Mondi - İstanbul Bayrampaşa Hilal Mobilya".
+The matcher could not see these, because it compares names and those two names barely share a
+letter. They are duplicates and want merging; the identity that makes them safe to merge is the
+brand plus the distance, not the name.
+
+---
+
 ## The shops that are nobody's branch
 
 The catalogue was built from brands' own store lists, which is why nine tenths of it is
