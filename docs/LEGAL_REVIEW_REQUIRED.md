@@ -1,3 +1,29 @@
+## Independent shops from OpenStreetMap (2026-09)
+
+The catalogue is chains, because chains publish lists. The shops that are nobody's branch do
+not, so they come from the public map instead. Three things a lawyer should see:
+
+- **The licence is ODbL, not public domain.** OpenStreetMap data may be used commercially,
+  but two obligations travel with it: attribution ("© OpenStreetMap contributors", with the
+  licence named and linked, wherever the data is shown) and share-alike on a *derived
+  database*. The second is the one that needs a view. Our catalogue mixes OSM rows with rows
+  compiled from chains' own lists and with our own reviews; whether that makes the whole thing
+  a derived database, or whether the OSM-sourced rows are a separable collective work, decides
+  what — if anything — we would have to publish. Every row that came from the map is tagged
+  `source_kind='osm'` and carries its map object id, so the OSM-derived subset can be
+  identified exactly, whichever answer we get.
+
+- **Attribution is not yet shown anywhere.** The data is imported and tagged; no page credits
+  OpenStreetMap yet. That has to be in place before these rows are visible to the public.
+
+- **These rows are not verified and are not presented as verified.** Nobody published them
+  about themselves; a mapper wrote them down. They carry no `data_verified_at`, search ranks
+  them behind rows a chain confirmed, and the store page says a location is approximate when
+  it is. A shop that objects to being listed is a case we should have an answer for before
+  this is public, in the same way a chain would be.
+
+---
+
 
 ## Removing Google Places (2026-09)
 

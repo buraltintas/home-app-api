@@ -34,9 +34,16 @@ type Fetcher struct {
 	delay  time.Duration
 }
 
-func NewFetcher() *Fetcher {
+func NewFetcher() *Fetcher { return NewFetcherWithTimeout(30 * time.Second) }
+
+// NewFetcherWithTimeout is the same fetcher with a different patience. Thirty seconds is
+// right for a store locator, which is a page somebody's browser also waits for. It is not
+// right for a query engine asked to sweep a province: that work is measured in minutes on the
+// server's side, and giving up at thirty seconds asks for it, throws the answer away, and
+// asks again -- which is ruder than waiting.
+func NewFetcherWithTimeout(timeout time.Duration) *Fetcher {
 	return &Fetcher{
-		client: &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{Timeout: timeout},
 		rules:  map[string]*robots{},
 		lastAt: map[string]time.Time{},
 		delay:  time.Second,

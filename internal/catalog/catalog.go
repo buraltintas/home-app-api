@@ -61,6 +61,11 @@ type RawStore struct {
 	// Outside marks a branch the brand publishes abroad. Several Turkish chains do, and
 	// their foreign cities sometimes carry names a Turkish district also has.
 	Outside bool
+	// Categories is for a source where each row is its own kind of shop. A brand's rows all
+	// take the brand's profile -- a bedding chain sells bedding in every branch -- but the
+	// public map labels each shop separately, and a carpet dealer next to a lighting shop
+	// are two different answers to a search.
+	Categories []string
 	// Raw is kept whole so a later change of mind about a field costs a re-match rather
 	// than another fetch of somebody else's website.
 	Raw json.RawMessage
