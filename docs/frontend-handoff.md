@@ -142,6 +142,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `GET /v1/stores/{id}/posts` | optional | limit → `{items}`; default 20/max 50, no next page token | — |
 | `POST /v1/stores/{id}/visit-verifications` | required | fresh mobile coordinates + horizontal accuracy → single-use expiring visit proof | proximity/input/rate errors |
 | `POST`, `DELETE /v1/stores/{id}/favorite` | required | empty → 204, idempotent | not found/auth |
+| `GET /v1/me/favorites/{id}` | required | `{favorited:boolean}` for exactly one store; no provider call | input/auth |
 | `POST /v1/posts` | required | review payload → `{id}` | media/proximity/input |
 | `GET /v1/posts/{id}` | optional | post object | not found |
 | `DELETE /v1/posts/{id}` | owner | empty → 204 | not found |

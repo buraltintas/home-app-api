@@ -543,6 +543,14 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 	return out, rows.Err()
 }
 
+// HasFavorite checks one store directly. A bounded favorites list cannot answer whether
+// an older saved store is still saved once the account has more than 100 favorites.
+func (s *Service) HasFavorite(ctx context.Context, viewer, storeID uuid.UUID) (bool, error) {
+	var saved bool
+	err := s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM favorites WHERE user_id=$1 AND store_id=$2)`, viewer, storeID).Scan(&saved)
+	return saved, err
+}
+
 func nilStrings(v []string) any {
 	if len(v) == 0 {
 		return nil

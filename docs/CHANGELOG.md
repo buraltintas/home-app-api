@@ -6,6 +6,13 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A saved store older than the favorites page
+
+The web store page used the first 100 saved stores to infer whether one store was saved.
+That made an older save look unsaved for accounts with a longer list. An authenticated,
+read-only endpoint now checks the requested store directly, without loading the list or
+calling an external provider. No migration is needed; it reads the existing favorites table.
+
 ## One shop, written down twice
 
 We said duplicates were the thing that must not happen, and 194 of them happened. What follows

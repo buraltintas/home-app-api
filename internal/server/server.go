@@ -190,6 +190,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.With(writeLimit.Middleware).Put("/me/discovery-location", s.updateDiscoveryLocation)
 			r.Delete("/me/discovery-location", s.clearDiscoveryLocation)
 			r.Get("/me/favorites", s.myFavorites)
+			r.Get("/me/favorites/{id}", s.myFavoriteStatus)
 			r.Get("/me/likes", s.myLikes)
 			r.With(writeLimit.Middleware).Post("/me/email", s.changeEmail)
 			r.Get("/me/messages", s.myMessages)
@@ -729,6 +730,21 @@ func (s *Server) myFavorites(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"items": x})
+}
+
+func (s *Server) myFavoriteStatus(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	storeID, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	saved, e := s.stores.HasFavorite(r.Context(), p.UserID, storeID)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"favorited": saved})
 }
 
 // searchOwner reads the history's owner off the request: the signed-in account when there

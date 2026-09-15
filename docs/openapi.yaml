@@ -189,6 +189,17 @@ paths:
       security: [{bffSecret: [], bearerAuth: []}]
       parameters: [{$ref: '#/components/parameters/ID'}]
       responses: {'204': {description: Favorite absent}}
+  /v1/me/favorites/{id}:
+    get:
+      tags: [Social]
+      summary: Check whether the viewer saved one store
+      security: [{bffSecret: [], bearerAuth: []}]
+      parameters: [{$ref: '#/components/parameters/ID'}]
+      responses:
+        '200':
+          description: Favorite status
+          content: {application/json: {schema: {type: object, required: [favorited], properties: {favorited: {type: boolean}}}}}
+        '401': {$ref: '#/components/responses/Error'}
   /v1/posts:
     post:
       tags: [Social]
