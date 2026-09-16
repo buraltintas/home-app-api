@@ -695,3 +695,69 @@ brands:
       id: 'store-title-([0-9]+)'
       name: 'data-toggle="accordion">\s*([^<]+)'
       address: '<div class="content-store">\s*([^<]+)'
+
+  # Chains the catalogue was already holding without knowing they were chains. Their shops
+  # arrived from the map or from the old provider and publish the chain's own address, which
+  # is what `cmd/adopt-branches` matches on -- so registering them here is what gives those
+  # shops their brand and, with it, the mark they were missing. None publishes a store list
+  # we can read yet, so they carry no locator: the registry is a record of what we hold, not
+  # only of what we fetch.
+  - slug: yatsan
+    name: Yatsan
+    website: https://www.yatsan.com
+    tier: 3
+    categories: [bedding, home_textile]
+
+  - slug: isbir-yatak
+    name: İşbir Yatak
+    website: https://www.isbiryatak.com
+    tier: 3
+    categories: [bedding, home_textile]
+
+  - slug: lova-yatak
+    name: Lova Yatak
+    website: https://www.lovayatak.com
+    tier: 3
+    categories: [bedding, home_textile]
+
+  - slug: idas
+    name: İdaş
+    website: https://www.idas.com.tr
+    tier: 3
+    categories: [bedding, home_textile]
+
+  - slug: bambi
+    name: Bambi
+    website: https://www.bambi.com.tr
+    tier: 3
+    categories: [bedding, home_textile]
+
+  - slug: modalife
+    name: Modalife
+    website: https://www.modalife.com
+    tier: 3
+    categories: [furniture, decoration]
+
+  - slug: konfor-yatak
+    name: Konfor Yatak
+    website: https://www.konforyatak.com.tr
+    tier: 3
+    categories: [bedding]
+
+  - slug: halsa-yatak
+    name: Halsa Yatak
+    website: https://www.halsayatak.com.tr
+    tier: 3
+    categories: [bedding]
+
+  - slug: mutlu-hali
+    name: Mutlu Halı
+    website: https://www.mutluhali.com
+    tier: 3
+    categories: [carpet, home_textile]
+
+  - slug: cam-hali
+    name: Cam Halı
+    website: https://www.cam-hali.com
+    tier: 3
+    categories: [carpet, home_textile]

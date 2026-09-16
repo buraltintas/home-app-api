@@ -6,6 +6,27 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Ten chains the catalogue was holding without knowing they were chains
+
+A shop's own website is a field nobody fills in by accident, and 558 independent rows had one.
+Grouped by host, twenty-one addresses appeared more than twice -- which is not a coincidence,
+it is a chain we had never registered. İşbir Yatak was thirteen "independent" shops sharing a
+name; Yatsan twenty-four.
+
+Ten are in the registry now, with no locator: none publishes a store list we can read, and the
+registry is a record of what we hold rather than only of what we fetch. `cmd/adopt-branches`
+then linked **165 shops** to them on the website rule that was already there. Seven of the ten
+have a usable mark; the other three keep their shops' initials, which is the honest answer
+when a chain publishes no mark worth showing.
+
+**One row was removed rather than matched.** "Boyner Sports Markantalya" is on the group's
+website, so the host rule kept adopting it into Boyner Ev; it had been unlinked by hand once
+and came straight back on the next run. Fighting the matcher was the wrong move: a sportswear
+shop is not a home and living shop and does not belong in this catalogue at all. It is
+soft-deleted, with the reason in the audit log.
+
+---
+
 ## A mark that will not parse is not a mark
 
 English Home's own logo file has `y="0px"viewBox=` in its opening tag: one attribute run
