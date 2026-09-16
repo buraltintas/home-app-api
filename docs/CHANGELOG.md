@@ -6,6 +6,20 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A review can say what the visit was for
+
+`posts.purchased` and `posts.purchased_item`: whether the visit ended in a purchase, and what
+was bought, both optional. A review that records a purchase is different evidence from one
+written by somebody who looked and left -- it says the shop could sell the thing somebody came
+for -- and the item is free text because a shopper names what they bought in their own words.
+Those words are the vocabulary a search for that product will arrive in.
+
+The column refuses a product name stored against "no" or against an unanswered question, and
+the service clears it rather than refusing the review: the review is the thing being written,
+and one stray field is not worth losing it over.
+
+---
+
 ## Ten chains the catalogue was holding without knowing they were chains
 
 A shop's own website is a field nobody fills in by accident, and 558 independent rows had one.

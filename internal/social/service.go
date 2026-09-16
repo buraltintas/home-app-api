@@ -104,6 +104,21 @@ type CreatePost struct {
 	OriginSearchID       *uuid.UUID      `json:"origin_search_id"`
 	OriginSearchResultID *uuid.UUID      `json:"origin_search_result_id"`
 	ContentLanguage      *string         `json:"content_language"`
+	// Whether the visit ended in a purchase, and what was bought. Optional, and the item is
+	// only kept when the answer was yes: a product name against "I did not buy anything" is
+	// not a fact about anything. The words are the shopper's own, because what somebody
+	// calls what they bought is the vocabulary a search for it will use.
+	Purchased     *bool  `json:"purchased"`
+	PurchasedItem string `json:"purchased_item"`
+}
+
+// nullIfEmpty keeps an empty answer out of the column, so "nothing was written" is NULL and
+// not a zero-length string two different queries would have to remember to test for.
+func nullIfEmpty(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 type VisitVerification struct {
@@ -186,6 +201,16 @@ type Comment struct {
 
 func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost) (uuid.UUID, error) {
 	in.Text = strings.TrimSpace(in.Text)
+	in.PurchasedItem = strings.TrimSpace(in.PurchasedItem)
+	// "No" cannot carry a shopping list, and neither can an unanswered question. The column
+	// has the same rule, so a client that sends both is corrected here rather than refused:
+	// the review is the thing being written, and one stray field is not worth losing it.
+	if in.Purchased == nil || !*in.Purchased {
+		in.PurchasedItem = ""
+	}
+	if utf8.RuneCountInString(in.PurchasedItem) > 120 {
+		return uuid.Nil, httpapi.E(422, "PURCHASED_ITEM_TOO_LONG", "What was bought is too long")
+	}
 	textLength := utf8.RuneCountInString(in.Text)
 	hasProof := in.VisitVerificationID != nil
 	// The eight criteria are the review, and the overall rating is derived from them rather
@@ -295,8 +320,8 @@ func (s *Service) CreatePost(ctx context.Context, user uuid.UUID, in CreatePost)
 			criteria[i] = score
 		}
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,visit_verified,verification_distance_meters,verified_at,content_language,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
-		append([]any{id, user, in.StoreID, in.Text, in.Rating, verified, recordedDistance, verifiedAt, in.ContentLanguage}, criteria...)...)
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,visit_verified,verification_distance_meters,verified_at,content_language,purchased,purchased_item,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+		append([]any{id, user, in.StoreID, in.Text, in.Rating, verified, recordedDistance, verifiedAt, in.ContentLanguage, in.Purchased, nullIfEmpty(in.PurchasedItem)}, criteria...)...)
 	if e != nil {
 		return uuid.Nil, e
 	}
