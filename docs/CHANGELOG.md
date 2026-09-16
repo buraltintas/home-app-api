@@ -6,6 +6,21 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A mark that will not parse is not a mark
+
+English Home's own logo file has `y="0px"viewBox=` in its opening tag: one attribute run
+straight into the next with no space between them. A browser parsing a page forgives it; a
+browser loading the same file as an image does not, so the file was fetched, size-checked,
+written to disk, committed, and then drawn as a broken-image icon on every English Home shop
+in the catalogue. The size and shape tests could not see it, because the bytes were the right
+size and shape -- they simply were not well-formed SVG.
+
+`cmd/brand-logos` now parses an SVG before it writes it and refuses one that does not parse.
+A brand left without a mark shows its shops' initials, which this tool has always said is the
+right answer when there is no usable mark to be had.
+
+---
+
 ## A saved store older than the favorites page
 
 The web store page used the first 100 saved stores to infer whether one store was saved.

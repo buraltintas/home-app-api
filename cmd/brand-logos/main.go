@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"image"
@@ -423,6 +424,16 @@ func firstGroup(match []string) string {
 // later; the right one survived by luck, and the wrong one was still there to be found.
 // One brand, one file.
 func writeMark(base, extension string, body []byte) error {
+	// A drawing that will not parse is not a mark. English Home's own file has an attribute
+	// run into the next one ("y=\"0px\"viewBox=...") -- well-formed enough for a browser
+	// reading a page, not well-formed enough for one loading an image, so it was written to
+	// disk, committed, and shown as a broken-image icon on every English Home shop we hold.
+	// Refusing it here leaves the shop showing its initial, which is the honest answer.
+	if extension == ".svg" {
+		if e := xml.Unmarshal(body, new(interface{})); e != nil {
+			return fmt.Errorf("the mark is not well-formed SVG: %w", e)
+		}
+	}
 	for _, other := range []string{".png", ".jpg", ".webp", ".svg", ".ico"} {
 		if other != extension {
 			_ = os.Remove(base + other)
