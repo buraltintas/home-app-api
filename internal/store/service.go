@@ -196,6 +196,90 @@ func (s *Service) Index(ctx context.Context, offset, limit int) ([]IndexEntry, e
 	return out, rows.Err()
 }
 
+// NearbyEntry is a neighbouring shop as a store page lists it: enough to recognise one and
+// choose between them, and nothing more. It is deliberately not an Item. This block renders
+// on every store page, so it has to cost one small query rather than the twenty columns a
+// search result carries.
+type NearbyEntry struct {
+	ID             uuid.UUID `json:"id"`
+	Slug           string    `json:"slug"`
+	Name           string    `json:"name"`
+	District       string    `json:"district,omitempty"`
+	City           string    `json:"city"`
+	DistanceMeters float64   `json:"distance_meters"`
+	AverageRating  float64   `json:"average_rating"`
+	ReviewCount    int       `json:"review_count"`
+	BrandSlug      string    `json:"brand_slug,omitempty"`
+	Photo          *Photo    `json:"photo,omitempty"`
+}
+
+// A neighbour has to be near enough that somebody reading one shop's page could reasonably
+// walk or drive to the other on the same trip. Ten kilometres is the same figure an ordinary
+// search uses by default, and measuring the catalogue at that radius, 266 of a sample of 300
+// shops found six or more neighbours sharing a category while only four found none.
+const nearbyRadiusMeters = 10000
+
+// Nearby answers "what else is around this one, selling the same kind of thing".
+//
+// It exists for two readers at once. A person who has decided this shop is not the one has,
+// until now, had nowhere to go but the back button. And a crawler had no way at all to reach
+// a store page except the sitemap: the home page linked to none and store pages linked to
+// none, so eleven thousand pages sat with nothing pointing at them. This block is what joins
+// them up.
+//
+// Ordering is by distance alone. Ordering by review count instead would have been tempting --
+// it sends readers to the pages with something written on them -- but with reviews on eleven
+// shops it would point every page in the province at the same eleven, which is the opposite
+// of a crawl path.
+//
+// Overlap of categories is required rather than preferred. A shop with no category in common
+// is not "similar", and a block that says it is would be lying to make itself look full; a
+// store with no shared neighbours renders no block at all.
+// nearbyLimit keeps a caller from asking for a hundred neighbours on a page that shows six.
+// Anything outside the range is read as "no opinion" and gets the default rather than an
+// error: a malformed query string should not fail a store page over a decorative block.
+func nearbyLimit(requested int) int {
+	if requested < 1 || requested > 24 {
+		return 6
+	}
+	return requested
+}
+
+func (s *Service) Nearby(ctx context.Context, id uuid.UUID, limit int) ([]NearbyEntry, error) {
+	limit = nearbyLimit(limit)
+	rows, e := s.db.Query(ctx, `WITH subject AS (SELECT id,location FROM stores WHERE id=$1 AND deleted_at IS NULL)
+ SELECT o.id,o.slug,o.name,coalesce(o.district,''),o.city,ST_Distance(o.location,sub.location),
+        ss.average_rating,ss.review_count,coalesce(b.slug,''),coalesce(o.cover_media_id::text,'')
+ FROM subject sub
+ JOIN stores o ON o.deleted_at IS NULL AND o.id<>sub.id AND ST_DWithin(o.location,sub.location,$2)
+ JOIN store_stats ss ON ss.store_id=o.id
+ LEFT JOIN brands b ON b.id=o.brand_id
+ WHERE EXISTS (SELECT 1 FROM store_category_links a JOIN store_category_links c ON c.category_id=a.category_id
+               WHERE a.store_id=sub.id AND c.store_id=o.id)
+ ORDER BY ST_Distance(o.location,sub.location) ASC
+ LIMIT $3`, id, nearbyRadiusMeters, limit)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := make([]NearbyEntry, 0, limit)
+	for rows.Next() {
+		var x NearbyEntry
+		var mediaID string
+		if e = rows.Scan(&x.ID, &x.Slug, &x.Name, &x.District, &x.City, &x.DistanceMeters, &x.AverageRating, &x.ReviewCount, &x.BrandSlug, &mediaID); e != nil {
+			return nil, e
+		}
+		// The same picture rule the rest of the product follows: an administrator's upload
+		// first, then the chain's mark, then nothing. Said once, here, rather than left for
+		// each caller to reinvent.
+		item := Item{BrandSlug: x.BrandSlug}
+		assignPhoto(&item, mediaID)
+		x.Photo = item.Photo
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
 // ResolveSlug turns a human readable store URL back into an id. Slugs are unique and
 // already stored, so readable URLs cost one indexed lookup rather than a schema change.
 func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, error) {

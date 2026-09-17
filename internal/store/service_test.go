@@ -23,3 +23,36 @@ func TestAnyWordStoreFallbackIgnoresLocationAndGenericStoreWords(t *testing.T) {
 		t.Fatalf("weak-only fallback query=%q", got)
 	}
 }
+
+func TestNearbyLimitFallsBackRatherThanFailing(t *testing.T) {
+	for _, requested := range []int{0, -1, 25, 1000} {
+		if got := nearbyLimit(requested); got != 6 {
+			t.Fatalf("nearbyLimit(%d)=%d, want the default 6", requested, got)
+		}
+	}
+	for _, requested := range []int{1, 6, 24} {
+		if got := nearbyLimit(requested); got != requested {
+			t.Fatalf("nearbyLimit(%d)=%d, want it honoured", requested, got)
+		}
+	}
+}
+
+// The neighbours block shows the same picture the rest of the product shows, and shows
+// nothing at all rather than a broken frame when a shop has no brand behind it.
+func TestNearbyPhotoFollowsTheSameRuleAsEverywhereElse(t *testing.T) {
+	var uploaded Item
+	assignPhoto(&uploaded, "3f6c1f0e-0000-4000-8000-000000000001")
+	if uploaded.Photo == nil || uploaded.Photo.Source != "admin" {
+		t.Fatalf("an administrator's upload should win, got %+v", uploaded.Photo)
+	}
+	branded := Item{BrandSlug: "english-home"}
+	assignPhoto(&branded, "")
+	if branded.Photo == nil || branded.Photo.Source != "brand" || branded.Photo.BrandSlug != "english-home" {
+		t.Fatalf("a chain's mark should stand in, got %+v", branded.Photo)
+	}
+	var bare Item
+	assignPhoto(&bare, "")
+	if bare.Photo != nil {
+		t.Fatalf("an independent shop has no picture, got %+v", bare.Photo)
+	}
+}

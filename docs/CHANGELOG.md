@@ -6,6 +6,34 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Eleven thousand store pages nothing pointed at
+
+`GET /v1/stores/{id}/nearby` returns the shops around one store that sell the same kind of
+thing: category overlap required, within ten kilometres, nearest first.
+
+It was written for a defect nobody had named. Measuring the live site, the home page linked to
+no store page and a store page linked to no other store page, so the only route to any of the
+11,252 store pages was the sitemap -- and a sitemap gets a page crawled without passing it any
+standing. Eleven thousand pages sat as islands. A reader had the same problem in a smaller
+way: deciding a shop was not the one left them with the back button and nothing else.
+
+Two decisions worth keeping:
+
+Ordering is by distance alone. Ordering by review count would send readers to the pages with
+something written on them, but with reviews on eleven shops it would have pointed every page
+in the province at the same eleven -- a hub, not a crawl path.
+
+Category overlap is required, not preferred. A shop with nothing in common is not "similar",
+and a block that pads itself to look full is lying; a store with no shared neighbours renders
+nothing. Measured over a sample of 300 stores at that radius, 266 find six or more neighbours
+and only four find none.
+
+It is a plain read rather than a call into `storeSearch`, because that handler writes a row to
+the search log and this block renders on every store page -- the log would have filled with
+searches nobody performed.
+
+---
+
 ## A review can say what the visit was for
 
 `posts.purchased` and `posts.purchased_item`: whether the visit ended in a purchase, and what

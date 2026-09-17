@@ -130,6 +130,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
 		r.Get("/stores/{id}/posts", s.postsByStore)
+		r.Get("/stores/{id}/nearby", s.storeNearby)
 		r.Get("/posts/{id}", s.postDetail)
 		r.Get("/posts/{id}/comments", s.comments)
 		r.Get("/users/{id}", s.userPublic)
@@ -477,6 +478,24 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 // never answer "every store you have", which left the sitemap listing no stores at all.
 func (s *Server) storeIndex(w http.ResponseWriter, r *http.Request) {
 	items, e := s.stores.Index(r.Context(), queryInt(r, "offset", 0), queryInt(r, "limit", 1000))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+// storeNearby lists the shops around one store that sell the same kind of thing. It is a
+// plain read and deliberately not routed through storeSearch: that handler writes a row to
+// the search log, and a block rendered on every store page would have filled the log with
+// searches nobody performed.
+func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
+	id, e := parseStoreRef(r, s)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	items, e := s.stores.Nearby(r.Context(), id, queryInt(r, "limit", 6))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
