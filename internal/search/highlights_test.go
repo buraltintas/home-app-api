@@ -36,3 +36,22 @@ func TestScanHighlightPreservesDatabaseErrors(t *testing.T) {
 		t.Fatalf("expected %v, got %v", want, err)
 	}
 }
+
+// A standout says a crowd agreed, so counting reviews is not enough: fourteen reviews by
+// one person put a shop on the home page under the words "most reviewed this month".
+func TestStandoutsRequireMoreThanOneVoice(t *testing.T) {
+	if highlightMinimumReviewers < 3 {
+		t.Fatalf("a standout needs at least three different people, got %d", highlightMinimumReviewers)
+	}
+	if highlightMinimumReviewers > highlightMinimumReviews {
+		t.Fatalf("more reviewers than reviews is unsatisfiable: %d > %d", highlightMinimumReviewers, highlightMinimumReviews)
+	}
+}
+
+// The recently reviewed list is what gives the home page links out to store pages, so an
+// empty or single-entry list would leave the page pointing nowhere again.
+func TestRecentListIsWorthRendering(t *testing.T) {
+	if recentHighlightLimit < 5 {
+		t.Fatalf("too few to be a list, got %d", recentHighlightLimit)
+	}
+}

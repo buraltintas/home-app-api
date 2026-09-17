@@ -6,6 +6,31 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## "Most reviewed this month" was one person, fourteen times
+
+The monthly standouts needed five reviews. Five reviews and five reviewers are the same
+number only until somebody visits twice, and one person had written fourteen reviews of one
+shop -- which put that shop on the home page under a sentence that reads as a crowd agreeing.
+The arithmetic behind the score was right; the sentence around it was not.
+
+Standouts now require reviews from at least three different people. `reviewer_count` is
+returned alongside `review_count` so a client can say "3 people" rather than "14 reviews",
+which is the honest number of the two.
+
+Today that threshold empties both standouts: every reviewed store in the catalogue has
+exactly one reviewer. That is the true state of the product and the home page should not
+have been hiding it -- but it left the home page with nothing to point at, and a home page
+that links to no store page passes its standing to none of them.
+
+So `recent` was added: up to eight shops written about most recently, newest first, with no
+threshold at all. It claims nothing beyond "somebody wrote about this one lately", which is
+always true of somewhere, and it is what gives the home page links out.
+
+`slug` is now in the payload too. Linking by uuid was answered with a redirect to the slug --
+free for a reader, a whole wasted fetch for a crawler.
+
+---
+
 ## Eleven thousand store pages nothing pointed at
 
 `GET /v1/stores/{id}/nearby` returns the shops around one store that sell the same kind of
