@@ -56,3 +56,12 @@ func TestNearbyPhotoFollowsTheSameRuleAsEverywhereElse(t *testing.T) {
 		t.Fatalf("an independent shop has no picture, got %+v", bare.Photo)
 	}
 }
+
+// A page has to be worth opening before it is worth publishing. Below ten shops a
+// city-and-category page is a list of two things dressed up as a guide, which is thin
+// content to a search engine and a wasted tap to a reader.
+func TestCityCategoryPagesNeedEnoughShopsToBeWorthPublishing(t *testing.T) {
+	if cityCategoryMinimum < 10 {
+		t.Fatalf("threshold too low to keep a page honest, got %d", cityCategoryMinimum)
+	}
+}

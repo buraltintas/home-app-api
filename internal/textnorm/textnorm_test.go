@@ -47,3 +47,15 @@ func TestFoldLeavesLettersAndCaseAlone(t *testing.T) {
 		t.Errorf("Key disagrees on the two spellings of Ağrı: %q vs %q", Key("AĞRI"), Key("Ağrı"))
 	}
 }
+
+func TestSlugSurvivesTurkishInAnAddressBar(t *testing.T) {
+	for raw, want := range map[string]string{
+		"İstanbul": "istanbul", "Şanlıurfa": "sanliurfa", "Muğla": "mugla",
+		"Çanakkale": "canakkale", "Kahramanmaraş": "kahramanmaras", "Afyonkarahisar": "afyonkarahisar",
+		"  Kırıkkale  ": "kirikkale", "Ev Tekstili": "ev-tekstili",
+	} {
+		if got := Slug(raw); got != want {
+			t.Fatalf("Slug(%q)=%q, want %q", raw, got, want)
+		}
+	}
+}

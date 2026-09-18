@@ -6,6 +6,34 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The 427 pages the catalogue could already fill
+
+`GET /v1/discovery/city-categories` lists every city-and-category pair with at least ten
+shops behind it, and `GET /v1/discovery/stores` returns one such pair's shops.
+
+The site had no way in. Somebody who wanted "carpet shops in Izmir" had to know to type it,
+and a crawler had nothing to follow at all: the store pages were reachable only from a
+sitemap, which gets a page crawled and passes it nothing. Measured against the catalogue as
+it stands, 427 pairs clear the threshold -- Istanbul furniture alone holds 1,373 shops --
+so this is a set of real pages rather than a template waiting for content.
+
+Three decisions in here worth keeping.
+
+Ten shops is the floor. Under it a page is a list of two things dressed up as a guide, which
+a search engine calls thin and a reader calls a wasted tap.
+
+The city slug is derived, never stored. A city's name is the thing that is true; its address
+is a rendering of that name, and deriving it in one place means the page, the link and the
+sitemap cannot disagree. `textnorm.Slug` does the fold, in Go rather than in SQL, because
+Postgres strips diacritics and Turkish dotless "ı" has none to strip -- unaccent leaves
+"Şanlıurfa" as "Sanlıurfa" and the address then matches nothing.
+
+Reviewed shops lead the list. Distance cannot order a page built before anybody opens it,
+and alphabetical order would nail the same shop to the top of every city forever. A reviewed
+shop is the only row carrying something no other site has.
+
+---
+
 ## "Most reviewed this month" was one person, fourteen times
 
 The monthly standouts needed five reviews. Five reviews and five reviewers are the same

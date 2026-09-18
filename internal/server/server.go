@@ -126,6 +126,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Delete("/me/searches", s.deleteMySearches)
 		r.Delete("/me/searches/{id}", s.deleteMySearch)
 		r.Get("/stores/index", s.storeIndex)
+		r.Get("/discovery/city-categories", s.cityCategories)
+		r.Get("/discovery/stores", s.cityCategoryStores)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
@@ -472,6 +474,34 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	JSON(w, 200, map[string]any{"search_id": searchID, "visitor_session_id": visitor, "items": items})
+}
+
+// cityCategories lists the city-and-category pairs the catalogue can actually fill, which
+// is the set of pages worth publishing. Read by the pages themselves and by the sitemap, so
+// neither can advertise a page the other does not believe in.
+func (s *Server) cityCategories(w http.ResponseWriter, r *http.Request) {
+	items, e := s.stores.CityCategories(r.Context(), queryInt(r, "minimum", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+// cityCategoryStores is one of those pages: the shops of one category in one city.
+func (s *Server) cityCategoryStores(w http.ResponseWriter, r *http.Request) {
+	city := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("city")))
+	category := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("category")))
+	if city == "" || category == "" || len(city) > 120 || len(category) > 60 {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	page, e := s.stores.ByCityCategory(r.Context(), city, category, queryInt(r, "limit", 60), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, page)
 }
 
 // storeIndex enumerates stores for sitemap generation. Search is query driven and can

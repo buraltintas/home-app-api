@@ -280,6 +280,187 @@ func (s *Service) Nearby(ctx context.Context, id uuid.UUID, limit int) ([]Nearby
 	return out, rows.Err()
 }
 
+// A page has to be worth opening before it is worth publishing. Ten shops is the floor: it
+// is enough that the page answers the question it is named after, and it is the line under
+// which a page is a list of two things dressed up as a guide -- which is what a search engine
+// calls thin, and what a reader calls a waste of a tap.
+const cityCategoryMinimum = 10
+
+// CityCategory is one (city, category) pair that has enough shops behind it to be a page.
+type CityCategory struct {
+	City         string `json:"city"`
+	CitySlug     string `json:"city_slug"`
+	CategorySlug string `json:"category_slug"`
+	CategoryName string `json:"category_name"`
+	StoreCount   int    `json:"store_count"`
+}
+
+// CityCategories lists every city-and-category pair the catalogue can fill.
+//
+// It exists because the site had no way in. Eleven thousand store pages were reachable only
+// from a sitemap, which gets a page crawled and passes it nothing, and a reader who wanted
+// "carpet shops in Izmir" had to know to type it. These pairs are the pages that answer that
+// question, and the count is what decides whether each one deserves to exist.
+func (s *Service) CityCategories(ctx context.Context, minimum int) ([]CityCategory, error) {
+	if minimum < 1 {
+		minimum = cityCategoryMinimum
+	}
+	locale := i18n.FromContext(ctx)
+	rows, e := s.db.Query(ctx, `SELECT s.city, c.slug,
+   coalesce((SELECT t.name FROM store_category_translations t WHERE t.category_id=c.id AND t.locale=$2), c.name_tr),
+   count(*)
+ FROM stores s
+ JOIN store_category_links l ON l.store_id=s.id
+ JOIN store_categories c ON c.id=l.category_id AND c.active
+ WHERE s.deleted_at IS NULL AND coalesce(s.city,'')<>''
+ GROUP BY s.city, c.id, c.slug, c.name_tr
+ HAVING count(*) >= $1
+ ORDER BY count(*) DESC, s.city, c.slug`, minimum, locale)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []CityCategory{}
+	for rows.Next() {
+		var x CityCategory
+		if e = rows.Scan(&x.City, &x.CategorySlug, &x.CategoryName, &x.StoreCount); e != nil {
+			return nil, e
+		}
+		// The slug is derived rather than stored. A city's name is the thing that is true;
+		// its address is a rendering of that name, and deriving it in one place means the
+		// page, the link and the sitemap cannot disagree about it.
+		x.CitySlug = textnorm.Slug(x.City)
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// CatalogEntry is a shop as a city-and-category page lists it.
+type CatalogEntry struct {
+	ID             uuid.UUID `json:"id"`
+	Slug           string    `json:"slug"`
+	Name           string    `json:"name"`
+	Address        string    `json:"address,omitempty"`
+	District       string    `json:"district,omitempty"`
+	City           string    `json:"city"`
+	AverageRating  float64   `json:"average_rating"`
+	ReviewCount    int       `json:"review_count"`
+	BrandName      string    `json:"brand_name,omitempty"`
+	BrandSlug      string    `json:"brand_slug,omitempty"`
+	CategoryLabels []string  `json:"category_labels"`
+	Photo          *Photo    `json:"photo,omitempty"`
+}
+
+// CityCategoryPage is one such page's contents: which pair it turned out to be, how many
+// shops stand behind it in total, and the slice being shown.
+type CityCategoryPage struct {
+	City         string         `json:"city"`
+	CategorySlug string         `json:"category_slug"`
+	CategoryName string         `json:"category_name"`
+	Total        int            `json:"total"`
+	Items        []CatalogEntry `json:"items"`
+}
+
+// cityForSlug turns "sanliurfa" back into "Şanlıurfa".
+//
+// The fold is done in Go rather than in SQL on purpose. Postgres can strip diacritics, but
+// Turkish dotless "ı" carries no diacritic to strip, so unaccent leaves "Şanlıurfa" as
+// "Sanlıurfa" and the address never matches. textnorm is where this language is already
+// understood, and having one place that understands it is the point of having it at all.
+func (s *Service) cityForSlug(ctx context.Context, slug string) (string, error) {
+	rows, e := s.db.Query(ctx, `SELECT DISTINCT city FROM stores WHERE deleted_at IS NULL AND coalesce(city,'')<>''`)
+	if e != nil {
+		return "", e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var city string
+		if e = rows.Scan(&city); e != nil {
+			return "", e
+		}
+		if textnorm.Slug(city) == slug {
+			return city, nil
+		}
+	}
+	if e = rows.Err(); e != nil {
+		return "", e
+	}
+	return "", httpapi.E(404, "CITY_NOT_FOUND", "City not found")
+}
+
+// ByCityCategory is the page itself: the shops of one category in one city, the ones the
+// community has already said something about first.
+//
+// That ordering is the one editorial decision here, and it is deliberate. Distance cannot
+// order this list -- the page is built before anybody opens it, so there is nobody to be near
+// -- and alphabetical order would put the same shop at the top of every city's page forever.
+// A reviewed shop is the only row on the page that says something no other site says, so it
+// leads; the rest follow by name, which at least is stable between two visits.
+func (s *Service) ByCityCategory(ctx context.Context, citySlug, categorySlug string, limit, offset int) (CityCategoryPage, error) {
+	var page CityCategoryPage
+	if limit < 1 || limit > 200 {
+		limit = 60
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	city, e := s.cityForSlug(ctx, citySlug)
+	if e != nil {
+		return page, e
+	}
+	locale := i18n.FromContext(ctx)
+	page.City = city
+	page.CategorySlug = categorySlug
+	if e = s.db.QueryRow(ctx, `SELECT
+   coalesce((SELECT t.name FROM store_category_translations t WHERE t.category_id=c.id AND t.locale=$2), c.name_tr),
+   (SELECT count(*) FROM stores s JOIN store_category_links l ON l.store_id=s.id
+     WHERE l.category_id=c.id AND s.deleted_at IS NULL AND s.city=$3)
+ FROM store_categories c WHERE c.slug=$1 AND c.active`, categorySlug, locale, city).Scan(&page.CategoryName, &page.Total); e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
+			return page, httpapi.E(404, "CATEGORY_NOT_FOUND", "Category not found")
+		}
+		return page, e
+	}
+	if page.Total == 0 {
+		return page, httpapi.E(404, "CATEGORY_NOT_FOUND", "Category not found")
+	}
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.slug,
+   coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$4),s.name),
+   coalesce(s.address,''),coalesce(s.district,''),s.city,
+   ss.average_rating,ss.review_count,coalesce(s.brand_name,''),coalesce(b.slug,''),
+   coalesce(s.cover_media_id::text,''),
+   coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2
+             JOIN store_categories c2 ON c2.id=l2.category_id
+             JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$4
+             WHERE l2.store_id=s.id),'{}')
+ FROM stores s
+ JOIN store_category_links l ON l.store_id=s.id
+ JOIN store_categories c ON c.id=l.category_id AND c.slug=$2 AND c.active
+ JOIN store_stats ss ON ss.store_id=s.id
+ LEFT JOIN brands b ON b.id=s.brand_id
+ WHERE s.deleted_at IS NULL AND s.city=$1
+ ORDER BY ss.review_count DESC, ss.average_rating DESC, s.name
+ LIMIT $3 OFFSET $5`, city, categorySlug, limit, locale, offset)
+	if e != nil {
+		return page, e
+	}
+	defer rows.Close()
+	page.Items = []CatalogEntry{}
+	for rows.Next() {
+		var x CatalogEntry
+		var mediaID string
+		if e = rows.Scan(&x.ID, &x.Slug, &x.Name, &x.Address, &x.District, &x.City,
+			&x.AverageRating, &x.ReviewCount, &x.BrandName, &x.BrandSlug, &mediaID, &x.CategoryLabels); e != nil {
+			return page, e
+		}
+		item := Item{BrandSlug: x.BrandSlug}
+		assignPhoto(&item, mediaID)
+		x.Photo = item.Photo
+		page.Items = append(page.Items, x)
+	}
+	return page, rows.Err()
+}
+
 // ResolveSlug turns a human readable store URL back into an id. Slugs are unique and
 // already stored, so readable URLs cost one indexed lookup rather than a schema change.
 func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, error) {

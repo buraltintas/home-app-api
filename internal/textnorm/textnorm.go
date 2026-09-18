@@ -127,3 +127,11 @@ func Title(raw string) string {
 func Compact(name string) string {
 	return strings.ReplaceAll(Key(name), " ", "")
 }
+
+// Slug is Key with the spaces closed up into hyphens: what a place or a category is called
+// inside a URL. Turkish is the point of it -- "Şanlıurfa" has to become "sanliurfa" and
+// "Muğla" "mugla", or the address bar carries letters half the keyboards in the world cannot
+// type and half the systems in between will re-encode.
+func Slug(raw string) string {
+	return strings.ReplaceAll(Key(raw), " ", "-")
+}
