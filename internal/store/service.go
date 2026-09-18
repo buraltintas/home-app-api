@@ -292,7 +292,12 @@ type CityCategory struct {
 	CitySlug     string `json:"city_slug"`
 	CategorySlug string `json:"category_slug"`
 	CategoryName string `json:"category_name"`
-	StoreCount   int    `json:"store_count"`
+	// The category's address, which is its Turkish name folded: "mobilya", "ev-tekstili".
+	// It is the same in every language on purpose. A shop in Izmir is in the same place
+	// whichever language you read about it in, and one address per page is what stops four
+	// translations of a page competing with each other to be the one that ranks.
+	CategoryURLSlug string `json:"category_url_slug"`
+	StoreCount      int    `json:"store_count"`
 }
 
 // CityCategories lists every city-and-category pair the catalogue can fill.
@@ -308,6 +313,7 @@ func (s *Service) CityCategories(ctx context.Context, minimum int) ([]CityCatego
 	locale := i18n.FromContext(ctx)
 	rows, e := s.db.Query(ctx, `SELECT s.city, c.slug,
    coalesce((SELECT t.name FROM store_category_translations t WHERE t.category_id=c.id AND t.locale=$2), c.name_tr),
+   c.name_tr,
    count(*)
  FROM stores s
  JOIN store_category_links l ON l.store_id=s.id
@@ -323,9 +329,11 @@ func (s *Service) CityCategories(ctx context.Context, minimum int) ([]CityCatego
 	out := []CityCategory{}
 	for rows.Next() {
 		var x CityCategory
-		if e = rows.Scan(&x.City, &x.CategorySlug, &x.CategoryName, &x.StoreCount); e != nil {
+		var turkishName string
+		if e = rows.Scan(&x.City, &x.CategorySlug, &x.CategoryName, &turkishName, &x.StoreCount); e != nil {
 			return nil, e
 		}
+		x.CategoryURLSlug = textnorm.Slug(turkishName)
 		// The slug is derived rather than stored. A city's name is the thing that is true;
 		// its address is a rendering of that name, and deriving it in one place means the
 		// page, the link and the sitemap cannot disagree about it.
