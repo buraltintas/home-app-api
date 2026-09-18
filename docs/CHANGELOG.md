@@ -6,6 +6,28 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The pages the queries were already asking for
+
+`GET /v1/discovery/city-brands` and `/v1/discovery/brand-stores`: one chain's branches in
+one city. 621 pairs clear the floor.
+
+The city-and-category pages went out first and then Search Console said what people actually
+type. Not "Antalya yatak mağazaları". **"yataş antalya", "antalya yataş mağazaları", "yataş
+konyaaltı", "en yakın yataş bayi".** Every branded query reaching this site in twenty-nine
+days is brand-and-city, and the site had no page with that name.
+
+Three branches is the floor, not ten, and the difference from the category pages is the
+point. "Antalya carpet shops" with three shops is a thin list of a large subject. "Yataş in
+Antalya" with three branches is a complete answer to a specific question -- which one is
+nearest -- and one the chain's own store finder answers badly, because it lists a country and
+leaves the reader to work out the district. Below three the store page answers it already.
+
+Ordering is by district, then name. Not by review count: somebody who named a chain has
+already chosen it, and is deciding which branch. A ranking would answer a question they did
+not ask and would put the same branch first for everybody.
+
+---
+
 ## The 427 pages the catalogue could already fill
 
 `GET /v1/discovery/city-categories` lists every city-and-category pair with at least ten

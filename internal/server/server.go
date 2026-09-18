@@ -128,6 +128,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/stores/index", s.storeIndex)
 		r.Get("/discovery/city-categories", s.cityCategories)
 		r.Get("/discovery/stores", s.cityCategoryStores)
+		r.Get("/discovery/city-brands", s.cityBrands)
+		r.Get("/discovery/brand-stores", s.cityBrandStores)
 		r.Get("/stores/search", s.storeSearch)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
@@ -497,6 +499,35 @@ func (s *Server) cityCategoryStores(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, e := s.stores.ByCityCategory(r.Context(), city, category, queryInt(r, "limit", 60), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, page)
+}
+
+// cityBrands lists the city-and-brand pairs the catalogue can fill. These answer the
+// questions actually reaching us -- "yataş antalya", "en yakın yataş bayi" -- which the
+// category pages do not: somebody who names a chain has already chosen it and is deciding
+// which branch.
+func (s *Server) cityBrands(w http.ResponseWriter, r *http.Request) {
+	items, e := s.stores.CityBrands(r.Context(), queryInt(r, "minimum", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+// cityBrandStores is one of those pages: one chain's branches in one city.
+func (s *Server) cityBrandStores(w http.ResponseWriter, r *http.Request) {
+	city := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("city")))
+	brand := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("brand")))
+	if city == "" || brand == "" || len(city) > 120 || len(brand) > 80 {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	page, e := s.stores.ByCityBrand(r.Context(), city, brand, queryInt(r, "limit", 60), queryInt(r, "offset", 0))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

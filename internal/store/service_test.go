@@ -65,3 +65,15 @@ func TestCityCategoryPagesNeedEnoughShopsToBeWorthPublishing(t *testing.T) {
 		t.Fatalf("threshold too low to keep a page honest, got %d", cityCategoryMinimum)
 	}
 }
+
+// A brand page and a category page are not the same kind of page. "Antalya carpet shops"
+// with three shops is a thin list of a large subject; "Yataş in Antalya" with three branches
+// is a complete answer to which one is nearest.
+func TestBrandPagesHaveTheirOwnFloor(t *testing.T) {
+	if cityBrandMinimum < 2 {
+		t.Fatalf("a single branch needs no page of its own, got %d", cityBrandMinimum)
+	}
+	if cityBrandMinimum >= cityCategoryMinimum {
+		t.Fatalf("a brand page answers a narrower question and should not need a category page's floor: %d vs %d", cityBrandMinimum, cityCategoryMinimum)
+	}
+}

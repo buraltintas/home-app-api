@@ -469,6 +469,132 @@ func (s *Service) ByCityCategory(ctx context.Context, citySlug, categorySlug str
 	return page, rows.Err()
 }
 
+// Three branches, not ten.
+//
+// A brand page and a category page are not the same kind of page and do not deserve the
+// same floor. "Antalya carpet shops" with three shops is a thin list of a large subject.
+// "Yataş in Antalya" with three branches is a complete answer to a specific question --
+// which of them is nearest -- and it is an answer the brand's own store finder gives badly,
+// because it lists a country and leaves the reader to work out the district.
+//
+// The queries reaching us today are this shape and no other: "yataş antalya", "antalya
+// yataş mağazaları", "yataş konyaaltı", "en yakın yataş bayi". Below three branches the
+// store page answers it already and this page would only get in the way.
+const cityBrandMinimum = 3
+
+// CityBrand is one (city, brand) pair with enough branches behind it to be a page.
+type CityBrand struct {
+	City       string `json:"city"`
+	CitySlug   string `json:"city_slug"`
+	BrandSlug  string `json:"brand_slug"`
+	BrandName  string `json:"brand_name"`
+	StoreCount int    `json:"store_count"`
+}
+
+// CityBrands lists every city-and-brand pair the catalogue can fill.
+func (s *Service) CityBrands(ctx context.Context, minimum int) ([]CityBrand, error) {
+	if minimum < 1 {
+		minimum = cityBrandMinimum
+	}
+	rows, e := s.db.Query(ctx, `SELECT s.city, b.slug, b.name, count(*)
+ FROM stores s JOIN brands b ON b.id=s.brand_id
+ WHERE s.deleted_at IS NULL AND coalesce(s.city,'')<>''
+ GROUP BY s.city, b.slug, b.name
+ HAVING count(*) >= $1
+ ORDER BY count(*) DESC, s.city, b.slug`, minimum)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	out := []CityBrand{}
+	for rows.Next() {
+		var x CityBrand
+		if e = rows.Scan(&x.City, &x.BrandSlug, &x.BrandName, &x.StoreCount); e != nil {
+			return nil, e
+		}
+		x.CitySlug = textnorm.Slug(x.City)
+		out = append(out, x)
+	}
+	return out, rows.Err()
+}
+
+// CityBrandPage is one such page's contents.
+type CityBrandPage struct {
+	City      string         `json:"city"`
+	BrandSlug string         `json:"brand_slug"`
+	BrandName string         `json:"brand_name"`
+	Total     int            `json:"total"`
+	Items     []CatalogEntry `json:"items"`
+}
+
+// ByCityBrand is one chain's branches in one city.
+//
+// Ordered by district and then by name rather than by review count, and that is the one
+// difference from the category listing that matters. Somebody who searched for a chain has
+// already chosen it; what they are deciding now is which branch, and district is how anybody
+// in a Turkish city says where something is. A ranking would answer a question they did not
+// ask and would put the same branch first for everyone.
+func (s *Service) ByCityBrand(ctx context.Context, citySlug, brandSlug string, limit, offset int) (CityBrandPage, error) {
+	var page CityBrandPage
+	if limit < 1 || limit > 200 {
+		limit = 60
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	city, e := s.cityForSlug(ctx, citySlug)
+	if e != nil {
+		return page, e
+	}
+	locale := i18n.FromContext(ctx)
+	page.City = city
+	page.BrandSlug = brandSlug
+	if e = s.db.QueryRow(ctx, `SELECT b.name,
+   (SELECT count(*) FROM stores s WHERE s.brand_id=b.id AND s.deleted_at IS NULL AND s.city=$2)
+ FROM brands b WHERE b.slug=$1`, brandSlug, city).Scan(&page.BrandName, &page.Total); e != nil {
+		if errors.Is(e, pgx.ErrNoRows) {
+			return page, httpapi.E(404, "BRAND_NOT_FOUND", "Brand not found")
+		}
+		return page, e
+	}
+	if page.Total == 0 {
+		return page, httpapi.E(404, "BRAND_NOT_FOUND", "Brand not found")
+	}
+	rows, e := s.db.Query(ctx, `SELECT s.id,s.slug,
+   coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$4),s.name),
+   coalesce(s.address,''),coalesce(s.district,''),s.city,
+   ss.average_rating,ss.review_count,coalesce(s.brand_name,''),b.slug,
+   coalesce(s.cover_media_id::text,''),
+   coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2
+             JOIN store_categories c2 ON c2.id=l2.category_id
+             JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$4
+             WHERE l2.store_id=s.id),'{}')
+ FROM stores s
+ JOIN brands b ON b.id=s.brand_id AND b.slug=$2
+ JOIN store_stats ss ON ss.store_id=s.id
+ WHERE s.deleted_at IS NULL AND s.city=$1
+ ORDER BY coalesce(s.district,''), s.name
+ LIMIT $3 OFFSET $5`, city, brandSlug, limit, locale, offset)
+	if e != nil {
+		return page, e
+	}
+	defer rows.Close()
+	page.Items = []CatalogEntry{}
+	for rows.Next() {
+		var x CatalogEntry
+		var mediaID string
+		if e = rows.Scan(&x.ID, &x.Slug, &x.Name, &x.Address, &x.District, &x.City,
+			&x.AverageRating, &x.ReviewCount, &x.BrandName, &x.BrandSlug, &mediaID, &x.CategoryLabels); e != nil {
+			return page, e
+		}
+		item := Item{BrandSlug: x.BrandSlug}
+		assignPhoto(&item, mediaID)
+		x.Photo = item.Photo
+		page.Items = append(page.Items, x)
+	}
+	return page, rows.Err()
+}
+
 // ResolveSlug turns a human readable store URL back into an id. Slugs are unique and
 // already stored, so readable URLs cost one indexed lookup rather than a schema change.
 func (s *Service) ResolveSlug(ctx context.Context, slug string) (uuid.UUID, error) {
