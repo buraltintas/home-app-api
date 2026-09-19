@@ -81,6 +81,10 @@ type Item struct {
 	LocationApproximate bool             `json:"location_approximate"`
 	ViewerFavorited     bool             `json:"viewer_has_favorited"`
 	ViewerHasReviewed   bool             `json:"viewer_has_reviewed"`
+	// How many of this shop's reviews this reader wrote. The flag above answers "have you",
+	// which is all a button needs; a sentence that says how many of the total are yours needs
+	// the number, and a client cannot work it out from a boolean.
+	ViewerReviewCount   int              `json:"viewer_review_count"`
 	ExternalSources     []ExternalSource `json:"external_sources,omitempty"`
 	Photo               *Photo           `json:"photo,omitempty"`
 }
@@ -123,12 +127,12 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
  CASE WHEN $3::float8 IS NULL OR $4::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($4,$3),4326)::geography) END,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2),
- EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
+ (SELECT count(*) FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
  coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
- WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.ViewerHasReviewed, &x.ExternalSources, &x.BrandSlug, &coverMedia)
+ WHERE s.id=$1 AND s.deleted_at IS NULL GROUP BY s.id,ss.store_id`, id, viewer, lat, lon, i18n.FromContext(ctx)).Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &distance, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ViewerFavorited, &x.ViewerReviewCount, &x.ExternalSources, &x.BrandSlug, &coverMedia)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return x, httpapi.E(404, "STORE_NOT_FOUND", "Store not found")
 	}
@@ -136,6 +140,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
 		return x, e
 	}
 	x.DistanceMeters = distance
+	x.ViewerHasReviewed = x.ViewerReviewCount > 0
 	assignPhoto(&x, coverMedia)
 	var criteria CriteriaAverages
 	e = s.db.QueryRow(ctx, `SELECT count(rating_availability)::int,
@@ -920,7 +925,7 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
  coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,''),
- EXISTS(SELECT 1 FROM posts p WHERE p.store_id=s.id AND p.user_id=$1 AND p.deleted_at IS NULL),f.created_at
+ (SELECT count(*) FROM posts p WHERE p.store_id=s.id AND p.user_id=$1 AND p.deleted_at IS NULL),f.created_at
  FROM favorites f JOIN stores s ON s.id=f.store_id AND s.deleted_at IS NULL JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE f.user_id=$1 GROUP BY s.id,ss.store_id,f.created_at ORDER BY f.created_at DESC LIMIT $2`, viewer, limit, i18n.FromContext(ctx))
 	if e != nil {
@@ -932,10 +937,11 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 		var x Item
 		var coverMedia string
 		var savedAt time.Time
-		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ExternalSources, &x.BrandSlug, &coverMedia, &x.ViewerHasReviewed, &savedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.Name, &x.Slug, &x.BrandName, &x.Address, &x.City, &x.District, &x.Phone, &x.Website, &x.Latitude, &x.Longitude, &x.Categories, &x.CategoryLabels, &x.LocalizedDescription, &x.Platform.AverageRating, &x.Platform.RatingCount, &x.Platform.ReviewCount, &x.Platform.FavoriteCount, &x.Platform.PostCount, &x.IsPremium, &x.IsCatalogStore, &x.LocationApproximate, &x.ExternalSources, &x.BrandSlug, &coverMedia, &x.ViewerReviewCount, &savedAt); e != nil {
 			return nil, e
 		}
 		x.ViewerFavorited = true
+		x.ViewerHasReviewed = x.ViewerReviewCount > 0
 		assignPhoto(&x, coverMedia)
 		out = append(out, x)
 	}

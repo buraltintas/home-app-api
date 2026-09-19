@@ -6,6 +6,17 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A store carries how many of its reviews the reader wrote
+
+`viewer_has_reviewed` answers "have you", which is all a button needs. The favourites page
+says "one of them is yours" next to a store's review count, and that sentence needs the
+number -- which cannot be recovered from a boolean, so the word "one" was written into the
+client and was right only for somebody who had reviewed a shop exactly once.
+
+`viewer_review_count` is on the store item now, from the store detail and the favourites
+list. `viewer_has_reviewed` stays and is derived from it, so nothing already reading the flag
+changes.
+
 ## The pages the queries were already asking for
 
 `GET /v1/discovery/city-brands` and `/v1/discovery/brand-stores`: one chain's branches in
