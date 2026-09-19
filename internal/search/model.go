@@ -192,6 +192,11 @@ type Result struct {
 	// an organic result is exactly what consumer rules prohibit, and /about and /terms
 	// already promise it is marked wherever it applies.
 	Premium bool `json:"premium,omitempty"`
+	// Whether this shop's point was worked out from its address rather than published by
+	// anyone. The query behind this result has always read it; it was simply never passed
+	// on, and the client needs it to decide whether it may tell somebody they are close
+	// enough to review -- a claim that cannot be made from a point we invented.
+	LocationApproximate bool `json:"location_approximate,omitempty"`
 	// CatalogStore is an administrator-curated presentation marker. It never changes
 	// ranking and is independent from paid placement.
 	CatalogStore bool `json:"catalog_store,omitempty"`
@@ -749,7 +754,7 @@ func containsAny(s string, terms ...string) bool {
 }
 func fromStore(x storepkg.Item, rank int) Result {
 	p := &Platform{StoreID: x.ID, AverageRating: x.Platform.AverageRating, ReviewCount: x.Platform.ReviewCount, FavoriteCount: x.Platform.FavoriteCount, PostCount: x.Platform.PostCount}
-	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, BrandSlug: x.BrandSlug, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, score: platformScore(*p, rank)}
+	return Result{ID: &x.ID, Source: "internal", Name: x.Name, Address: x.Address, City: x.City, District: x.District, Latitude: x.Latitude, Longitude: x.Longitude, DistanceMeters: x.DistanceMeters, Categories: append([]string{}, x.Categories...), Platform: p, BrandSlug: x.BrandSlug, Premium: x.IsPremium, CatalogStore: x.IsCatalogStore, LocationApproximate: x.LocationApproximate, score: platformScore(*p, rank)}
 }
 
 func platformScore(p Platform, relevanceRank int) float64 {

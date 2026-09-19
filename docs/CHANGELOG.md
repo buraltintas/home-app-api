@@ -6,6 +6,14 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Search results say whether a shop's point was worked out or published
+
+`location_approximate` is on a search result now. The query behind those results has always
+read it -- it is what the store's own page uses to say "approximate" beside a distance -- and
+it was simply never passed on. The listing needs it to decide whether it may tell somebody
+they are close enough to review a shop, which is a claim that cannot be made from a point we
+placed ourselves: the door may be half a kilometre from it.
+
 ## A store carries how many of its reviews the reader wrote
 
 `viewer_has_reviewed` answers "have you", which is all a button needs. The favourites page
