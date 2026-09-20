@@ -518,11 +518,16 @@ func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Co
 	}
 	return out, rows.Err()
 }
+// The ceiling is 200 rather than 50, because one of the two things this serves is somebody's
+// own list of reviews and a person is entitled to see all of theirs. Fifty was cutting a
+// reader with thirty-four of them down to twenty, and the page above it was saying thirty-four.
+// It is still a ceiling: this returns a page, not an archive, and a reader past two hundred
+// would be told so rather than quietly shown a prefix.
 func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, viewer *uuid.UUID, limit int) ([]Post, error) {
 	if column != "user_id" && column != "store_id" {
 		return nil, httpapi.ErrInvalidInput
 	}
-	if limit < 1 || limit > 50 {
+	if limit < 1 || limit > 200 {
 		limit = 20
 	}
 	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL ORDER BY p.created_at DESC,p.id DESC LIMIT $2`

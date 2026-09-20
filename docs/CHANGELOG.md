@@ -6,6 +6,16 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A reader with 34 reviews was shown 20 of them
+
+`PostsBy` capped its limit at 50 and the profile asked for 20, while the page above the list
+said "Toplam 34 değerlendirme". The page was contradicting itself, and the half that was wrong
+was the list.
+
+The ceiling is 200 now. It is still a ceiling -- this returns a page, not an archive -- but it
+is one nobody is near, and the client says so when it is reached rather than quietly showing a
+prefix.
+
 ## Search results say whether a shop's point was worked out or published
 
 `location_approximate` is on a search result now. The query behind those results has always
