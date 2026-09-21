@@ -6,6 +6,28 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A review now says what it was for, and why a low score was low
+
+Three fields a review has been collecting or could not carry, reported to the clients that
+draw it.
+
+**What the visit was for.** `purchased` and `purchased_item` have been stored since the form
+began asking, and were never returned. The store page had no way to say that a review came
+from somebody who actually bought something -- which is a different kind of evidence from one
+written by somebody who looked and left.
+
+**Why a heading scored one or two.** The form asks for a sentence whenever somebody gives a
+low mark, and those sentences were being folded into the review body as "Heading: sentence"
+lines. That is lossy in a way that only shows up later: the heading was written in whatever
+language the reviewer was using, so reading it back out means parsing translated text.
+`criterion_notes` is a jsonb object keyed by the eight question names, so a note can be put
+beside the score it explains. Unknown keys, empty notes and notes past the form's limit are
+dropped on the way in rather than refused -- a review is worth more than one field a client
+got wrong.
+
+Both are additive and both are omitted when absent, so a client that does not know about them
+sees exactly what it saw before.
+
 ## The database was never allowed to sleep
 
 Managed Postgres suspends a compute that has had no connection for five minutes and bills

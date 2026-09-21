@@ -143,3 +143,31 @@ func TestCreatePostStillAcceptsTheOlderContract(t *testing.T) {
 		t.Fatalf("an incomplete review was not refused: %v", err)
 	}
 }
+
+// A note belongs to one of the eight questions and says something. Everything else is
+// dropped rather than stored or refused, because a client that files a note against a
+// heading that does not exist has got one field wrong, not written a bad review.
+func TestCriterionNotesKeepOnlyWhatTheFormCanAsk(t *testing.T) {
+	long := strings.Repeat("ş", criterionNoteLimit+40)
+	out := cleanCriterionNotes(map[string]string{
+		"availability":   "  Aradığım yatak hiç yoktu.  ",
+		"value":          "   ",
+		"not_a_question": "bir şey",
+		"cleanliness":    long,
+	})
+	if out["availability"] != "Aradığım yatak hiç yoktu." {
+		t.Fatalf("note not trimmed: %q", out["availability"])
+	}
+	if _, ok := out["value"]; ok {
+		t.Fatal("an empty note was kept")
+	}
+	if _, ok := out["not_a_question"]; ok {
+		t.Fatal("a note against an unknown heading was kept")
+	}
+	if n := len([]rune(out["cleanliness"])); n != criterionNoteLimit {
+		t.Fatalf("note not cut to the form's limit: %d runes", n)
+	}
+	if cleanCriterionNotes(map[string]string{"value": " "}) != nil {
+		t.Fatal("a map with nothing usable in it should be nothing at all")
+	}
+}
