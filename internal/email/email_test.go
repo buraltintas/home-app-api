@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/brand"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -139,5 +140,57 @@ func TestGmailSenderClassifiesQuotaAndConfigurationFailures(t *testing.T) {
 func TestGmailSenderRejectsHeaderInjection(t *testing.T) {
 	if _, err := gmailRawMessage(Message{From: "no-reply@bosagezme.com", To: "user@example.com", Subject: "OTP\r\nBcc: attacker@example.com"}); err == nil {
 		t.Fatal("subject header injection accepted")
+	}
+}
+
+// The nudge is fire-and-forget: it is called from a request handler, right
+// after the commit, and must never make that handler wait — not when the worker
+// is busy sending, and not when there is no worker at all.
+func TestNotifyNeverBlocksTheCaller(t *testing.T) {
+	w := NewWorker(nil, nil, "", nil, nil)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Far more nudges than the channel can hold. A blocking send would
+		// stop here and the test would time out.
+		for i := 0; i < 1000; i++ {
+			w.Notify()
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Notify blocked its caller")
+	}
+
+	// They collapse into one pending wake-up: the worker drains the queue when
+	// it runs, so a second nudge would only make it look twice at an empty one.
+	if got := len(w.wake); got != 1 {
+		t.Fatalf("a thousand nudges should leave one pending wake-up, got %d", got)
+	}
+}
+
+// A worker that was never given to anything is still safe to nudge: the
+// services hold the notifier as an optional field and a local run may not
+// deliver mail at all.
+func TestNotifyOnANilWorkerIsHarmless(t *testing.T) {
+	var w *Worker
+	w.Notify()
+}
+
+// The ceiling has one job: to be longer than the quiet the database needs
+// before it suspends itself. A ceiling shorter than that would leave the poll
+// costing a whole night of compute while looking like a saving.
+func TestTheIdleCeilingIsLongerThanTheDatabaseNeedsToSuspend(t *testing.T) {
+	// Managed Postgres suspends after five minutes without a connection, and
+	// the pool holds an idle one for ninety seconds after the last query.
+	const quietNeeded = 5*time.Minute + 90*time.Second
+	if emailPollIdle <= quietNeeded {
+		t.Fatalf("idle poll every %s never leaves the %s of quiet a suspend needs", emailPollIdle, quietNeeded)
+	}
+	if emailPollBusy > time.Second {
+		t.Fatalf("a queue with work in it should be drained promptly, got %s", emailPollBusy)
 	}
 }

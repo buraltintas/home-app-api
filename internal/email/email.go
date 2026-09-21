@@ -293,10 +293,37 @@ type Worker struct {
 	from   string
 	key    []byte
 	log    *slog.Logger
+	// Nudged by whoever just wrote a row; see Notify.
+	wake chan struct{}
 }
 
 func NewWorker(db *pgxpool.Pool, s Sender, from string, key []byte, log *slog.Logger) *Worker {
-	return &Worker{db, s, from, key, log}
+	return &Worker{db: db, sender: s, from: from, key: key, log: log, wake: make(chan struct{}, 1)}
+}
+
+/*
+Notify tells the worker a row has just been written, so it does not have to
+find out by asking.
+
+Everything that enqueues mail does so while serving a request, in this same
+process, and the worker that will send it is the one running beside that
+request. Saying so directly is what lets the idle poll below be minutes rather
+than a second: the poll stops being how mail is discovered and becomes only the
+backstop for a row this process did not write — a retry that has come due, or
+one left behind by an instance that went away.
+
+Non-blocking on purpose. The channel holds one pending nudge because a second
+one would say nothing the first has not: the worker drains the queue when it
+wakes, however many rows arrived.
+*/
+func (w *Worker) Notify() {
+	if w == nil {
+		return
+	}
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
 }
 
 type job struct {
@@ -307,25 +334,70 @@ type job struct {
 	Locale              i18n.Locale
 }
 
+/*
+How often an empty queue is asked about.
+
+A poll every second is a query every second, and this worker runs inside the
+API process, so the database was asked about the outbox once a second for as
+long as any instance was alive. That is what a managed Postgres charges for: it
+suspends after a few minutes without a connection and bills the hours it is
+awake, and a queue poll made sure those minutes never arrived — every night,
+for a queue that is empty all night.
+
+So an empty queue is asked about less and less, up to the ceiling below, and a
+row that actually arrives says so through Notify rather than waiting to be
+found. The ceiling is the longest a row written somewhere this process cannot
+hear about — a due retry, or an instance that died holding one — waits to be
+noticed. It is deliberately longer than the few minutes of quiet the database
+needs, because a ceiling shorter than that saves nothing at all.
+*/
+const (
+	emailPollBusy = time.Second
+	emailPollIdle = 15 * time.Minute
+)
+
 func (w *Worker) Run(ctx context.Context) error {
-	t := time.NewTicker(time.Second)
-	defer t.Stop()
+	wait := emailPollBusy
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-t.C:
-			for i := 0; i < 10; i++ {
-				ok, e := w.once(ctx)
-				if e != nil {
-					w.log.Error("email worker iteration failed", "error", e)
-					break
-				}
-				if !ok {
-					break
+		case <-w.wake:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
 				}
 			}
+		case <-timer.C:
 		}
+
+		sent := false
+		for i := 0; i < 10; i++ {
+			ok, e := w.once(ctx)
+			if e != nil {
+				w.log.Error("email worker iteration failed", "error", e)
+				break
+			}
+			if !ok {
+				break
+			}
+			sent = true
+		}
+
+		// A queue with something in it is asked about again immediately; one
+		// that came back empty is asked about half as often, to the ceiling.
+		if sent {
+			wait = emailPollBusy
+		} else if wait < emailPollIdle {
+			wait *= 2
+			if wait > emailPollIdle {
+				wait = emailPollIdle
+			}
+		}
+		timer.Reset(wait)
 	}
 }
 func (w *Worker) once(ctx context.Context) (bool, error) {

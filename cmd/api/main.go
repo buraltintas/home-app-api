@@ -108,11 +108,17 @@ func main() {
 		os.Exit(1)
 	}
 	emailWorker := email.NewWorker(db, sender, cfg.EmailFrom, []byte(cfg.OTPHashSecret), log)
+	// Whoever writes a row tells the worker, instead of the worker asking the
+	// database every second whether one has appeared. That question, asked all
+	// night for a queue that is empty all night, is what kept the database from
+	// ever suspending itself.
+	authSvc.SetMailNotifier(emailWorker.Notify)
 	adminSvc := adminpkg.NewService(db)
 	// Where to search comes from our own table now. No key, no provider, nothing to be
 	// unavailable -- so nothing here is conditional on configuration.
 	placesSvc := locationpkg.NewService(db)
 	feedbackSvc := feedback.NewService(db, cfg.FeedbackNotifyEmail)
+	feedbackSvc.SetMailNotifier(emailWorker.Notify)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, placesSvc, users, mediaSvc, adminSvc, reportSvc, feedbackSvc, []byte(cfg.OTPHashSecret))
 	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails, server.RuntimeConfig{StoreReviewRadiusMeters: cfg.StoreReviewRadiusMeters}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {

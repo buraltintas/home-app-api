@@ -38,10 +38,34 @@ type Service struct {
 	google GoogleVerifier
 	report *reporting.Service
 	now    func() time.Time
+	// Told after a commit that may have left mail behind; see SetMailNotifier.
+	mailReady func()
 }
 
 func NewService(db *pgxpool.Pool, c Config, t *security.TokenManager, g GoogleVerifier, report *reporting.Service) *Service {
 	return &Service{db: db, cfg: c, tokens: t, google: g, report: report, now: time.Now}
+}
+
+/*
+SetMailNotifier hands the service a way to say "there may be mail now".
+
+Login codes and welcome mail are written to the outbox inside the transaction
+that issues them, and the worker that sends them runs in this same process. It
+used to find them by asking the database every second, which is what kept that
+database awake around the clock. Saying so directly costs a channel send and
+lets the worker's own poll fall back to a backstop.
+
+Called after the commit, never before: a nudge for a transaction that then
+rolls back would send the worker looking for a row that will never exist. It
+may also be called when nothing was enqueued — the worker finds an empty queue,
+which is one query, and is far cheaper than getting the condition wrong.
+*/
+func (s *Service) SetMailNotifier(notify func()) { s.mailReady = notify }
+
+func (s *Service) notifyMail() {
+	if s.mailReady != nil {
+		s.mailReady()
+	}
 }
 
 type TokenPair struct {
@@ -131,7 +155,12 @@ func (s *Service) RequestCode(ctx context.Context, email string, visitor *uuid.U
 	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.OTPRequested, IdempotencyKey: "otp-request:" + id.String(), VisitorSessionID: visitor}); e != nil {
 		return e
 	}
-	return tx.Commit(ctx)
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	// The code is in the outbox and the person is waiting on it.
+	s.notifyMail()
+	return nil
 }
 
 func (s *Service) VerifyCode(ctx context.Context, email, code string, client Client) (TokenPair, error) {
@@ -205,6 +234,8 @@ func (s *Service) verifyCodeOnce(ctx context.Context, email, code string, client
 	if e = tx.Commit(ctx); e != nil {
 		return TokenPair{}, e
 	}
+	// A first sign-in leaves a welcome mail behind it.
+	s.notifyMail()
 	return pair, nil
 }
 
@@ -263,6 +294,8 @@ func (s *Service) googleIdentity(ctx context.Context, g GoogleIdentity, norm str
 	if e = tx.Commit(ctx); e != nil {
 		return TokenPair{}, e
 	}
+	// A first sign-in leaves a welcome mail behind it.
+	s.notifyMail()
 	return pair, nil
 }
 

@@ -6,6 +6,33 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The database was never allowed to sleep
+
+Managed Postgres suspends a compute that has had no connection for five minutes and bills
+the hours it is awake. Ours was awake every hour of every day -- measured, not assumed: a
+little over six compute-hours a day at the 0.25 CU floor, which is exactly what twenty-four
+hours at the minimum costs, for a service whose nights are one crawler and nobody else.
+
+Two things made that impossible, and neither was traffic.
+
+The pool held a floor of two connections. `MinConns` keeps that many open whether or not
+anybody is asking, so the count the database watches never reached zero and the five minutes
+never started. It is zero now, and an idle connection is let go after ninety seconds rather
+than fifteen minutes.
+
+The outbox worker asked every second whether a row had appeared. It runs inside the API
+process, so for as long as any instance was alive there was a query every second -- all
+night, for a queue that is empty all night. Now whoever writes a row tells the worker
+directly, through `Notify`, and the poll falls back from a second to fifteen minutes when the
+queue comes back empty. The poll is no longer how mail is found; it is the backstop for a row
+this process did not write, a retry that has come due or one left behind by an instance that
+went away. Fifteen minutes is chosen for one reason: a ceiling shorter than the quiet the
+database needs would have saved nothing, and a test holds it above that line.
+
+What this costs: the first request after a quiet spell pays for a fresh connection, about a
+second. Mail sent by this process is unaffected -- it is nudged, not polled for -- and mail
+left behind elsewhere waits up to the ceiling instead of up to a second.
+
 ## A reader with 34 reviews was shown 20 of them
 
 `PostsBy` capped its limit at 50 and the profile asked for 20, while the page above the list

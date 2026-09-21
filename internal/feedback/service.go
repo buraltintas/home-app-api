@@ -19,12 +19,25 @@ import (
 type Service struct {
 	db     *pgxpool.Pool
 	notify string
+	// Told after a commit that left mail behind; see SetMailNotifier.
+	mailReady func()
 }
 
 // notify is where a new message is sent. Empty disables the mail and keeps the panel as
 // the only place feedback lands, which is what a local run wants.
 func NewService(db *pgxpool.Pool, notify string) *Service {
 	return &Service{db: db, notify: strings.TrimSpace(notify)}
+}
+
+// SetMailNotifier hands the service a way to say "there may be mail now", so the
+// worker beside it does not have to keep asking the database. See the same
+// method on the auth service for why that asking was worth removing.
+func (s *Service) SetMailNotifier(notify func()) { s.mailReady = notify }
+
+func (s *Service) notifyMail() {
+	if s.mailReady != nil {
+		s.mailReady()
+	}
 }
 
 var kinds = map[string]bool{"suggestion": true, "problem": true, "praise": true, "other": true}
@@ -76,6 +89,7 @@ func (s *Service) Messages(ctx context.Context, user uuid.UUID, limit, offset in
 // an account, and neither should telling us the product is wrong. The address is optional
 // and exists only so we can answer.
 func (s *Service) Create(ctx context.Context, in Input, user *uuid.UUID, visitor *uuid.UUID) error {
+	queued := false
 	kind, message, email, e := validate(in)
 	if e != nil {
 		return e
@@ -110,8 +124,15 @@ func (s *Service) Create(ctx context.Context, in Input, user *uuid.UUID, visitor
  VALUES($1,'feedback',$2,$3,'tr') ON CONFLICT(idempotency_key) DO NOTHING`, "feedback:"+id.String(), s.notify, payload); e != nil {
 			return e
 		}
+		queued = true
 	}
-	return tx.Commit(ctx)
+	if e = tx.Commit(ctx); e != nil {
+		return e
+	}
+	if queued {
+		s.notifyMail()
+	}
+	return nil
 }
 
 // validate is separated from the write so the rules can be tested without a database. The
