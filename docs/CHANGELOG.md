@@ -6,6 +6,23 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## There was no way to run a migration against production
+
+Following on from the outage below: the reason a migration and its code shipped together is
+that there was no separate way to ship the migration at all. The deployed image carries the
+API binary and nothing else -- no migrate tool, no migration files -- so "run migrations as a
+dedicated release step", which the README has always said, had no step to run.
+
+`Dockerfile.migrate` builds that step: the migrate tool and the `migrations/` directory in
+their own image, meant to run as a one-off Cloud Run job against the same `DATABASE_URL`
+secret the API uses. The credential stays in Secret Manager; nobody needs a copy of it to
+release a schema change.
+
+And the tool itself now reads `DATABASE_URL` from the environment instead of loading the
+application's config. Loading that config made a schema change demand the access-token
+signing key, the OTP secret and the BFF secrets before it would open a connection. A
+migration runner should need one thing, and that thing is the database.
+
 ## Store pages returned 500 for eleven minutes, and the cause was a column that was not there
 
 A query was shipped reading `posts.criterion_notes` in the same change that added the

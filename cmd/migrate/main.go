@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -21,11 +20,15 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	cfg, e := config.Load()
-	if e != nil {
-		log.Fatal(e)
+	// Read straight from the environment rather than through the application's config.
+	// Loading that config makes this tool demand the token signing keys, the OTP secret and
+	// the BFF secrets before it will open a connection -- none of which a schema change has
+	// any business holding. Running a migration should need exactly one thing: the database.
+	url := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if url == "" {
+		log.Fatal("DATABASE_URL is required")
 	}
-	db, e := database.Open(ctx, cfg.DatabaseURL)
+	db, e := database.Open(ctx, url)
 	if e != nil {
 		log.Fatal(e)
 	}

@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+
+# The migration runner, as its own image.
+#
+# The API image carries only the API binary, so there was no way to apply a migration to the
+# production database at all -- which is how a column got read in production before it had
+# been created. This image carries the migrate tool and the migration files, and is run as a
+# one-off Cloud Run job against the same DATABASE_URL secret the API uses, so the credential
+# stays in Secret Manager and nobody has to hold a copy of it to release a schema change.
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG TARGETOS
+ARG TARGETARCH
+ENV CGO_ENABLED=0
+RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -tags timetzdata -ldflags="-s -w" -o /out/migrate ./cmd/migrate
+
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /app
+COPY --from=build /out/migrate /app/migrate
+# The tool globs "migrations/*.sql" relative to the working directory, so the files travel
+# with it rather than being mounted at run time.
+COPY --from=build /src/migrations /app/migrations
+USER nonroot:nonroot
+ENTRYPOINT ["/app/migrate"]
+CMD ["up"]
