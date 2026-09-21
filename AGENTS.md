@@ -81,6 +81,24 @@ So:
   itself, which is already paid for. A recurring backfill pays a second time for data that
   arrives free.
 
+## A migration and the code that needs it cannot ship together
+
+Deploys here do not run migrations. They are a separate release step, and nothing in the
+pipeline will tell you that you forgot: the build is green, because the build compiles code
+and never sees the database.
+
+So a change that adds a column and reads it in the same commit goes live as a binary querying
+a column that does not exist. Every request on that path fails. This cost the site every
+store page for eight minutes, and the symptom -- a 500 from one endpoint -- looks nothing like
+the cause.
+
+Two deploys, in this order, whenever a change needs new schema:
+
+1. The migration on its own, applied to the database.
+2. The code that reads or writes it, once step 1 has actually run.
+
+The same holds for dropping a column: the code stops using it first, then the column goes.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest
