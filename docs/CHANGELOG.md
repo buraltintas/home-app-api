@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Store pages returned 500 for eleven minutes, and the cause was a column that was not there
+
+A query was shipped reading `posts.criterion_notes` in the same change that added the
+migration creating it. This service deploys without running migrations -- they are a separate
+release step, which the README says and this change ignored -- so the new binary went live
+against a database that had never seen the column. Every read of a store's reviews failed,
+which is every store page on the site.
+
+The fix was to stop reading and writing the column; everything else in that change stands,
+including `purchased` and `purchased_item`, which are columns that already existed.
+
+**The rule this cost us:** a migration and the code that depends on it cannot travel in the
+same deploy here. The migration goes first, on its own, and the code that needs it follows
+once it has been applied. A green build says the code compiles, not that the schema it
+assumes exists.
+
 ## A review now says what it was for, and why a low score was low
 
 Three fields a review has been collecting or could not carry, reported to the clients that
