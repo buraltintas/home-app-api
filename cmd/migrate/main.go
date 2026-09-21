@@ -15,8 +15,11 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 2 || (os.Args[1] != "up" && os.Args[1] != "down") {
-		log.Fatal("usage: migrate up|down")
+	// "status" reads and changes nothing. It exists because "up" applies every migration the
+	// database has not seen, not the one you have in mind -- and against a production
+	// database the difference between those two matters enough to be able to look first.
+	if len(os.Args) != 2 || (os.Args[1] != "up" && os.Args[1] != "down" && os.Args[1] != "status") {
+		log.Fatal("usage: migrate up|down|status")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -33,10 +36,18 @@ func main() {
 		log.Fatal(e)
 	}
 	defer db.Close()
-	if _, e = db.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`); e != nil {
-		log.Fatal(e)
+	// Not for "status": that mode is a read, and a read should not be able to create
+	// anything, not even a table that is certainly already there.
+	if os.Args[1] != "status" {
+		if _, e = db.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations(version text PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())`); e != nil {
+			log.Fatal(e)
+		}
 	}
-	files, e := filepath.Glob("migrations/*." + os.Args[1] + ".sql")
+	direction := os.Args[1]
+	if direction == "status" {
+		direction = "up"
+	}
+	files, e := filepath.Glob("migrations/*." + direction + ".sql")
 	if e != nil {
 		log.Fatal(e)
 	}
@@ -49,6 +60,14 @@ func main() {
 		var exists bool
 		if e = db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version=$1)`, version).Scan(&exists); e != nil {
 			log.Fatal(e)
+		}
+		if os.Args[1] == "status" {
+			state := "PENDING"
+			if exists {
+				state = "applied"
+			}
+			fmt.Printf("%-10s %s\n", state, filepath.Base(file))
+			continue
 		}
 		if os.Args[1] == "up" && !exists {
 			apply(ctx, db, file, version, true)

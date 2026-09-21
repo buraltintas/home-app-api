@@ -6,6 +6,23 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The schema register was three migrations behind the schema
+
+Running the new migration job in "status" mode before touching anything turned up something
+worth knowing: 000033 and 000034 were both recorded as pending, and both were plainly already
+in the database -- the store page has been serving `purchased_item` for days.
+
+So the SQL had been applied by hand and never written into `schema_migrations`. The database
+was right and the register was wrong, which is the more dangerous way round: every later
+reader, including the tool, believed work was outstanding that was not. All three are applied
+and recorded now. Each is written to be safe to repeat, which is why replaying two of them
+cost nothing.
+
+`migrate status` exists for exactly this. It reads and writes nothing -- it does not even
+create the register table -- because "up" applies every migration the database has not seen,
+not the one you have in mind, and against production that difference is worth being able to
+look at first.
+
 ## There was no way to run a migration against production
 
 Following on from the outage below: the reason a migration and its code shipped together is

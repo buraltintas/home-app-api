@@ -12,7 +12,8 @@ coverage.out
 *.log
 .DS_Store
 docs
-migrations
+# migrations/ travels with the build context: the migration runner image copies it, and the
+# API image is unaffected -- its final stage takes only the compiled binary.
 scripts
 README.md
 PRODUCT.md

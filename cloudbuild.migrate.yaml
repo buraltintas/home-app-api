@@ -1,0 +1,9 @@
+# Builds the migration runner. Not part of the API deploy: this image is built and run on
+# purpose, as its own release step, before the code that depends on the schema it applies.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build','-f','Dockerfile.migrate','-t','europe-west1-docker.pkg.dev/bosa-gezme/cloud-run-source-deploy/home-app-migrate:latest','.']
+images:
+  - 'europe-west1-docker.pkg.dev/bosa-gezme/cloud-run-source-deploy/home-app-migrate:latest'
+options:
+  logging: CLOUD_LOGGING_ONLY
