@@ -51,6 +51,10 @@ type StoreHighlight struct {
 	// picture first, then the provider's. A store recommended without a face beside it
 	// reads as a line of text rather than a place.
 	Photo *Photo `json:"photo,omitempty"`
+	// What the shop sells. The home page draws these the way a result row does, and a client
+	// deciding whether a shop called "Yataş" is the chain Yataş needs to know it sells beds --
+	// a name on its own is a resemblance. Cheap here: the rows are already grouped per store.
+	Categories []string `json:"categories"`
 }
 
 type MonthlyStoreHighlights struct {
@@ -85,6 +89,9 @@ WITH review_stats AS (
                    JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
                    WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready'
                    ORDER BY p2.created_at DESC, pm.position LIMIT 1), '') AS own_media,
+         coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l
+                   JOIN store_categories c ON c.id=l.category_id AND c.active
+                   WHERE l.store_id=s.id), '{}') AS categories,
          count(p.id) FILTER (WHERE p.deleted_at IS NULL) AS review_count,
          count(DISTINCT p.user_id) FILTER (WHERE p.deleted_at IS NULL) AS reviewer_count,
          max(p.created_at) FILTER (WHERE p.deleted_at IS NULL) AS last_review_at,
@@ -96,9 +103,9 @@ WITH review_stats AS (
   FROM stores s
   LEFT JOIN posts p ON p.store_id = s.id
   WHERE s.deleted_at IS NULL
-  GROUP BY s.id, s.slug, s.name, s.city, s.district, brand_slug, own_media
+  GROUP BY s.id, s.slug, s.name, s.city, s.district, brand_slug, own_media, categories
 )
-SELECT id, slug, name, city, district, brand_slug, own_media, current_rating, review_count, recent_review_count,
+SELECT id, slug, name, city, district, brand_slug, own_media, categories, current_rating, review_count, recent_review_count,
        reviewer_count, coalesce(current_rating - prior_rating, 0) AS rating_increase
 FROM review_stats
 `
@@ -160,6 +167,7 @@ func scanHighlight(row rowScanner) (*StoreHighlight, error) {
 		&item.District,
 		&brandSlug,
 		&ownMedia,
+		&item.Categories,
 		&item.AverageRating,
 		&item.ReviewCount,
 		&item.RecentReviewCount,

@@ -23,6 +23,15 @@ create the register table -- because "up" applies every migration the database h
 not the one you have in mind, and against production that difference is worth being able to
 look at first.
 
+## Store highlights now say what the shop sells
+
+`/v1/search/highlights` returned a shop's name and not its categories, so a client deciding
+whether a shop called "Yataş" is the chain Yataş had only the name to go on -- and a name on
+its own is a resemblance. The home page's recent-reviews list was the one surface that could
+not make that call, and it showed an initial where every other surface showed the mark.
+
+Additive, and cheap: the rows are already grouped per store.
+
 ## A store page showed five reviews under a heading that said twenty
 
 `PostsBy(..., 5)` was reading the last five reviews for a store's page. The page prints the
