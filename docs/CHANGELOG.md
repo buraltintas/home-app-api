@@ -6,6 +6,24 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The admin panel posted a sign-in code to anybody whose address was typed into it
+
+/admin is a public address, and its sign-in form called the ordinary email endpoint. So
+typing any address into it sent that person a real six-digit code -- somebody who has never
+seen the panel, receiving a code for it because a stranger typed their address into a page.
+The code was useless (authorisation happens at the routes, and it still does) but it should
+never have been sent.
+
+It has its own endpoint now. The answer is unchanged for every address -- same 202, same
+body -- because "that address is not an administrator" tells whoever asked which addresses
+are, and the form is reachable by anyone. What changed is underneath: an address that is not
+on the allowlist has nothing queued and nothing written, so a stranger's own sign-in codes
+are not disturbed either.
+
+"Is this an administrator" is now one definition rather than two. The middleware that guards
+the admin routes and this endpoint ask the same allowlist, in constant time, because the
+copy that drifts is the way in.
+
 ## Two timers were sized for a database that never got to sleep anyway
 
 The database has been awake around the clock, and the first guess was the work this process

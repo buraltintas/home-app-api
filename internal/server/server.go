@@ -181,6 +181,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Route("/auth", func(r chi.Router) {
 			r.Use(appmw.NewLimiter(30, 8).Middleware)
 			r.Post("/email/request-code", s.requestCode)
+			r.Post("/email/request-admin-code", s.requestAdminCode(adminEmails))
 			r.Post("/email/verify-code", s.verifyCode)
 			r.Post("/google", s.google)
 			r.Post("/refresh", s.refresh)
@@ -265,13 +266,48 @@ func (s *Server) completeMediaUpload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) {
+func (s *Server) requestCode(w http.ResponseWriter, r *http.Request) { s.issueCode(w, r, nil) }
+
+// The admin panel's own sign-in.
+//
+// It answers exactly like the public one -- same status, same body, whoever asks -- because
+// "that address is not an administrator" tells a stranger which addresses are, and the panel
+// is reachable by anyone who types /admin.
+//
+// What it does not do is send mail. The public form exists for everybody and a code posted
+// there is one the person asked for; this form exists for a handful of people, and an
+// address that is not one of them has no business receiving a six-digit code it could never
+// spend -- least of all one triggered by somebody else typing their address into a page they
+// have never seen. Nothing is written either: the stranger's own sign-in codes, if they have
+// any, are left alone.
+func (s *Server) requestAdminCode(allowed []string) http.HandlerFunc {
+	permitted := appmw.NewAdminAllowlist(allowed)
+	return func(w http.ResponseWriter, r *http.Request) {
+		s.issueCode(w, r, &permitted)
+	}
+}
+
+// issueCode is the shared body. A nil allowlist means the public form, where every address
+// is its own business; a non-nil one means the panel, where only the named addresses are.
+func (s *Server) issueCode(w http.ResponseWriter, r *http.Request, permitted *appmw.AdminAllowlist) {
 	var in struct {
 		Email string `json:"email"`
 	}
 	if e := Decode(w, r, &in, 16<<10); e != nil {
 		WriteError(w, e, r.Context())
 		return
+	}
+	if permitted != nil {
+		// Normalised the same way the sign-in itself normalises it, so an address typed
+		// with capitals or spaces is the same address here as it is there. A malformed one
+		// is not an administrator either, and is answered the same way as any other
+		// address that is not.
+		normalised, e := auth.NormalizeEmail(in.Email)
+		if e != nil || !permitted.Has(normalised) {
+			observability.Auth("otp_request", "success")
+			JSON(w, 202, map[string]string{"status": "accepted"})
+			return
+		}
 	}
 	var visitor *uuid.UUID
 	if v, ok := appmw.VisitorID(r); ok {

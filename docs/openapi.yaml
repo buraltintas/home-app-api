@@ -65,6 +65,17 @@ paths:
       description: Rate limited by normalized email, remote IP and visitor session. The explicitly configured App Review identity receives the same generic response and short-lived attempt-limited code record, but no email is queued.
       requestBody: {$ref: '#/components/requestBodies/EmailRequest'}
       responses: {'202': {$ref: '#/components/responses/Accepted'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
+  /v1/auth/email/request-admin-code:
+    post:
+      tags: [Auth]
+      summary: Queue an email OTP for the admin panel
+      description: >-
+        Same request, same 202 and same body as the public endpoint, for any address. An
+        address that is not on the administrator allowlist has nothing queued and nothing
+        written; the response does not distinguish the two cases, because saying which
+        addresses are administrators is the thing this protects.
+      requestBody: {$ref: '#/components/requestBodies/EmailRequest'}
+      responses: {'202': {$ref: '#/components/responses/Accepted'}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
   /v1/auth/email/verify-code:
     post:
       tags: [Auth]
