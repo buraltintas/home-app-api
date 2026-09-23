@@ -597,6 +597,7 @@ components:
         display_name: {type: string}
         avatar_url: {type: string}
         store_name: {type: string}
+        store_slug: {type: string, description: Readable address of the store this review is about.}
         store_city: {type: string}
         store_district: {type: string}
         store_photo: {$ref: '#/components/schemas/StorePhoto'}
