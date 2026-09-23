@@ -99,6 +99,29 @@ Two deploys, in this order, whenever a change needs new schema:
 
 The same holds for dropping a column: the code stops using it first, then the column goes.
 
+## A database that never sleeps is a traffic question before it is a code question
+
+The managed Postgres suspends itself after five quiet minutes and bills the hours it is
+awake, so anything that touches it on a short cycle costs a full day of compute. The obvious
+suspects are ours -- pollers, tickers, sweeps -- and reading the code will always find some.
+It found two here, and neither was the reason.
+
+Count the gaps first. One query over a day of request logs, bucketed into five-minute
+windows, answers it outright:
+
+```bash
+gcloud logging read 'resource.type="cloud_run_revision" AND resource.labels.service_name="<service>" AND httpRequest.requestMethod!="" AND timestamp>="<from>" AND timestamp<"<to>"' \
+  --project <project> --limit 20000 --format='value(timestamp)'
+```
+
+If no window is empty, no timer can be to blame -- there was never a gap for it to sit in,
+and changing its period saves nothing. The cause is upstream, in who is asking. If gaps do
+exist, then the periods matter, and the test for each is whether it is longer than the gaps
+it is sitting in: fifteen minutes against gaps of five to fifteen is the same as no gap at
+all.
+
+Fix the traffic, then size the timers for the quiet that fixing it creates.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest

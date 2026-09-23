@@ -351,9 +351,20 @@ hear about — a due retry, or an instance that died holding one — waits to be
 noticed. It is deliberately longer than the few minutes of quiet the database
 needs, because a ceiling shorter than that saves nothing at all.
 */
+//
+// Fifteen minutes was that ceiling, and it was still wrong -- not by much, but by exactly
+// the wrong amount. Once the crawlers were told to stop, the quiet stretches at night came
+// out between five and fifteen minutes long, so a question asked every fifteen minutes
+// landed inside the longest of them and restarted the countdown each time. A ceiling has to
+// be longer than the gaps it is sitting in, not comparable to them.
+//
+// Nothing waits on the ceiling any more in the normal case: a new row arrives through
+// Notify, and a row that failed and is due again says when it is due, which the loop below
+// waits for exactly. What is left is a row written by an instance that died before it could
+// say so, and that can wait for the next one.
 const (
 	emailPollBusy = time.Second
-	emailPollIdle = 15 * time.Minute
+	emailPollIdle = 6 * time.Hour
 )
 
 func (w *Worker) Run(ctx context.Context) error {
@@ -375,8 +386,12 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 
 		sent := false
+		var due time.Duration
 		for i := 0; i < 10; i++ {
-			ok, e := w.once(ctx)
+			ok, retryIn, e := w.once(ctx)
+			if retryIn > 0 && (due == 0 || retryIn < due) {
+				due = retryIn
+			}
 			if e != nil {
 				w.log.Error("email worker iteration failed", "error", e)
 				break
@@ -387,11 +402,17 @@ func (w *Worker) Run(ctx context.Context) error {
 			sent = true
 		}
 
-		// A queue with something in it is asked about again immediately; one
-		// that came back empty is asked about half as often, to the ceiling.
-		if sent {
+		// A queue with something in it is asked about again immediately; one that came
+		// back empty is asked about half as often, to the ceiling. A delivery that failed
+		// and will be tried again is the third case, and the one the ceiling used to get
+		// wrong: this process wrote that row's next attempt, so it knows when it is due and
+		// waits that long rather than discovering it on some later sweep.
+		switch {
+		case due > 0:
+			wait = due
+		case sent:
 			wait = emailPollBusy
-		} else if wait < emailPollIdle {
+		case wait < emailPollIdle:
 			wait *= 2
 			if wait > emailPollIdle {
 				wait = emailPollIdle
@@ -400,26 +421,29 @@ func (w *Worker) Run(ctx context.Context) error {
 		timer.Reset(wait)
 	}
 }
-func (w *Worker) once(ctx context.Context) (bool, error) {
+// once takes at most one job. It reports whether it took one, and -- when a delivery failed
+// and is due to be tried again -- how long until that attempt, so the caller can wait for it
+// instead of polling for it.
+func (w *Worker) once(ctx context.Context) (bool, time.Duration, error) {
 	tx, e := w.db.BeginTx(ctx, pgx.TxOptions{})
 	if e != nil {
-		return false, e
+		return false, 0, e
 	}
 	defer tx.Rollback(ctx)
 	var j job
 	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts,locale::text FROM email_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts, &j.Locale)
 	if errors.Is(e, pgx.ErrNoRows) {
-		return false, nil
+		return false, 0, nil
 	}
 	if e != nil {
-		return false, e
+		return false, 0, e
 	}
 	_, e = tx.Exec(ctx, `UPDATE email_outbox SET status='processing',locked_at=now(),attempts=attempts+1 WHERE id=$1`, j.ID)
 	if e != nil {
-		return false, e
+		return false, 0, e
 	}
 	if e = tx.Commit(ctx); e != nil {
-		return false, e
+		return false, 0, e
 	}
 	msg, e := w.render(j)
 	shouldRetry := false
@@ -433,7 +457,7 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 		if e == nil {
 			_, e = w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status='sent',sent_at=now(),provider_message_id=$2,last_error=NULL WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,provider_message_id,success) VALUES($1,'configured',$2,true)`, j.ID, providerID)
 			observability.Worker("email", observability.Outcome(e), false)
-			return true, e
+			return true, 0, e
 		}
 	}
 	delay := time.Duration(1<<min(j.Attempts, 8)) * time.Minute
@@ -446,10 +470,13 @@ func (w *Worker) once(ctx context.Context) (bool, error) {
 	_, dbErr := w.db.Exec(context.Background(), `WITH u AS (UPDATE email_outbox SET status=$2,available_at=CASE WHEN $3='infinity' THEN 'infinity'::timestamptz ELSE now()+$3::interval END,last_error=$4 WHERE id=$1) INSERT INTO email_deliveries(outbox_id,provider,success,error_code) VALUES($1,'configured',false,'DELIVERY_FAILED')`, j.ID, status, available, safeError)
 	if dbErr != nil {
 		observability.Worker("email", "failure", shouldRetry)
-		return true, dbErr
+		return true, 0, dbErr
 	}
 	observability.Worker("email", "failure", shouldRetry)
-	return true, e
+	if available == "infinity" {
+		return true, 0, e
+	}
+	return true, delay, e
 }
 
 func retryable(err error) bool {

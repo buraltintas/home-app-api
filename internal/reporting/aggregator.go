@@ -132,11 +132,25 @@ func (s *Service) Rebuild(ctx context.Context) error {
 	return nil
 }
 
+// How often the window is recomputed.
+//
+// It was every hour, and an hour was chosen for freshness without anybody costing it. Each
+// pass rewrites every day the attribution window touches -- four of them -- and each day is
+// one statement of roughly forty counting subqueries over users, posts, searches and the
+// event log. That is ninety-six full rollups a day, every one of them a database that has
+// to be awake and working, for numbers nobody reads more than once a day.
+//
+// Six hours keeps today's figures current enough for a report that is read in the morning
+// and cuts the rollups to sixteen. It is also longer than the few quiet minutes the
+// database needs to suspend itself, which an hourly tick was short enough to prevent on its
+// own once the crawlers stopped keeping it awake.
+const aggregateEvery = 6 * time.Hour
+
 func (s *Service) Run(ctx context.Context) error {
 	if e := s.aggregateAttributionWindow(ctx, s.now()); e != nil {
 		return e
 	}
-	ticker := time.NewTicker(time.Hour)
+	ticker := time.NewTicker(aggregateEvery)
 	defer ticker.Stop()
 	for {
 		select {

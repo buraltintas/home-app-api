@@ -6,6 +6,28 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Two timers were sized for a database that never got to sleep anyway
+
+The database has been awake around the clock, and the first guess was the work this process
+schedules: an outbox poll and an hourly rollup. Counting a day of requests first said
+otherwise -- 288 of 288 five-minute windows carried traffic, so there was no quiet for a
+timer to interrupt. Crawlers were the reason, and they are dealt with on the web side.
+
+That makes these two worth fixing rather than blaming, because they are what would close the
+gaps once the gaps exist:
+
+The reporting rollup ran every hour and rewrote every day the attribution window covers --
+four days, each one statement of some forty counting subqueries over users, posts, searches
+and the event log. Ninety-six full rollups a day, for figures read once a morning. It runs
+every six hours now: sixteen.
+
+The outbox ceiling was fifteen minutes, and the quiet stretches measured out at five to
+fifteen -- so the question landed inside the longest of them and restarted the countdown. It
+is six hours now, which is only reachable at all because nothing normal waits on it: a new
+row arrives through Notify, and a delivery that failed and is due again now reports when it
+is due, so the loop waits exactly that long instead of finding out on a later sweep. A
+sign-in code that fails once is still retried in two minutes, as before.
+
 ## The schema register was three migrations behind the schema
 
 Running the new migration job in "status" mode before touching anything turned up something
