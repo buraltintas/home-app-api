@@ -23,6 +23,15 @@ create the register table -- because "up" applies every migration the database h
 not the one you have in mind, and against production that difference is worth being able to
 look at first.
 
+## A store page showed five reviews under a heading that said twenty
+
+`PostsBy(..., 5)` was reading the last five reviews for a store's page. The page prints the
+true count beside the rating, so a shop with twenty reviews announced twenty and showed five
+-- the page contradicting itself, which is exactly how it was reported.
+
+Fifty now, which is far beyond anything in the catalogue and leaves the printed count honest
+past it.
+
 ## There was no way to run a migration against production
 
 Following on from the outage below: the reason a migration and its code shipped together is

@@ -581,7 +581,11 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 5)
+	// Every review this shop has, not the last five. The page prints the true count beside
+	// the rating; showing five under a heading that says twenty is the page contradicting
+	// itself, which is exactly how this was reported. Fifty is the ceiling -- far beyond
+	// anything in the catalogue today, and the count above still tells the truth past it.
+	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 50)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
