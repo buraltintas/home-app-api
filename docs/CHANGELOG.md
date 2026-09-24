@@ -6,6 +6,25 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A search for Samsung answered with two carpet shops in Samsun
+
+Both faults are in the same clause, and both come from closing up the spaces in a name.
+
+A chain's name is often typed without them -- "englishhome", "yatasbedding" -- so the query
+and the name are both closed up before they are compared. But a name with its spaces removed
+has joins in it that no word of that name has: "Merinos Halı - Samsun GENÇ Kartallar" closes
+up to "...halisamsungenckartallar", which contains "samsung". The letter that starts the next
+word made the match. A name typed without spaces now has to meet the beginning or the end of
+a shop's name, never a join between two of its words; anything in the middle is still found
+by the word index, which cannot glue two words together.
+
+The second fault is why a branch in Ankara, 379 km away, was in the same answer. The rule
+against that already existed -- if the name is found nearby, a branch four provinces away is
+not part of the answer -- but a floor underneath it was widening the search whenever fewer
+than five results were local. That floor is for a thin category search in a small town, where
+widening finds more of what was asked for. For a name, "only two nearby" is not a thin
+answer, it is the answer, and widening finds the same shop somewhere the reader cannot go.
+
 ## A shop's page shows every review it has, not the first fifty
 
 Five, then fifty, and both were numbers chosen when somebody happened to be looking. A

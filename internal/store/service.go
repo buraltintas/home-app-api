@@ -801,15 +801,30 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
  WHERE s.deleted_at IS NULL AND (
    to_tsvector('simple',coalesce(s.name,'')||' '||coalesce(s.brand_name,'')) @@ `+fn+`('simple',$1)
+   -- Typed without spaces, which is how a great many people type a chain's name:
+   -- "englishhome", "yatasbedding". Both sides have their spaces closed up so the two can
+   -- meet -- and closing them up is also how this clause went wrong.
+   --
+   -- It used to accept the query anywhere inside the closed-up name, and a name with its
+   -- spaces removed has joins in it that no word of the shop's name has. "Merinos Halı -
+   -- Samsun GENÇ Kartallar" closes up to "...halisamsungenckartallar", which contains
+   -- "samsung". A search for Samsung from Antalya answered with two carpet shops in Samsun,
+   -- 687 km away, because of the letter that starts the next word.
+   --
+   -- So a name typed without spaces has to meet the beginning or the end of the shop's
+   -- name, never a join between two of its words. A chain's name sits at one end or the
+   -- other -- "Yataş Bedding Konyaaltı", "Antalya English Home" -- and anything in the
+   -- middle is still found by the word index above, which cannot glue two words together.
+   OR ($7<>'' AND (s.compact_name LIKE $7||'%' OR s.compact_name LIKE '%'||$7))
+   -- The same rule for the unfolded spelling, and with the shop's name and its brand kept
+   -- apart: concatenating them made one more join that belongs to neither.
    OR (regexp_replace(lower($1),'[^[:alnum:]]','','g')<>''
-      AND regexp_replace(lower(coalesce(s.name,'')||coalesce(s.brand_name,'')),'[^[:alnum:]]','','g')
-          LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%')
-   -- Turkish written without its diacritics, which is how a great many people type. The
-   -- clauses above lowercase and strip punctuation but leave the letters alone, so
-   -- "dogtas" met "Doğtaş" nowhere and answered with nothing at all. compact_name is
-   -- already folded on write, and $7 is the same folding applied to the query, so the two
-   -- meet. The trigram index on compact_name serves this.
-   OR ($7<>'' AND s.compact_name LIKE '%'||$7||'%')
+      AND (regexp_replace(lower(coalesce(s.name,'')),'[^[:alnum:]]','','g')
+             LIKE regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%'
+        OR regexp_replace(lower(coalesce(s.name,'')),'[^[:alnum:]]','','g')
+             LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')
+        OR regexp_replace(lower(coalesce(s.brand_name,'')),'[^[:alnum:]]','','g')
+             LIKE '%'||regexp_replace(lower($1),'[^[:alnum:]]','','g')||'%'))
    -- A shop that sells a chain's goods without carrying its sign. One dealer holds two
    -- franchises and appears in both chains' published lists; the importer records the
    -- second as a brand this shop carries rather than adding the shop twice, and that record
@@ -835,7 +850,7 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
  -- branch a kilometre from the door, because the Ankara branch's name is longer and
  -- scattered the two words further apart. Rounding it was not enough; it is gone, and the
  -- phrase test that replaces it says something a person would recognise as a reason.
- CASE WHEN $7<>'' AND s.compact_name LIKE '%'||$7||'%' THEN 0 ELSE 1 END,
+ CASE WHEN $7<>'' AND (s.compact_name LIKE $7||'%' OR s.compact_name LIKE '%'||$7) THEN 0 ELSE 1 END,
  CASE WHEN $2::float8 IS NULL THEN 0 ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,
  -- With no location to sort by -- a search made before the visitor has shared one -- the
  -- index's own score is still better than an arbitrary order.

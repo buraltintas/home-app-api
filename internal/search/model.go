@@ -1333,13 +1333,27 @@ func containsNameHit(results []Result) bool {
 	return false
 }
 
-func withinLocalHorizon(results []Result) []Result {
+// localOnly is the horizon applied plainly, with nothing kept back.
+func localOnly(results []Result) []Result {
 	local := make([]Result, 0, len(results))
 	for _, r := range results {
 		if r.DistanceMeters == nil || *r.DistanceMeters <= localHorizonMeters {
 			local = append(local, r)
 		}
 	}
+	return local
+}
+
+// withinLocalHorizon is the horizon with a floor under it: a thin answer in a small town is
+// widened rather than left nearly empty.
+//
+// The floor is for a category search and only for one. A search that names a shop was being
+// widened by it too, and that is a different thing entirely: there, "only two nearby" is not
+// a thin answer, it is the answer. A search for Samsung from Antalya found one in Antalya,
+// two results in all, fell under the floor, and so kept a branch in Ankara 379 km away --
+// past the rule that exists to stop exactly that.
+func withinLocalHorizon(results []Result) []Result {
+	local := localOnly(results)
 	if len(local) < minLocalResults {
 		return results
 	}

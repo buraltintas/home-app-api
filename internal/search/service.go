@@ -357,9 +357,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// the name is the nearest one anywhere worth showing -- which is the case the loosened
 	// rule was written for in the first place.
 	if in.Latitude != nil {
-		near := withinLocalHorizon(results)
-		if intent.StoreName == "" || containsNameHit(near) {
-			results = near
+		if intent.StoreName == "" {
+			results = withinLocalHorizon(results)
+		} else if local := localOnly(results); containsNameHit(local) {
+			// Plainly, with no floor under it. The floor widens a thin answer, which is
+			// right for a category and wrong for a name: the shop was found where the
+			// reader is, and a second branch four provinces away is not more of the answer.
+			results = local
 		}
 	}
 	rankResults(results, in.Latitude != nil, intent.StoreName != "")
