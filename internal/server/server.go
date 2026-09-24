@@ -621,7 +621,11 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 	// the rating; showing five under a heading that says twenty is the page contradicting
 	// itself, which is exactly how this was reported. Fifty is the ceiling -- far beyond
 	// anything in the catalogue today, and the count above still tells the truth past it.
-	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 50)
+	// Every review the shop has, near enough. It was five, which was chosen when a shop
+	// with five reviews was a busy one; then fifty, which is a different arbitrary number.
+	// A shop's page is the place its reviews live, so the number is set where a page stops
+	// being readable rather than where the query starts to cost something.
+	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

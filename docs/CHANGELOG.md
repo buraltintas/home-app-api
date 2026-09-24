@@ -6,6 +6,12 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A shop's page shows every review it has, not the first fifty
+
+Five, then fifty, and both were numbers chosen when somebody happened to be looking. A
+shop's page is where its reviews live, so the limit is set where a page stops being readable
+rather than where a query starts to cost something. Two hundred.
+
 ## A category the catalogue carries could not be searched for, and its name went somewhere worse
 
 Reported as "why do you show Paşabahçe under garden". Reproduced: searching "bahçe" answered
