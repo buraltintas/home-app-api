@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -20,6 +22,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/media"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/observability"
+	"github.com/burakaltintas/home-app-api/internal/readcache"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	searchpkg "github.com/burakaltintas/home-app-api/internal/search"
 	"github.com/burakaltintas/home-app-api/internal/security"
@@ -45,6 +48,73 @@ type Server struct {
 	report   *reporting.Service
 	feedback *feedback.Service
 	hashKey  []byte
+	// Answers to anonymous catalogue reads, kept in this process so that a crawl of the
+	// catalogue does not wake the database. See internal/readcache for why, and for the
+	// three rules that keep it honest.
+	reads *readcache.Cache
+}
+
+// SetReadCache hands the server its catalogue cache. Separate from the constructor because
+// a nil cache is a working configuration -- switched off, every read goes to the database,
+// which is exactly what happened before this existed.
+func (s *Server) SetReadCache(c *readcache.Cache) { s.reads = c }
+
+// cacheableRead reports whether this request may be answered from, or stored in, the shared
+// cache. Two conditions, and they are the design rather than an optimisation:
+//
+// Nobody is signed in. An answer that mentions the reader must never be shared, and a
+// reader who has just written something must never be shown a stored copy -- they are the
+// only person who would notice it was old.
+//
+// No coordinates. With them the answer carries a distance, which belongs to one reader
+// standing in one place. The page built on the server sends none; a browser asking "how far
+// is this from me" gets a fresh answer as before.
+func cacheableRead(r *http.Request) bool {
+	if viewer(r) != nil {
+		return false
+	}
+	return r.URL.Query().Get("latitude") == "" && r.URL.Query().Get("longitude") == ""
+}
+
+// storeGroup names everything stored about one shop, so a review dropped it whole.
+func storeGroup(id uuid.UUID) string { return "store:" + id.String() }
+
+// answer writes a JSON body that may have come from the cache, and stores it when it did
+// not. The body is the bytes that were sent, so what is served later is byte for byte what
+// was served before.
+func (s *Server) answer(w http.ResponseWriter, r *http.Request, key, group string, build func() (any, error)) {
+	if key != "" {
+		body, ok := s.reads.Get(key)
+		_, _, held, _ := s.reads.Stats()
+		observability.ReadCache(ok, held)
+		if ok {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("X-Cache", "hit")
+			w.WriteHeader(200)
+			_, _ = w.Write(body)
+			return
+		}
+	}
+	value, e := build()
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	body, e := json.Marshal(value)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	body = append(body, '\n')
+	if key != "" {
+		s.reads.Put(key, group, body)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if key != "" {
+		w.Header().Set("X-Cache", "miss")
+	}
+	w.WriteHeader(200)
+	_, _ = w.Write(body)
 }
 
 // RuntimeConfig contains the small, non-secret subset of deployment settings
@@ -55,7 +125,7 @@ type RuntimeConfig struct {
 }
 
 func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, lo *locationpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, lo, u, m, ad, rp, fb, hashKey}
+	return &Server{db, a, st, so, se, lo, u, m, ad, rp, fb, hashKey, nil}
 }
 
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
@@ -592,12 +662,21 @@ func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	items, e := s.stores.Nearby(r.Context(), id, queryInt(r, "limit", 6))
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
+	limit := queryInt(r, "limit", 6)
+	// Which shops are near this one does not depend on who is asking or where they are
+	// standing: it is measured from the shop. So the answer is the same bytes for everybody
+	// who asks in the same language for the same number of them.
+	key := ""
+	if cacheableRead(r) {
+		key = fmt.Sprintf("nearby|%s|%s|%d", id, i18n.FromContext(r.Context()), limit)
 	}
-	JSON(w, 200, map[string]any{"items": items})
+	s.answer(w, r, key, storeGroup(id), func() (any, error) {
+		items, e := s.stores.Nearby(r.Context(), id, limit)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"items": items}, nil
+	})
 }
 
 func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
@@ -612,25 +691,27 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
-	x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
+	// Answered from this process when nobody is signed in and no coordinates were sent --
+	// which is every page built on the server, and so every crawl. See internal/readcache.
+	key := ""
+	if cacheableRead(r) {
+		key = fmt.Sprintf("store|%s|%s", id, i18n.FromContext(r.Context()))
 	}
-	// Every review this shop has, not the last five. The page prints the true count beside
-	// the rating; showing five under a heading that says twenty is the page contradicting
-	// itself, which is exactly how this was reported. Fifty is the ceiling -- far beyond
-	// anything in the catalogue today, and the count above still tells the truth past it.
-	// Every review the shop has, near enough. It was five, which was chosen when a shop
-	// with five reviews was a busy one; then fifty, which is a different arbitrary number.
-	// A shop's page is the place its reviews live, so the number is set where a page stops
-	// being readable rather than where the query starts to cost something.
-	posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
-	JSON(w, 200, map[string]any{"store": x, "recent_posts": posts})
+	s.answer(w, r, key, storeGroup(id), func() (any, error) {
+		x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
+		if e != nil {
+			return nil, e
+		}
+		// Every review the shop has, near enough. It was five, which was chosen when a shop
+		// with five reviews was a busy one; then fifty, which is a different arbitrary
+		// number. A shop's page is the place its reviews live, so the number is set where a
+		// page stops being readable rather than where the query starts to cost something.
+		posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"store": x, "recent_posts": posts}, nil
+	})
 }
 func (s *Server) postDetail(w http.ResponseWriter, r *http.Request) {
 	id, e := parseID(r)
@@ -923,6 +1004,8 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	// Written, so the copy of this shop's page held here is wrong from this moment.
+	s.reads.Drop(storeGroup(in.StoreID))
 	if in.OriginSearchID != nil && in.OriginSearchResultID != nil {
 		_ = s.search.Attribute(r.Context(), *in.OriginSearchID, *in.OriginSearchResultID, p.UserID, in.StoreID, "review_created", "review:"+id.String())
 	}
@@ -951,7 +1034,13 @@ func (s *Server) verifyStoreVisit(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusCreated, verification)
 }
 func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
-	s.idAction(w, r, func(p, id uuid.UUID) error { return s.social.DeletePost(r.Context(), p, id) })
+	s.idAction(w, r, func(p, id uuid.UUID) error {
+		store, e := s.social.DeletePost(r.Context(), p, id)
+		// The shop's page is held for anonymous readers and says how many reviews it has.
+		// A deleted review leaves it now rather than when the entry ages out.
+		s.reads.Drop(storeGroup(store))
+		return e
+	})
 }
 func (s *Server) like(w http.ResponseWriter, r *http.Request) {
 	s.idAction(w, r, func(p, id uuid.UUID) error { return s.social.Like(r.Context(), p, id, true) })
@@ -981,6 +1070,10 @@ func (s *Server) favoriteAction(w http.ResponseWriter, r *http.Request, add bool
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
+	}
+	if changed {
+		// "Kaydedenler" is on the page, so the page has changed.
+		s.reads.Drop(storeGroup(storeID))
 	}
 	searchID, se := uuid.Parse(r.Header.Get("X-Origin-Search-ID"))
 	resultID, re := uuid.Parse(r.Header.Get("X-Origin-Search-Result-ID"))

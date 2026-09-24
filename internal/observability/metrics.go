@@ -25,7 +25,11 @@ var (
 	providerRequests = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_provider_requests_total", Help: "External provider calls by bounded provider and outcome."}, []string{"provider", "outcome"})
 	providerDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: brand.MetricsNamespace + "_provider_request_duration_seconds", Help: "External provider call latency.", Buckets: prometheus.DefBuckets}, []string{"provider"})
 	workerJobs       = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_jobs_total", Help: "Background jobs by worker and outcome."}, []string{"worker", "outcome"})
-	workerRetries    = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
+	// A cache nobody can see the hit rate of is a cache nobody can tell is working, and
+	// this one is the difference between a database that sleeps and one that does not.
+	readCache      = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_read_cache_total", Help: "Anonymous catalogue reads answered from this process, by outcome."}, []string{"outcome"})
+	readCacheBytes = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_read_cache_bytes", Help: "Bytes currently held as cached catalogue answers."})
+	workerRetries  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
 	// What the search sufficiency gate decided, and why. The decision counter gives the
 	// Local Only Rate and the Places Fallback Rate; the reason counter says which of the
 	// gate's four conditions is driving the calls that remain, which is the difference
@@ -39,7 +43,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, searchGate, searchGateReason, searchShadow, searchStage)
+	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, readCache, readCacheBytes, searchGate, searchGateReason, searchShadow, searchStage)
 }
 
 type statusWriter struct {
@@ -131,6 +135,16 @@ func SearchStage(stage string, elapsed time.Duration) {
 func Provider(provider, outcome string, elapsed time.Duration) {
 	providerRequests.WithLabelValues(provider, outcome).Inc()
 	providerDuration.WithLabelValues(provider).Observe(elapsed.Seconds())
+}
+
+// ReadCache records whether an anonymous catalogue read was answered without the database.
+func ReadCache(hit bool, bytes int) {
+	outcome := "miss"
+	if hit {
+		outcome = "hit"
+	}
+	readCache.WithLabelValues(outcome).Inc()
+	readCacheBytes.Set(float64(bytes))
 }
 
 func Worker(worker, outcome string, retry bool) {

@@ -53,11 +53,22 @@ type Config struct {
 	// tuning variables never pays the provider for an answer already held in PostgreSQL.
 	// The switch remains as an emergency rollback control.
 	SearchRetentionDays, SearchLocationRetentionDays, VisitorRetentionDays int
-	MetricsToken                                                           string
-	AdminEmails                                                            []string
-	OTELEnabled                                                            bool
-	OTLPEndpoint                                                           string
-	DefaultLocale                                                          i18n.Locale
+	// How long an anonymous catalogue answer is held in the API process, and how much of
+	// it. Zero for either switches the whole thing off and every read goes to the database
+	// again, which is what it did before this existed.
+	//
+	// The lifetime is the staleness budget, and it buys sleep directly: the database can
+	// only suspend itself after five quiet minutes, so a short lifetime keeps waking it for
+	// answers it has already given. It is bounded above by something else anyway -- the web
+	// holds a shop's page for a day -- so an anonymous reader is not made to wait longer
+	// than they already were.
+	ReadCacheTTL   time.Duration
+	ReadCacheBytes int
+	MetricsToken   string
+	AdminEmails    []string
+	OTELEnabled    bool
+	OTLPEndpoint   string
+	DefaultLocale  i18n.Locale
 }
 
 func Load() (Config, error) {
@@ -181,6 +192,15 @@ func Load() (Config, error) {
 	// A shadow call costs what a real one costs. Sampling everything would spend the
 	// whole saving on proving it, so the rate is capped well below that.
 	if c.SearchRetentionDays, err = integer("SEARCH_RETENTION_DAYS", 365); err != nil {
+		return c, err
+	}
+	if c.ReadCacheTTL, err = duration("READ_CACHE_TTL", 6*time.Hour); err != nil {
+		return c, err
+	}
+	// Thirty megabytes holds the whole catalogue as it is today -- 11,252 shops, most of
+	// them answering in under a kilobyte. Sixty-four leaves room for it to grow and for the
+	// handful of shops with reviews, inside a container with 512.
+	if c.ReadCacheBytes, err = integer("READ_CACHE_BYTES", 64<<20); err != nil {
 		return c, err
 	}
 	if c.SearchLocationRetentionDays, err = integer("SEARCH_LOCATION_RETENTION_DAYS", 30); err != nil {

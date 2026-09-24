@@ -784,28 +784,32 @@ func (s *Service) DeleteComment(ctx context.Context, user, comment uuid.UUID) er
 	}
 	return tx.Commit(ctx)
 }
-func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) error {
+
+// DeletePost returns the shop the review belonged to. The caller needs it: a shop's page is
+// held in this process for anonymous readers, and a review that has gone has to go from
+// there too rather than waiting out its lifetime.
+func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) (uuid.UUID, error) {
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
-		return e
+		return uuid.Nil, e
 	}
 	defer tx.Rollback(ctx)
 	var store uuid.UUID
 	e = tx.QueryRow(ctx, `UPDATE posts SET deleted_at=now() WHERE id=$1 AND user_id=$2 AND deleted_at IS NULL RETURNING store_id`, post, user).Scan(&store)
 	if errors.Is(e, pgx.ErrNoRows) {
-		return httpapi.E(404, "POST_NOT_FOUND", "Post not found or not owned by you")
+		return uuid.Nil, httpapi.E(404, "POST_NOT_FOUND", "Post not found or not owned by you")
 	}
 	if e != nil {
-		return e
+		return uuid.Nil, e
 	}
 	_, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg,updated_at=now() FROM (SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL) x WHERE ss.store_id=$1`, store)
 	if e != nil {
-		return e
+		return uuid.Nil, e
 	}
 	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.PostDeleted, IdempotencyKey: "post-deleted:" + post.String(), UserID: &user, StoreID: &store, PostID: &post}); e != nil {
-		return e
+		return uuid.Nil, e
 	}
-	return tx.Commit(ctx)
+	return store, tx.Commit(ctx)
 }
 
 var _ = fmt.Sprintf

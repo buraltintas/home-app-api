@@ -6,6 +6,39 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Reading the catalogue no longer wakes the database
+
+The database suspends itself after five quiet minutes and is billed for the hours it stays
+awake. It never got five quiet minutes: measured over a full day, all 288 five-minute windows
+carried traffic, and the longest silence in four daytime hours was eighteen seconds.
+
+Blocking crawlers did not fix that and could not. Replaying four daytime hours with every
+rule-ignoring agent removed, and then all datacentre address space as well, still left a
+request every six seconds and not one gap. The traffic is not the lever.
+
+The lever is that these requests stop reaching Postgres. 69% of them are one shop's page
+being built -- its details and the shops near it -- and the same four hours replayed with
+catalogue reads answered from the API process leaves 302 requests instead of 3,817, with
+three gaps worth 107 minutes. 45% of the window asleep, where today there is none.
+
+What makes it affordable is a fact about this catalogue: of 11,252 shops, eleven have a
+review. Every other shop's page is the same bytes each time it is asked for, and all of them
+together are about thirty megabytes.
+
+Three rules keep it honest. Only anonymous reads are stored, so an answer that mentions the
+reader never is -- the page is already built that way, with whether you saved a shop fetched
+by the browser afterwards. A reader who is signed in never reads from it, which is what lets
+the lifetime be long: whoever would notice a stale page is whoever wrote something, and they
+are signed in, while the crawlers that fill it are not. And a write drops what it changed on
+the spot -- a review written or deleted, a shop saved or unsaved.
+
+The limits, plainly. Other instances of the process cannot be told about a write, because
+the usual way of telling them holds a connection open to the database and would defeat the
+whole point; they expire by time instead, `READ_CACHE_TTL`, six hours by default and
+bounded anyway by the day the web already holds a shop's page for. A like or a comment on a
+review changes a number inside a stored page and does not drop it; it ages out. Setting the
+lifetime or the budget to zero switches the whole thing off.
+
 ## A search for Samsung answered with two carpet shops in Samsun
 
 Both faults are in the same clause, and both come from closing up the spaces in a name.
