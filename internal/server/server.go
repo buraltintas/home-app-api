@@ -108,6 +108,11 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request, key string, buil
 		WriteError(w, e, r.Context())
 		return
 	}
+	// An empty group means the build decided this answer must not be stored, whatever the
+	// caller thought when it made the key.
+	if group == "" {
+		key = ""
+	}
 	body, e := json.Marshal(value)
 	if e != nil {
 		WriteError(w, e, r.Context())
@@ -715,6 +720,16 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
 		if e != nil {
 			return nil, "", e
+		}
+		// A shop with reviews is not stored at all, and the exception is smaller than it
+		// sounds: eleven shops in a catalogue of 11,252 have one. Everything on a shop's
+		// page that somebody would notice going stale is a review or a number derived from
+		// reviews, and a write can only drop this copy in the process it arrived at -- with
+		// several running, the page rebuilt after a review could still be handed an old
+		// answer by another one. Rather than make that unlikely, the eleven pages where it
+		// would matter are left out.
+		if x.Platform.ReviewCount > 0 {
+			return map[string]any{"store": x, "recent_posts": posts}, "", nil
 		}
 		return map[string]any{"store": x, "recent_posts": posts}, storeGroup(id), nil
 	})

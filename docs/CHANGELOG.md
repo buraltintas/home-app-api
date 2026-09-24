@@ -38,6 +38,13 @@ consulted after that step would have left one query per request -- and one query
 seconds is all it takes to keep the database from ever suspending itself. On a hit nothing
 is resolved at all.
 
+A shop that has reviews is not stored at all, and the exception is smaller than it sounds:
+eleven of 11,252. Everything on a shop's page that somebody would notice going stale is a
+review or a number derived from one, and a write can only drop this copy in the process it
+reached -- with several running, the page rebuilt straight after a review could still be
+handed an old answer by another. Rather than make that unlikely, the eleven pages where it
+would matter are left out.
+
 The limits, plainly. Other instances of the process cannot be told about a write, because
 the usual way of telling them holds a connection open to the database and would defeat the
 whole point; they expire by time instead, `READ_CACHE_TTL`, six hours by default and
