@@ -27,7 +27,7 @@ type Intent struct {
 	NormalizedQuery string      `json:"normalized_query"`
 	StoreName       string      `json:"store_name"`
 	LocationText    string      `json:"location_text"`
-	Categories      []string    `json:"categories" jsonschema:"enum=furniture,enum=home_textile,enum=lighting,enum=decoration,enum=kitchenware,enum=bathroom,enum=carpet,enum=curtain,enum=bedding,enum=tableware,enum=home_accessories,enum=household,enum=major_appliances,enum=small_appliances"`
+	Categories      []string    `json:"categories" jsonschema:"enum=furniture,enum=home_textile,enum=lighting,enum=decoration,enum=kitchenware,enum=bathroom,enum=carpet,enum=curtain,enum=bedding,enum=tableware,enum=home_accessories,enum=household,enum=major_appliances,enum=small_appliances,enum=garden"`
 	ProductTerms    []string    `json:"product_terms"`
 	StyleTerms      []string    `json:"style_terms"`
 	PriceIntent     string      `json:"price_intent" jsonschema:"enum=,enum=budget,enum=midrange,enum=premium"`
@@ -286,6 +286,17 @@ var homeConcepts = []homeConcept{
 	{"home_textile", "furnishing", []string{"mefruşat", "mefrusat", "döşemelik", "dosemelik", "kumaş", "kumas"}, nil},
 	{"bedding", "sleep_centre", []string{"uyku merkezi", "yatak merkezi"}, nil},
 	{"household", "diy", []string{"yapı market", "yapi market", "hırdavat", "hirdavat"}, nil},
+	// Garden is a category this catalogue has carried all along -- a garden centre or a
+	// plant nursery lands in it from the provider's own types -- and no search could ask
+	// for it: the word was in none of these tables, missing from the model's list of
+	// categories, and missing from the list that survives validation. A category nobody can
+	// ask for is bad enough; worse is where the word went instead. "Bahçe" fell through to
+	// the store-name path, and a name-led search drops the radius -- so it answered with
+	// every Paşabahçe in the country, because "bahçe" is inside that name.
+	//
+	// Only the phrases go here. The bare word belongs with the whole-word terms below, for
+	// exactly the reason above: found inside a word it names a glassware chain, not a garden.
+	{"garden", "garden", []string{"bahçe mobilya", "bahce mobilya", "bahçe mobilyası", "bahce mobilyasi", "garden furniture", "outdoor furniture", "gartenmöbel", "gartenmobel", "садовая мебель"}, nil},
 }
 
 // Generic words that name a home store without naming a product. These are matched as
@@ -300,6 +311,25 @@ var homeConcepts = []homeConcept{
 var homeWordConcepts = []homeConcept{
 	{"home_accessories", "home_goods", []string{"home", "homeware", "home goods", "ev aksesuar", "ev aksesuarları", "ev aksesuarlari", "züccaciye", "zuccaciye", "ev gereçleri", "ev gerecleri", "haushaltswaren", "wohnaccessoires", "товары для дома"}, nil},
 	{"home_textile", "home_textile", []string{"ev tekstil", "ev tekstili", "home textile"}, nil},
+}
+
+// The catalogue's own category names, in the words a shopper would type them in.
+//
+// Separate from the two tables above, and the separation is the point. Those hold the words
+// a trade puts on its signs, which is why "home" belongs there -- it names half the home
+// stores in the country and none of them is a category. These name a category and nothing
+// else, so a query made of nothing but one of them is a request for that category rather
+// than for a shop with that name.
+//
+// Matched as whole words, always. That is what the table exists to guarantee: "bahçe" found
+// inside a word is a glassware chain, and reading it as a garden search answered with every
+// Paşabahçe in the country.
+//
+// A category whose name is already a term above needs no row here -- "halı", "perde",
+// "mobilya" and the rest are all found by the phrase table. Garden was the one category
+// whose name was in none of them, which is how it became unaskable.
+var categoryWordConcepts = []homeConcept{
+	{"garden", "garden", []string{"bahçe", "bahce", "garden", "garten", "сад"}, nil},
 }
 
 // containsWord reports whether the term appears as a whole word. A letter on either side
@@ -455,9 +485,15 @@ func Deterministic(raw string) Intent {
 		i.Categories = appendUnique(i.Categories, "bedding")
 		i.ProductTerms = appendUnique(i.ProductTerms, "bedding_set")
 	}
-	for _, concept := range homeConcepts {
-		for _, term := range concept.terms {
-			if containsNormalized(n, folded, term) {
+	// Two tables, each with the match it was written for: a phrase may be found inside a
+	// longer word, a category's own name may not. Only the phrase table was read here, so a
+	// category whose name is a single word -- garden -- could not be asked for at all.
+	classify := func(concepts []homeConcept, fits func(string) bool) {
+		for _, concept := range concepts {
+			for _, term := range concept.terms {
+				if !fits(term) {
+					continue
+				}
 				i.Categories = appendUnique(i.Categories, concept.category)
 				// Extra categories describe what a store also sells, not what a shopper
 				// requested. A white-goods dealer carries kettles; a kettle retailer is not
@@ -472,6 +508,8 @@ func Deterministic(raw string) Intent {
 			}
 		}
 	}
+	classify(categoryWordConcepts, func(term string) bool { return containsWord(n, folded, term) })
+	classify(homeConcepts, func(term string) bool { return containsNormalized(n, folded, term) })
 	if i.StoreName != "" || len(i.Categories) > 0 || len(i.ProductTerms) > 0 {
 		i.Scope = ScopeHomeLiving
 	} else if containsAnyFolded(n, folded, "lastikçi", "lastikci", "lastik", "tire shop", "tyre shop", "reifen", "шиномонтаж", "restoran", "restaurant", "kuaför", "kuafor", "berber", "hairdresser", "eczane", "pharmacy", "oto servis", "car repair", "elektrikçi", "elektrikci", "electrician", "elektrik tesisat", "elektrik arıza", "elektrik ariza", "elektrik faturası", "elektrik faturasi") {
@@ -644,9 +682,35 @@ func genericStoreName(name string) bool {
 		matched = true
 		remaining = strings.ReplaceAll(remaining, term, " ")
 	}
+	// The same, for terms that only count as a whole word. Rebuilt from the fields rather
+	// than replaced in place, so "bahçe" leaves "Paşabahçe" alone.
+	stripWord := func(term string) {
+		term = foldLatin(normalizeText(term))
+		if term == "" {
+			return
+		}
+		kept := make([]string, 0, 8)
+		for _, field := range strings.Fields(remaining) {
+			if field == term {
+				matched = true
+				continue
+			}
+			kept = append(kept, field)
+		}
+		remaining = strings.Join(kept, " ")
+	}
 	for _, concept := range homeConcepts {
 		for _, term := range concept.terms {
 			strip(term)
+		}
+	}
+	// And the category names, stripped a word at a time. Without this a query that is
+	// nothing but a category name -- "bahçe" -- was not recognised as the thing being
+	// looked for, so it was taken as a shop's name, which drops the radius and answers
+	// with every shop in the country whose sign contains the word.
+	for _, concept := range categoryWordConcepts {
+		for _, term := range concept.terms {
+			stripWord(term)
 		}
 	}
 	if !matched {
@@ -700,7 +764,7 @@ func Validate(i Intent) error {
 	if i.QueryLanguage != "" && !i18n.IsSupported(i.QueryLanguage) {
 		return fmt.Errorf("unsupported query language")
 	}
-	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "home_accessories": true, "household": true, "major_appliances": true, "small_appliances": true}
+	allowedCat := map[string]bool{"furniture": true, "home_textile": true, "lighting": true, "decoration": true, "kitchenware": true, "bathroom": true, "carpet": true, "curtain": true, "bedding": true, "tableware": true, "home_accessories": true, "household": true, "major_appliances": true, "small_appliances": true, "garden": true}
 	if utf8.RuneCountInString(i.NormalizedQuery) > 500 || utf8.RuneCountInString(i.StoreName) > 160 || utf8.RuneCountInString(i.LocationText) > 120 {
 		return fmt.Errorf("intent text too long")
 	}
@@ -1021,10 +1085,12 @@ var tradeNameTerms = map[string]bool{
 // "clothing_store" were both about to be struck off a catalogue their own signs qualify
 // them for.
 func namesAProduct(normalized, folded string) bool {
-	for _, concept := range homeWordConcepts {
-		for _, term := range concept.terms {
-			if !tradeNameTerms[term] && containsWord(normalized, folded, term) {
-				return true
+	for _, concepts := range [2][]homeConcept{homeWordConcepts, categoryWordConcepts} {
+		for _, concept := range concepts {
+			for _, term := range concept.terms {
+				if !tradeNameTerms[term] && containsWord(normalized, folded, term) {
+					return true
+				}
 			}
 		}
 	}
@@ -1149,11 +1215,13 @@ func StoreCategories(name string, types []string) []string {
 		}
 		add(googleTypeCategories[t])
 	}
-	for _, concept := range homeWordConcepts {
-		for _, term := range concept.terms {
-			if containsWord(normalized, folded, term) {
-				add(concept.category)
-				break
+	for _, concepts := range [2][]homeConcept{homeWordConcepts, categoryWordConcepts} {
+		for _, concept := range concepts {
+			for _, term := range concept.terms {
+				if containsWord(normalized, folded, term) {
+					add(concept.category)
+					break
+				}
 			}
 		}
 	}

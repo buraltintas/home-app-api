@@ -347,3 +347,43 @@ func TestAProductWordIsNotAStoreName(t *testing.T) {
 		t.Error("an empty name is nothing to strip")
 	}
 }
+
+// A category the catalogue carries has to be askable by its own name, and its name must
+// not fall through to the store-name path: "bahçe" inside "Paşabahçe" answered a search
+// for garden shops with a glassware chain.
+func TestCategoryNameIsACategoryNotAStoreName(t *testing.T) {
+	for _, query := range []string{"bahçe", "Bahçe", "bahce", "garden"} {
+		i := Deterministic(query)
+		if !containsString(i.Categories, "garden") {
+			t.Fatalf("%q did not classify as garden: %v", query, i.Categories)
+		}
+		if !genericStoreName(query) {
+			t.Fatalf("%q was taken for a shop's name", query)
+		}
+	}
+}
+
+// And the reason the bare word is matched as a word: found inside one, it names a
+// glassware chain rather than a garden.
+func TestGardenWordDoesNotClaimPasabahce(t *testing.T) {
+	for _, name := range []string{"Paşabahçe", "Paşabahçe Mağazaları - MarkAntalya AVM"} {
+		if got := StoreCategories(name, nil); containsString(got, "garden") {
+			t.Fatalf("%q classified as garden: %v", name, got)
+		}
+		if genericStoreName(name) {
+			t.Fatalf("%q should still be a shop's name", name)
+		}
+	}
+	if got := StoreCategories("Neo Garden Bahçe Mobilyaları", nil); !containsString(got, "garden") {
+		t.Fatalf("a garden furniture shop should be garden: %v", got)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}

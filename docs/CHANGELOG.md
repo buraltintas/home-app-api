@@ -6,6 +6,31 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A category the catalogue carries could not be searched for, and its name went somewhere worse
+
+Reported as "why do you show Paşabahçe under garden". Reproduced: searching "bahçe" answered
+with every Paşabahçe in the country.
+
+The cause is not in the data. `garden` has been a category since the start -- a garden centre
+or a plant nursery lands in it from the provider's own types -- but the word was missing from
+three places in search at once: the list of categories the model may return, the list that
+survives validation, and the concept tables the deterministic path reads. No search could ask
+for it.
+
+What made it a visible fault rather than a quiet gap is where the word went instead. With no
+category to be, "bahçe" was taken for a shop's name, and a name-led search drops the radius
+filter -- so it lifted every shop whose sign contains those letters, above every shop nearby.
+"Bahçe" is inside "Paşabahçe".
+
+Garden is askable now, and the bare word is matched as a whole word. That distinction has its
+own table: the two that existed hold the words a trade puts on its signs -- which is why
+"home" belongs there and reading it as a query turned "English Home" into a category search,
+as a test has guarded since. A category's own name is a different kind of word and now says so.
+
+White goods got the same treatment for the same reason: the brand register held no
+major_appliances brand at all, so every Arçelik, Vestel and Bosch dealer showed a blank where
+a mark belongs. Seven are registered now.
+
 ## The admin panel posted a sign-in code to anybody whose address was typed into it
 
 /admin is a public address, and its sign-in form called the ordinary email endpoint. So

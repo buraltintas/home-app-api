@@ -761,3 +761,50 @@ brands:
     website: https://www.cam-hali.com
     tier: 3
     categories: [carpet, home_textile]
+
+  # White goods. The catalogue has carried a major_appliances category from the start and
+  # this register held not one brand for it, which is why every Arçelik, Vestel and Bosch
+  # dealer in the country showed a blank where a mark belongs -- 83 shops whose sign is a
+  # brand name we did not know. They are dealers rather than company shops, which is the
+  # same footing the home brands are lent their mark on: the sign says what is sold inside.
+  - slug: arcelik
+    name: Arçelik
+    website: https://www.arcelik.com.tr
+    tier: 1
+    categories: [major_appliances, small_appliances]
+
+  - slug: vestel
+    name: Vestel
+    website: https://www.vestel.com.tr
+    tier: 1
+    categories: [major_appliances, small_appliances]
+
+  - slug: bosch
+    name: Bosch
+    website: https://www.bosch-home.com.tr
+    tier: 1
+    categories: [major_appliances, small_appliances]
+
+  - slug: beko
+    name: Beko
+    website: https://www.beko.com.tr
+    tier: 1
+    categories: [major_appliances, small_appliances]
+
+  - slug: siemens
+    name: Siemens
+    website: https://www.siemens-home.bsh-group.com/tr
+    tier: 2
+    categories: [major_appliances, small_appliances]
+
+  - slug: profilo
+    name: Profilo
+    website: https://www.profilo.com
+    tier: 2
+    categories: [major_appliances, small_appliances]
+
+  - slug: arzum
+    name: Arzum
+    website: https://www.arzum.com.tr
+    tier: 3
+    categories: [small_appliances]
