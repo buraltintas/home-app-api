@@ -32,6 +32,12 @@ the lifetime be long: whoever would notice a stale page is whoever wrote somethi
 are signed in, while the crawlers that fill it are not. And a write drops what it changed on
 the spot -- a review written or deleted, a shop saved or unsaved.
 
+One detail decides whether any of it works: the key is built from the reference in the URL,
+not from the id it resolves to. Resolving a slug is itself a database query, so a cache
+consulted after that step would have left one query per request -- and one query every few
+seconds is all it takes to keep the database from ever suspending itself. On a hit nothing
+is resolved at all.
+
 The limits, plainly. Other instances of the process cannot be told about a write, because
 the usual way of telling them holds a connection open to the database and would defeat the
 whole point; they expire by time instead, `READ_CACHE_TTL`, six hours by default and

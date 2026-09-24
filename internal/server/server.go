@@ -82,7 +82,15 @@ func storeGroup(id uuid.UUID) string { return "store:" + id.String() }
 // answer writes a JSON body that may have come from the cache, and stores it when it did
 // not. The body is the bytes that were sent, so what is served later is byte for byte what
 // was served before.
-func (s *Server) answer(w http.ResponseWriter, r *http.Request, key, group string, build func() (any, error)) {
+// The key is built from the reference in the URL, not from the id it resolves to, and that
+// is not a detail. Resolving a slug is itself a database query, so a cache consulted after
+// it would leave one query per request -- and one query every few seconds is all it takes to
+// keep the database from ever suspending itself. On a hit nothing is resolved at all.
+//
+// The group is learned from the build instead, which is the only place the shop's identity
+// is known for certain. A shop reached by slug and by uuid is stored twice under one group,
+// so a write drops both.
+func (s *Server) answer(w http.ResponseWriter, r *http.Request, key string, build func() (any, string, error)) {
 	if key != "" {
 		body, ok := s.reads.Get(key)
 		_, _, held, _ := s.reads.Stats()
@@ -95,7 +103,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request, key, group strin
 			return
 		}
 	}
-	value, e := build()
+	value, group, e := build()
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -657,34 +665,28 @@ func (s *Server) storeIndex(w http.ResponseWriter, r *http.Request) {
 // the search log, and a block rendered on every store page would have filled the log with
 // searches nobody performed.
 func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
-	id, e := parseStoreRef(r, s)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
 	limit := queryInt(r, "limit", 6)
 	// Which shops are near this one does not depend on who is asking or where they are
 	// standing: it is measured from the shop. So the answer is the same bytes for everybody
 	// who asks in the same language for the same number of them.
 	key := ""
 	if cacheableRead(r) {
-		key = fmt.Sprintf("nearby|%s|%s|%d", id, i18n.FromContext(r.Context()), limit)
+		key = fmt.Sprintf("nearby|%s|%s|%d", chi.URLParam(r, "id"), i18n.FromContext(r.Context()), limit)
 	}
-	s.answer(w, r, key, storeGroup(id), func() (any, error) {
+	s.answer(w, r, key, func() (any, string, error) {
+		id, e := parseStoreRef(r, s)
+		if e != nil {
+			return nil, "", e
+		}
 		items, e := s.stores.Nearby(r.Context(), id, limit)
 		if e != nil {
-			return nil, e
+			return nil, "", e
 		}
-		return map[string]any{"items": items}, nil
+		return map[string]any{"items": items}, storeGroup(id), nil
 	})
 }
 
 func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
-	id, e := parseStoreRef(r, s)
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
-	}
 	lat, latErr := queryFloat(r, "latitude")
 	lon, lonErr := queryFloat(r, "longitude")
 	if latErr != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) {
@@ -695,12 +697,16 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 	// which is every page built on the server, and so every crawl. See internal/readcache.
 	key := ""
 	if cacheableRead(r) {
-		key = fmt.Sprintf("store|%s|%s", id, i18n.FromContext(r.Context()))
+		key = fmt.Sprintf("store|%s|%s", chi.URLParam(r, "id"), i18n.FromContext(r.Context()))
 	}
-	s.answer(w, r, key, storeGroup(id), func() (any, error) {
+	s.answer(w, r, key, func() (any, string, error) {
+		id, e := parseStoreRef(r, s)
+		if e != nil {
+			return nil, "", e
+		}
 		x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 		if e != nil {
-			return nil, e
+			return nil, "", e
 		}
 		// Every review the shop has, near enough. It was five, which was chosen when a shop
 		// with five reviews was a busy one; then fifty, which is a different arbitrary
@@ -708,9 +714,9 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		// page stops being readable rather than where the query starts to cost something.
 		posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
 		if e != nil {
-			return nil, e
+			return nil, "", e
 		}
-		return map[string]any{"store": x, "recent_posts": posts}, nil
+		return map[string]any{"store": x, "recent_posts": posts}, storeGroup(id), nil
 	})
 }
 func (s *Server) postDetail(w http.ResponseWriter, r *http.Request) {
