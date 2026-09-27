@@ -6,6 +6,67 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A dealer's shop is recognised when its sign and its registered name share nothing
+
+Vestel was imported: 1,154 dealers from Vestel's own finder. The first dry run said 1,135 of
+them were new, and that was wrong in a way nothing would have shown.
+
+A chain that sells through dealers publishes each dealer's registered company name --
+"UGS Elektronik Sanayi ve Ticaret Ltd. Şti." -- while the row we already held for the same
+door was written from the sign over it: "Vestel Antalya Muratpaşa Şarampol Yetkili Satış
+Mağazası". They stand nought metres apart and their name similarity is near zero. The matcher
+chose its one candidate by name, so it never looked at the row with the sign; the rule that
+recognises a shop signed with the chain's own name was right there and never got to run.
+Eight of the twenty-one Vestel shops we already held would have been listed a second time
+beside themselves. When the name settles nothing, the nearest unclaimed row signed with the
+chain's name -- as a word, so that "Taç" does not match "Ataç" -- is now asked for directly.
+Nineteen of the twenty-one match; the other two are a service point and a shop 552 m away,
+which should not.
+
+The second finding is the one worth knowing about. 131 of the rows to be added stood within
+thirty metres of another chain's shop, and they are two different things that look the same:
+one dealer selling two chains from one door (Çaykar sells Merinos and Vestel, two metres
+apart), and two shops side by side in a shopping centre (a Madame Coco and a Vestel in Maltepe
+Park). No rule on names and coordinates tells those apart -- the word the two names share is
+the dealer's name as often as it is the mall's: of the thirty-six that shared a rare word,
+two thirds were one dealer and a third were Armonipark, Akbatı and Vialand. So a row that
+shares a rare word with a shop within thirty metres is neither merged nor added; it goes to
+the review queue with the word and the shop named, and a person decides with the two side by
+side. "Rare" is measured on the catalogue itself, the way house words already are, not kept
+as a list: "mobilya" is in 2,353 names, "çaykar" in two.
+
+The apply found a gap the dry run could not. A row whose nearest match is a branch of the
+same chain written earlier in the same run -- which a dry run never sees, because it writes
+nothing -- took the "the chain lists these separately" path, and that path skipped the
+thirty-metre check. Four rows the dry run had held were added; three were right (mall
+neighbours in Armonipark, Anatolium, Bayramyeri) and one, Uğur Pazarlama in Şanlıurfa, was
+added four metres from the unbranded row that was already its door. That path now goes
+through the same check. The one twin it left is flagged for a merge from the panel.
+
+Result: 1,094 Vestel shops added, 19 existing rows adopted by the brand, 36 held for review,
+5 skipped as clothing departments; the catalogue went from 11,252 to 12,346. Afterwards: two
+Vestel-signed rows remain unbranded, a service point 463 m from any dealer and a shop 551 m
+from one, both correctly left alone.
+
+Banio Yapı Market publishes addresses and no points, and its first dry run would have added
+two of its five shops a second time: "Banio Yapı Market - Osmangazi Bursa Şubesi" scores
+under the name bar a pointless row must clear against the "Banio Yapı Market" we already held
+in Osmangazi. A row with no point next to a row in the same district signed with the chain's
+name is now held for a person rather than added -- not merged, because Banio has two shops in
+Muratpaşa and without a point nobody can say which one the old row was. One shop added
+(Isparta), four held.
+
+Six chains were looked at and are not imported, and the registry says why beside each so
+nobody spends the afternoon again: Arçelik and Beko sit behind a CDN that answers this fetcher
+with 403 on every path, robots.txt included; Bosch, Siemens and Profilo share one dealer
+finder that reads its data through the exact GraphQL pattern their robots.txt forbids;
+Bauhaus answers curl and refuses this fetcher, which is Cloudflare scoring the client. None of
+them is to be worked around. Bauhaus's nine shops are few enough to enter from the panel.
+
+The catalogue tool also takes `-timeout`. An import is one transaction, and Vestel's first
+apply -- a thousand dealers written from Turkey to a database in Frankfurt -- ran past the
+fixed half hour and was rolled back whole. The right failure, and still a wasted half hour.
+
 ## Reading the catalogue no longer wakes the database
 
 The database suspends itself after five quiet minutes and is billed for the hours it stays

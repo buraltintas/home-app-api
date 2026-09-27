@@ -233,3 +233,27 @@ func TestContainmentRecognisesADealerUnderTheChainsSign(t *testing.T) {
 		t.Fatal("a word this short must not stand for identity")
 	}
 }
+
+// The chain's name has to be on the sign as a word. Three letters of "Taç" sit inside
+// "Ataç", and a merge decided by a substring would give a Taç dealer's reviews to Ataç.
+func TestCarriesBrandWord(t *testing.T) {
+	cases := []struct {
+		name, brand string
+		want        bool
+	}{
+		{"Vestel Antalya Muratpaşa Şarampol Yetkili Satış Mağazası", "Vestel", true},
+		{"vestel Atakul Elektronik Cebesoy Satış Mağazası", "Vestel", true},
+		{"Arçelik-Vestel Bayi", "Vestel", true},
+		{"VESTEL UNCALI YETKİLİ SATIŞ MAĞAZASI", "Vestel", true},
+		{"Taç - Adıyaman Merkez Akıncıoğlu", "Taç", true},
+		{"Ataç Mobilya", "Taç", false},
+		{"Tacettin Ev Tekstili", "Taç", false},
+		{"English Home Kadıköy", "English Home", true},
+		{"UGS Elektronik Sanayi ve Ticaret", "Vestel", false},
+	}
+	for _, c := range cases {
+		if got := carriesBrandWord(c.name, c.brand); got != c.want {
+			t.Errorf("carriesBrandWord(%q, %q) = %v, want %v", c.name, c.brand, got, c.want)
+		}
+	}
+}

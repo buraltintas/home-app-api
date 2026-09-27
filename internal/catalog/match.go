@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/burakaltintas/home-app-api/internal/textnorm"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -31,6 +32,14 @@ const (
 	// Below merge, above this: a resemblance too strong to ignore and too weak to act on.
 	// These go to a person rather than being guessed at.
 	reviewSimilarity = 0.40
+	// A shop about to be added within this distance of another shop whose name shares a rare
+	// word with it is held for a person. It is the width of one frontage: close enough that
+	// two names sharing "Çaykar" are very probably one dealer's one door.
+	dealerMeters = 30
+	// A word found in more shop names than this is the trade's vocabulary or a big city's
+	// name, not a particular business's. Measured on the catalogue: "dayanikli" is in 317
+	// names and "mobilya" in 2,353; "caykar" and "altinoglu" are in two or three.
+	rareWordShops = 20
 )
 
 // Candidate is a store already in the catalogue that might be the row being imported.
@@ -57,6 +66,9 @@ type Matcher struct {
 	tx pgx.Tx
 	// Which existing stores this run has already spoken for.
 	claimed map[string]bool
+	// In how many shop names each word appears, read once per run the first time it is
+	// needed. It is what tells a business's own name from the words every business uses.
+	shopsWithWord map[string]int
 }
 
 func NewMatcher(tx pgx.Tx) *Matcher { return &Matcher{tx: tx, claimed: map[string]bool{}} }
@@ -117,9 +129,31 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	if e != nil {
 		return decision, e
 	}
+	// The shop may already be here under a name that shares nothing with the one being
+	// published. A chain that sells through dealers publishes the dealer's registered name --
+	// Vestel's list says "UGS Elektronik Sanayi ve Ticaret Ltd. Şti." -- while the row we
+	// already hold was written from the sign over the door: "Vestel Antalya Muratpaşa
+	// Şarampol Yetkili Satış Mağazası". The two stand nought metres apart and their name
+	// similarity is near zero, so the candidate above, chosen by name, is some other shop,
+	// and the rule further down that recognises a chain's own sign never gets to see the row
+	// that carries it. Measured on Vestel's first dry run: eight of the twenty-one Vestel
+	// shops we already held would have been listed a second time beside themselves.
+	//
+	// So when the name finds nothing it would merge with, the sign is asked for directly:
+	// the nearest unclaimed row within reach whose name carries this chain's name as a word.
+	// Only as a fallback, so every verdict the name already settles stays as it was.
+	if located(in) && !(found && m.settledByName(candidate, in, brand)) {
+		signed, ok, e := m.signedNearby(ctx, in, brand)
+		if e != nil {
+			return decision, e
+		}
+		if ok {
+			candidate, found = signed, true
+		}
+	}
 	if !found {
 		decision.Action, decision.Reason = ActionInserted, "no comparable store nearby"
-		return decision, nil
+		return m.holdSameDealer(ctx, in, brand, decision)
 	}
 	decision.Similarity, decision.Distance, decision.StoreID = candidate.Similarity, candidate.Distance, candidate.ID
 
@@ -150,7 +184,7 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 		decision.Action = ActionInserted
 		decision.Reason = fmt.Sprintf("nearest comparable store belongs to another brand (%q)", candidate.Name)
 		decision.StoreID = ""
-		return decision, nil
+		return m.holdSameDealer(ctx, in, brand, decision)
 	}
 
 	// The brand is the authority on which of its own shops are distinct. If the nearest
@@ -167,7 +201,12 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 		decision.Action = ActionInserted
 		decision.Reason = fmt.Sprintf("the brand lists this separately from %q", candidate.Name)
 		decision.StoreID = ""
-		return decision, nil
+		// The chain saying this is not that other branch of its own says nothing about the
+		// other chain's shop next door. Vestel's first apply let a dealer through here that a
+		// dry run had held: the nearest row was a Vestel branch written earlier in the same
+		// run, which a dry run never sees, and Uğur Pazarlama in Şanlıurfa was added four
+		// metres from the unbranded row that was already its door.
+		return m.holdSameDealer(ctx, in, brand, decision)
 	}
 
 	// A store already claimed by an earlier row of this same run must not be claimed
@@ -222,8 +261,159 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	default:
 		decision.Action, decision.Reason = ActionInserted, "nearest comparable store is not the same shop"
 		decision.StoreID = ""
+		return m.holdSameDealer(ctx, in, brand, decision)
 	}
 	return decision, nil
+}
+
+// holdSameDealer turns an insert into a question when the shop may already be here under
+// another chain's name.
+//
+// A dealer often sells more than one chain from one door. Vestel's list names a shop "Çay
+// Kar Day. Tük. Mall." and Merinos's names the same door "Çaykar Day. Tük. Ma." two metres
+// away; inserted, it would be the same shop twice under two signs. But two shops of two
+// chains two metres apart are just as often neighbours in a shopping centre, and a merge
+// would hand one shop's reviews to the other -- and nothing in a name tells those apart
+// reliably: the word they share is the dealer's name as often as it is the mall's. Measured
+// on Vestel's first run, thirty-six rows shared a rare word with a shop within thirty
+// metres; about two thirds were one dealer's door, a third were Armonipark, Akbatı and
+// Vialand. So the row is neither merged nor added. It goes to the review queue, with the
+// word and the shop that raised it, and a person decides with the two side by side.
+func (m *Matcher) holdSameDealer(ctx context.Context, in RawStore, brand BrandSpec, decision Decision) (Decision, error) {
+	if !located(in) {
+		return m.holdSignedInDistrict(ctx, in, brand, decision)
+	}
+	rows, e := m.tx.Query(ctx, `
+SELECT id::text, name, ST_Distance(location, ST_SetSRID(ST_MakePoint($2,$1),4326)::geography) AS metres
+FROM stores
+WHERE deleted_at IS NULL
+  AND ST_DWithin(location, ST_SetSRID(ST_MakePoint($2,$1),4326)::geography, $3)
+ORDER BY metres
+LIMIT 10`, *in.Latitude, *in.Longitude, float64(dealerMeters))
+	if e != nil {
+		return decision, e
+	}
+	type neighbour struct {
+		id, name string
+		metres   float64
+	}
+	var near []neighbour
+	for rows.Next() {
+		var n neighbour
+		if e = rows.Scan(&n.id, &n.name, &n.metres); e != nil {
+			rows.Close()
+			return decision, e
+		}
+		near = append(near, n)
+	}
+	rows.Close()
+	if e = rows.Err(); e != nil {
+		return decision, e
+	}
+	if len(near) == 0 {
+		return decision, nil
+	}
+	frequency, e := m.wordFrequency(ctx)
+	if e != nil {
+		return decision, e
+	}
+	// Words that say where, or which chain, are shared by every neighbour and prove nothing.
+	ignore := map[string]bool{}
+	for _, text := range []string{in.City, in.District, brand.Name} {
+		for _, word := range strings.Fields(textnorm.Key(text)) {
+			ignore[word] = true
+		}
+	}
+	own := map[string]bool{}
+	for _, word := range strings.Fields(textnorm.Key(in.Name)) {
+		if len([]rune(word)) >= 4 && !ignore[word] && frequency[word] <= rareWordShops {
+			own[word] = true
+		}
+	}
+	for _, n := range near {
+		if m.claimed[n.id] {
+			continue
+		}
+		for _, word := range strings.Fields(textnorm.Key(n.name)) {
+			if own[word] {
+				decision.Action = ActionReview
+				decision.StoreID = ""
+				decision.Reason = fmt.Sprintf("%.0f m from %q, and both names carry %q -- one dealer's door, or two shops side by side?", n.metres, n.name, word)
+				return decision, nil
+			}
+		}
+	}
+	return decision, nil
+}
+
+// holdSignedInDistrict is the same question for a row with no point of its own.
+//
+// Banio publishes its five shops by address alone. "Banio Yapı Market - Osmangazi Bursa
+// Şubesi" and the "Banio Yapı Market" we already held in Osmangazi score under the name bar
+// a pointless row has to clear, so the first dry run would have added the Bursa shop a second
+// time. A row in the same district signed with this chain's name is very likely this shop --
+// but with no point there is no telling which branch it is when the chain has two in one
+// district, and Banio has two in Muratpaşa. So it is not merged either: it is held for a
+// person, with the row that raised it named.
+func (m *Matcher) holdSignedInDistrict(ctx context.Context, in RawStore, brand BrandSpec, decision Decision) (Decision, error) {
+	if in.City == "" {
+		return decision, nil
+	}
+	brandCompact := CompactName(brand.Name)
+	if brandCompact == "" {
+		return decision, nil
+	}
+	rows, e := m.tx.Query(ctx, `
+SELECT id::text, name FROM stores
+WHERE deleted_at IS NULL AND city=$1 AND ($2='' OR district=$2)
+  AND compact_name LIKE '%' || $3 || '%'
+  AND (brand_id IS NULL OR brand_id::text = $4)
+LIMIT 10`, in.City, in.District, brandCompact, brand.ID)
+	if e != nil {
+		return decision, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name string
+		if e = rows.Scan(&id, &name); e != nil {
+			return decision, e
+		}
+		if m.claimed[id] || !carriesBrandWord(name, brand.Name) {
+			continue
+		}
+		decision.Action = ActionReview
+		decision.StoreID = ""
+		decision.Reason = fmt.Sprintf("no published point, and %q in the same district is signed with this chain's name -- this branch, or another one?", name)
+		return decision, nil
+	}
+	return decision, rows.Err()
+}
+
+// wordFrequency counts, once per run, how many shop names each word appears in.
+func (m *Matcher) wordFrequency(ctx context.Context) (map[string]int, error) {
+	if m.shopsWithWord != nil {
+		return m.shopsWithWord, nil
+	}
+	rows, e := m.tx.Query(ctx, `SELECT name FROM stores WHERE deleted_at IS NULL`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var name string
+		if e = rows.Scan(&name); e != nil {
+			return nil, e
+		}
+		for word := range uniqueWords(name) {
+			counts[word]++
+		}
+	}
+	if e = rows.Err(); e != nil {
+		return nil, e
+	}
+	m.shopsWithWord = counts
+	return counts, nil
 }
 
 // closest finds the single best comparable store. Two ways in, because a published row
@@ -281,6 +471,77 @@ LIMIT 1`, compact, in.City, in.District, provider)
 		return Candidate{}, false, e
 	}
 	return c, true, nil
+}
+
+// settledByName reports whether the candidate chosen by name is one the rules below would
+// actually merge with: close in spelling, contained in the other, or already signed with
+// this chain's name -- and near enough, and not already taken by an earlier row of this
+// run. A name that matches a shop across town, or one already spoken for, settles nothing.
+//
+// The second half was learned on the same dry run. Vestel's Antalya dealer "Grand Dayanıklı
+// Tüketim" has three shops; the name picked the one already claimed, called that settled,
+// and the Grand three metres away was never looked at.
+func (m *Matcher) settledByName(candidate Candidate, in RawStore, brand BrandSpec) bool {
+	radius := float64(mergeMeters)
+	if !candidate.Verified {
+		radius = legacyMeters
+	}
+	if m.claimed[candidate.ID] || candidate.Distance > radius {
+		return false
+	}
+	return candidate.Similarity >= mergeSimilarity ||
+		containment(CompactName(in.Name), candidate.CompactName) ||
+		carriesBrandWord(candidate.Name, brand.Name)
+}
+
+// carriesBrandWord reports whether a shop's name has the chain's name in it as a word, not
+// merely as letters. Taç is three letters, and "tac" sits inside Ataç and Tacettin; a
+// merge decided by a substring would give a Taç dealer's reviews to a shop called Ataç.
+func carriesBrandWord(name, brand string) bool {
+	brandKey := textnorm.Key(brand)
+	if brandKey == "" {
+		return false
+	}
+	return strings.Contains(" "+textnorm.Key(name)+" ", " "+brandKey+" ")
+}
+
+// signedNearby finds the nearest row within the legacy radius that is signed with this
+// chain's name as a word, not yet claimed by this run, and not another chain's. The
+// radius is the wide one on purpose: the rows this exists for are legacy rows, placed by
+// a provider whose geocoding disagrees with a chain's own by a few hundred metres, and the
+// merge rule below still holds a verified row to the narrow one.
+func (m *Matcher) signedNearby(ctx context.Context, in RawStore, brand BrandSpec) (Candidate, bool, error) {
+	brandCompact := CompactName(brand.Name)
+	if brandCompact == "" {
+		return Candidate{}, false, nil
+	}
+	rows, e := m.tx.Query(ctx, `
+SELECT id::text, name, compact_name, similarity(compact_name,$1) AS sim,
+       ST_Distance(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) AS metres,
+       source_kind, data_verified_at IS NOT NULL, brand_id::text,
+       coalesce((SELECT array_agg(external_id) FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$5),'{}')
+FROM stores
+WHERE deleted_at IS NULL
+  AND ST_DWithin(location, ST_SetSRID(ST_MakePoint($3,$2),4326)::geography, $4)
+  AND compact_name LIKE '%' || $6 || '%'
+  AND (brand_id IS NULL OR brand_id::text = $7)
+ORDER BY metres
+LIMIT 8`, CompactName(in.Name), *in.Latitude, *in.Longitude, float64(legacyMeters), brand.Provider(), brandCompact, brand.ID)
+	if e != nil {
+		return Candidate{}, false, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var c Candidate
+		if e = rows.Scan(&c.ID, &c.Name, &c.CompactName, &c.Similarity, &c.Distance, &c.SourceKind, &c.Verified, &c.BrandID, &c.BrandExternalIDs); e != nil {
+			return Candidate{}, false, e
+		}
+		if m.claimed[c.ID] || !carriesBrandWord(c.Name, brand.Name) {
+			continue
+		}
+		return c, true, nil
+	}
+	return Candidate{}, false, rows.Err()
 }
 
 // listedSeparately reports whether the chain has given this store identifiers of its own

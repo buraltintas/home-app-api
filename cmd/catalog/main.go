@@ -35,9 +35,14 @@ func main() {
 	list := flag.Bool("list", false, "list registered brands and exit")
 	probe := flag.Bool("probe", false, "look for a brand's store locator and report what is there")
 	verbose := flag.Int("show", 15, "how many per-row decisions to print")
+	// An import is one transaction: it lands whole or not at all. A chain with a thousand
+	// dealers, written from a desk in Turkey to a database in Frankfurt, spends most of its
+	// time on the round trips -- Vestel's first apply ran past half an hour and was rolled
+	// back complete, which is the right failure and still a wasted half hour.
+	timeout := flag.Duration("timeout", 30*time.Minute, "how long the whole run may take before it is rolled back")
 	flag.Parse()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
 	cfg, e := config.Load()
 	if e != nil {

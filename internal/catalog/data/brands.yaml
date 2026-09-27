@@ -772,39 +772,109 @@ brands:
     website: https://www.arcelik.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
+    store_count_estimate: 2400
+    # Not imported, and not to be worked around. Arçelik publishes every dealer on one page per
+    # province (/antalya-arcelik-magazalari, 58 dealers in Antalya against the 13 we hold), and
+    # robots.txt allows those pages -- but the CDN in front of the site answers this fetcher
+    # with 403 Access Denied on every path, robots.txt included. That is the site refusing
+    # automated reading outright. A browser's cookies or a browser's User-Agent would get
+    # through, and that is exactly what not to do. Beko sits behind the same wall.
+    #
+    # If Arçelik ever grants access -- a data feed, or an allowance for this fetcher -- the
+    # page shape is known: each dealer is a div.srv-item carrying data-order (the list's
+    # copy; the map carousel prints every dealer a second time without it), data-coor
+    # "lat|lon", srv-name, srv-address ending "DISTRICT/PROVINCE", a tel: link and a
+    # per-dealer slug that is sometimes published empty.
 
   - slug: vestel
     name: Vestel
     website: https://www.vestel.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
+    store_count_estimate: 1150
+    locator:
+      kind: json
+      # The shop finder's own data: every dealer in the country in one answer, each with
+      # Vestel's id, province, district and point. robots.txt forbids /api/ and /search?, not
+      # /lookup/. The street address and the neighbourhood are published as two fields; the
+      # street is taken, and the district and point carry the rest.
+      url: https://www.vestel.com.tr/lookup/offlinestores
+      list: Result
+      id: ID
+      name: MAGAZATITLE
+      address: ADRES
+      city: IL
+      district: ILCE
+      phone: MAGAZATEL
+      latitude: Lat
+      longitude: Long
 
   - slug: bosch
     name: Bosch
     website: https://www.bosch-home.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
+    # Not imported. BSH runs one dealer finder for all its brands and it reads its data
+    # through GET /graphql?operationName=..., which robots.txt forbids by that exact pattern.
 
   - slug: beko
     name: Beko
     website: https://www.beko.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
+    # Not imported: Arçelik's group, behind the same CDN that refuses this fetcher outright.
 
   - slug: siemens
     name: Siemens
     website: https://www.siemens-home.bsh-group.com/tr
     tier: 2
     categories: [major_appliances, small_appliances]
+    # Not imported: the same BSH dealer finder as Bosch, behind the same robots.txt rule.
 
   - slug: profilo
     name: Profilo
     website: https://www.profilo.com
     tier: 2
     categories: [major_appliances, small_appliances]
+    # Not imported: the same BSH dealer finder as Bosch, behind the same robots.txt rule.
 
   - slug: arzum
     name: Arzum
     website: https://www.arzum.com.tr
     tier: 3
     categories: [small_appliances]
+
+  # Home-improvement chains, the same trade as Koçtaş: the half of the home a furniture
+  # shop does not sell -- bathroom, lighting, garden, kitchen fittings.
+  - slug: bauhaus
+    name: Bauhaus
+    website: https://www.bauhaus.com.tr
+    tier: 2
+    categories: [household, garden, bathroom, lighting, kitchenware]
+    store_count_estimate: 9
+    # Not imported. robots.txt allows /bauhaus-magazalari and the page carries every shop's id
+    # and point, but Cloudflare in front of it answers this fetcher with 403 while answering
+    # curl with the same User-Agent -- it is scoring the client, not the name. Making this
+    # fetcher look like another client to get through is exactly what not to do. Nine shops:
+    # the panel's store form is the honest way in. The page shape, for the day that changes:
+    # div.storeListItem with data-store-id, data-store-lat and data-store-lng, a storeTitle,
+    # a storeAddress ending "District - Province", and a tel: link.
+
+  - slug: banio-yapi-market
+    name: Banio Yapı Market
+    website: https://www.banioyapimarket.com
+    tier: 3
+    categories: [household, bathroom, garden, lighting, kitchenware, furniture]
+    store_count_estimate: 5
+    locator:
+      kind: html
+      # Five shops on one page. The map link is a Google share link, not a point, so these
+      # are placed at their district's centre and matched by name inside the district --
+      # which the matcher holds to a much higher bar than a match backed by a coordinate.
+      url: https://www.banioyapimarket.com/magazalarimiz
+      row: '(?s)<div class="banio-card">(.*?banio-btn-call[^>]*>)'
+      name: 'class="banio-card-title">([^<]+)</h2>'
+      address: '>Adres</span><span class="banio-info-value">([^<]+)</span>'
+      district: '>Adres</span><span class="banio-info-value">[^<]*?[0-9]{5}\s+([^/<]+?)\s*/'
+      city: '>Adres</span><span class="banio-info-value">[^<]*/\s*([^/<]+?)\s*</span>'
+      phone: 'href="tel:([^"]+)"'
