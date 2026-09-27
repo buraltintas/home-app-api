@@ -87,7 +87,7 @@ WITH review_stats AS (
          coalesce((SELECT b.slug FROM brands b WHERE b.id=s.brand_id), '') AS brand_slug,
          coalesce((SELECT m.id::text FROM post_media pm
                    JOIN posts p2 ON p2.id=pm.post_id JOIN media m ON m.id=pm.media_id
-                   WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND m.status='ready'
+                   WHERE p2.store_id=s.id AND p2.deleted_at IS NULL AND p2.moderation='published' AND m.status='ready'
                    ORDER BY p2.created_at DESC, pm.position LIMIT 1), '') AS own_media,
          coalesce((SELECT array_agg(c.slug ORDER BY c.slug) FROM store_category_links l
                    JOIN store_categories c ON c.id=l.category_id AND c.active
@@ -101,7 +101,7 @@ WITH review_stats AS (
            WHERE p.created_at < $1 AND (p.deleted_at IS NULL OR p.deleted_at >= $1)
          ) AS prior_rating
   FROM stores s
-  LEFT JOIN posts p ON p.store_id = s.id
+  LEFT JOIN posts p ON p.store_id = s.id AND p.moderation = 'published'
   WHERE s.deleted_at IS NULL
   GROUP BY s.id, s.slug, s.name, s.city, s.district, brand_slug, own_media, categories
 )

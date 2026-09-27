@@ -19,6 +19,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/feedback"
 	locationpkg "github.com/burakaltintas/home-app-api/internal/location"
 	"github.com/burakaltintas/home-app-api/internal/media"
+	"github.com/burakaltintas/home-app-api/internal/moderation"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	"github.com/burakaltintas/home-app-api/internal/privacy"
 	"github.com/burakaltintas/home-app-api/internal/readcache"
@@ -75,6 +76,9 @@ func main() {
 	}
 	if cfg.OpenAIAPIKey != "" {
 		ai = searchpkg.NewOpenAIParser(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout)
+		// The same key and model read a review's words before they are published. Without a
+		// key a review that has words is held for a person rather than published unread.
+		socialSvc.SetModerator(moderation.NewOpenAIChecker(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.OpenAITimeout))
 	}
 	searchSvc := searchpkg.NewService(db, stores, ai, cfg.OpenAIModel, cfg.SearchLocationDecimals, reportSvc, cfg.SearchAttributionWindow, time.Duration(cfg.VisitorRetentionDays)*24*time.Hour)
 	users := userpkg.NewService(db, reportSvc)

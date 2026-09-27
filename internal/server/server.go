@@ -260,6 +260,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Post("/users/{id}/status", s.adminSetUserStatus)
 			r.Delete("/users/{id}", s.adminDeleteUser)
 			r.Delete("/reviews/{id}", s.adminDeleteReview)
+			r.Get("/moderation", s.adminHeldReviews)
+			r.Post("/moderation/{id}", s.adminDecideReview)
 		})
 		r.Route("/auth", func(r chi.Router) {
 			r.Use(appmw.NewLimiter(30, 8).Middleware)
@@ -1020,17 +1022,20 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	id, e := s.social.CreatePost(r.Context(), p.UserID, in)
+	created, e := s.social.CreateReview(r.Context(), p.UserID, in)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
 	}
+	id := created.ID
 	// Written, so the copy of this shop's page held here is wrong from this moment.
 	s.reads.Drop(storeGroup(in.StoreID))
 	if in.OriginSearchID != nil && in.OriginSearchResultID != nil {
 		_ = s.search.Attribute(r.Context(), *in.OriginSearchID, *in.OriginSearchResultID, p.UserID, in.StoreID, "review_created", "review:"+id.String())
 	}
-	JSON(w, 201, map[string]any{"id": id})
+	// The state is said, not left to be discovered: a review held for a person is not on the
+	// shop's page, and an author sent there to find it would conclude it was lost.
+	JSON(w, 201, map[string]any{"id": id, "moderation": created.Moderation})
 }
 
 func (s *Server) verifyStoreVisit(w http.ResponseWriter, r *http.Request) {

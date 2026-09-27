@@ -148,7 +148,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
  coalesce(avg(rating_layout),0)::float8,coalesce(avg(rating_staff_care),0)::float8,
  coalesce(avg(rating_staff_knowledge),0)::float8,coalesce(avg(rating_checkout),0)::float8,
  coalesce(avg(rating_returns),0)::float8,coalesce(avg(rating_cleanliness),0)::float8
- FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND rating_availability IS NOT NULL`, id).Scan(
+ FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND moderation='published' AND rating_availability IS NOT NULL`, id).Scan(
 		&criteria.ReviewCount, &criteria.Availability, &criteria.Value, &criteria.Layout,
 		&criteria.StaffCare, &criteria.StaffKnowledge, &criteria.Checkout, &criteria.Returns,
 		&criteria.Cleanliness)

@@ -6,6 +6,7 @@ package admin
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -124,17 +125,22 @@ type ReviewRow struct {
 	ID        uuid.UUID `json:"id"`
 	StoreID   uuid.UUID `json:"store_id"`
 	StoreName string    `json:"store_name"`
+	// The shop's address, so the page that shows this review can be dropped from the web
+	// side's cache under both of the names it answers to.
+	StoreSlug string    `json:"store_slug"`
 	UserID    uuid.UUID `json:"user_id"`
 	Author    string    `json:"author"`
 	Rating    int       `json:"rating"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at"`
 	Deleted   bool      `json:"deleted"`
+	// published, held or removed.
+	Moderation string `json:"moderation"`
 }
 
 func (s *Service) Reviews(ctx context.Context, query string, limit, offset int) ([]ReviewRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,p.user_id,coalesce(up.display_name,''),p.rating,p.body,p.created_at,p.deleted_at IS NOT NULL
+	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,st.slug,p.user_id,coalesce(up.display_name,''),p.rating,p.body,p.created_at,p.deleted_at IS NOT NULL,p.moderation
  FROM posts p JOIN stores st ON st.id=p.store_id LEFT JOIN user_profiles up ON up.user_id=p.user_id
  WHERE ($1='' OR lower(st.name) LIKE '%'||$1||'%' OR lower(coalesce(up.display_name,'')) LIKE '%'||$1||'%')
  ORDER BY p.created_at DESC LIMIT $2 OFFSET $3`, query, clamp(limit), offset)
@@ -145,7 +151,7 @@ func (s *Service) Reviews(ctx context.Context, query string, limit, offset int) 
 	out := []ReviewRow{}
 	for rows.Next() {
 		var x ReviewRow
-		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.CreatedAt, &x.Deleted); e != nil {
+		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.CreatedAt, &x.Deleted, &x.Moderation); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -445,28 +451,127 @@ func (s *Service) SetUserStatus(ctx context.Context, actor uuid.UUID, email stri
 
 // DeleteReview soft-deletes a review and recomputes the store's aggregates, matching what
 // happens when an author deletes their own.
-func (s *Service) DeleteReview(ctx context.Context, actor uuid.UUID, email string, post uuid.UUID) error {
+func (s *Service) DeleteReview(ctx context.Context, actor uuid.UUID, email string, post uuid.UUID) (uuid.UUID, error) {
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
-		return e
+		return uuid.Nil, e
 	}
 	defer tx.Rollback(ctx)
 	var store uuid.UUID
 	e = tx.QueryRow(ctx, `UPDATE posts SET body='',content_language=NULL,deleted_at=now(),updated_at=now() WHERE id=$1 AND deleted_at IS NULL RETURNING store_id`, post).Scan(&store)
 	if e == pgx.ErrNoRows {
-		return httpapi.E(404, "POST_NOT_FOUND", "Post not found")
+		return uuid.Nil, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
 	if e != nil {
-		return e
+		return uuid.Nil, e
 	}
 	if _, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg,updated_at=now()
- FROM(SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL) x WHERE ss.store_id=$1`, store); e != nil {
-		return e
+ FROM(SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND moderation='published') x WHERE ss.store_id=$1`, store); e != nil {
+		return uuid.Nil, e
 	}
 	if e = record(ctx, tx, actor, email, "post.delete", "post", post, map[string]any{"store_id": store.String()}); e != nil {
-		return e
+		return uuid.Nil, e
 	}
-	return tx.Commit(ctx)
+	return store, tx.Commit(ctx)
+}
+
+// HeldReview is one review waiting for a person, with everything needed to decide it
+// without opening anything else: every part a visitor would read, and what the check found
+// in it -- the passage, not a score.
+type HeldReview struct {
+	ID            uuid.UUID         `json:"id"`
+	StoreID       uuid.UUID         `json:"store_id"`
+	StoreName     string            `json:"store_name"`
+	StoreSlug     string            `json:"store_slug"`
+	UserID        uuid.UUID         `json:"user_id"`
+	Author        string            `json:"author"`
+	Rating        float64           `json:"rating"`
+	Text          string            `json:"text"`
+	PurchasedItem string            `json:"purchased_item,omitempty"`
+	Notes         map[string]string `json:"criterion_notes,omitempty"`
+	// severe: the check found something; unchecked: the check could not run, and the review
+	// was held rather than published unread.
+	Verdict   string          `json:"verdict"`
+	Findings  json.RawMessage `json:"findings"`
+	Error     string          `json:"error,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// HeldReviews is the queue, newest first, and how long it is.
+func (s *Service) HeldReviews(ctx context.Context, limit, offset int) ([]HeldReview, int, error) {
+	var total int
+	if e := s.db.QueryRow(ctx, `SELECT count(*) FROM posts WHERE moderation='held' AND deleted_at IS NULL`).Scan(&total); e != nil {
+		return nil, 0, e
+	}
+	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,st.slug,p.user_id,coalesce(up.display_name,''),p.rating::float8,
+ coalesce(p.body,''),coalesce(p.purchased_item,''),coalesce(p.criterion_notes,'{}'::jsonb),
+ coalesce(m.verdict,'unchecked'),coalesce(m.findings,'[]'::jsonb),coalesce(m.error,''),p.created_at
+ FROM posts p JOIN stores st ON st.id=p.store_id LEFT JOIN user_profiles up ON up.user_id=p.user_id
+ LEFT JOIN post_moderation m ON m.post_id=p.id
+ WHERE p.moderation='held' AND p.deleted_at IS NULL
+ ORDER BY p.created_at DESC LIMIT $1 OFFSET $2`, clamp(limit), offset)
+	if e != nil {
+		return nil, 0, e
+	}
+	defer rows.Close()
+	out := []HeldReview{}
+	for rows.Next() {
+		var x HeldReview
+		var notes []byte
+		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.PurchasedItem, &notes, &x.Verdict, &x.Findings, &x.Error, &x.CreatedAt); e != nil {
+			return nil, 0, e
+		}
+		if len(notes) > 0 {
+			_ = json.Unmarshal(notes, &x.Notes)
+		}
+		out = append(out, x)
+	}
+	return out, total, rows.Err()
+}
+
+// DecideReview is a person's answer to a held review: publish it as written, or keep it off
+// the page. Removed is kept rather than deleted, so a decision can be looked at again; the
+// author sees it marked as removed and nobody else sees it at all.
+//
+// Publishing puts it into the shop's numbers, which were kept without it while it waited, so
+// the numbers are recounted from the reviews rather than adjusted by one.
+func (s *Service) DecideReview(ctx context.Context, actor uuid.UUID, email string, post uuid.UUID, decision string) (uuid.UUID, string, error) {
+	state := map[string]string{"approved": "published", "removed": "removed"}[decision]
+	if state == "" {
+		return uuid.Nil, "", httpapi.ErrInvalidInput
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return uuid.Nil, "", e
+	}
+	defer tx.Rollback(ctx)
+	var store uuid.UUID
+	var slug string
+	e = tx.QueryRow(ctx, `UPDATE posts p SET moderation=$2,updated_at=now() FROM stores st
+ WHERE p.id=$1 AND p.moderation='held' AND p.deleted_at IS NULL AND st.id=p.store_id RETURNING p.store_id,st.slug`, post, state).Scan(&store, &slug)
+	if e == pgx.ErrNoRows {
+		return uuid.Nil, "", httpapi.E(404, "POST_NOT_HELD", "This review is not waiting for a decision")
+	}
+	if e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO post_moderation(post_id,verdict) VALUES($1,'unchecked') ON CONFLICT(post_id) DO NOTHING`, post); e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE post_moderation SET decided_by=$2,decided_at=now(),decision=$3 WHERE post_id=$1`, post, actor, decision); e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO store_stats(store_id) VALUES($1) ON CONFLICT(store_id) DO NOTHING`, store); e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE store_stats ss SET rating_count=x.n,review_count=x.n,post_count=x.n,average_rating=x.avg,updated_at=now()
+ FROM(SELECT count(*)::int n,coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND moderation='published') x WHERE ss.store_id=$1`, store); e != nil {
+		return uuid.Nil, "", e
+	}
+	if e = record(ctx, tx, actor, email, "post.moderate", "post", post, map[string]any{"store_id": store.String(), "decision": decision}); e != nil {
+		return uuid.Nil, "", e
+	}
+	return store, slug, tx.Commit(ctx)
 }
 
 // RecordUserDeletion notes an administrator-initiated account deletion. The deletion itself
@@ -1034,7 +1139,7 @@ FROM stores d WHERE k.id=$1 AND d.id=$2`, keep, drop); e != nil {
 UPDATE store_stats ss SET
   rating_count=p.n, review_count=p.n, post_count=p.n, average_rating=p.avg,
   favorite_count=(SELECT count(*) FROM favorites WHERE store_id=$1), updated_at=now()
- FROM (SELECT count(*)::int n, coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL) p
+ FROM (SELECT count(*)::int n, coalesce(avg(rating),0) avg FROM posts WHERE store_id=$1 AND deleted_at IS NULL AND moderation='published') p
  WHERE ss.store_id=$1`, keep); e != nil {
 		return e
 	}

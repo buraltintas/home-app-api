@@ -346,11 +346,56 @@ func (s *Server) adminDeleteReview(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	if e = s.admin.DeleteReview(r.Context(), actor, email, id); e != nil {
+	store, e := s.admin.DeleteReview(r.Context(), actor, email, id)
+	if e != nil {
 		WriteError(w, e, r.Context())
 		return
 	}
+	// The shop's page held here still carries the review. Creating one dropped this copy and
+	// deleting one did not, so an administrator's removal waited out the cache while the
+	// author's own appearance was instant -- the wrong way round for the one that matters.
+	s.reads.Drop(storeGroup(store))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// adminHeldReviews is the moderation queue: reviews the check held back, with what it found.
+func (s *Server) adminHeldReviews(w http.ResponseWriter, r *http.Request) {
+	items, total, e := s.admin.HeldReviews(r.Context(), queryInt(r, "limit", 50), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items, "total": total})
+}
+
+// adminDecideReview publishes a held review or keeps it off the page. Either way the shop's
+// page changes -- a review appears on it, or the shop's numbers are recounted -- so its copy
+// here is dropped, and the store's address is returned for the web side to drop its own.
+func (s *Server) adminDecideReview(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var in struct {
+		Decision string `json:"decision"`
+	}
+	if e = Decode(w, r, &in, 1<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	store, slug, e := s.admin.DecideReview(r.Context(), actor, email, id, in.Decision)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	s.reads.Drop(storeGroup(store))
+	JSON(w, 200, map[string]any{"store_id": store, "store_slug": slug})
 }
 
 func (s *Server) adminCategories(w http.ResponseWriter, r *http.Request) {

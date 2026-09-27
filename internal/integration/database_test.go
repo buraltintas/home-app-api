@@ -25,6 +25,7 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
+	"github.com/burakaltintas/home-app-api/internal/moderation"
 	"github.com/burakaltintas/home-app-api/internal/middleware"
 	"github.com/burakaltintas/home-app-api/internal/notification"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
@@ -112,6 +113,9 @@ func services(t *testing.T, db *pgxpool.Pool, google auth.GoogleVerifier, places
 	authSvc := auth.NewService(db, auth.Config{OTPTTL: 10 * time.Minute, OTPMaxAttempts: 5, OTPEmailLimit: 20, OTPIPLimit: 20, OTPVisitorLimit: 20, VisitorTTL: 24 * time.Hour, RefreshTTL: 24 * time.Hour, HashKey: []byte(testHashKey)}, tokens, google, report)
 	stores := storepkg.NewService(db, report)
 	socialSvc := social.NewService(db, social.Config{ReviewRadiusMeters: 500, VisitProofTTL: 30 * 24 * time.Hour, MaxLocationAccuracyMeters: 100}, report)
+	// These reviews are about PostGIS and visibility, not about what a review may say. A
+	// checker that finds nothing publishes them the way a clean review is published.
+	socialSvc.SetModerator(cleanChecker{})
 	searchSvc := search.NewService(db, stores, nil, places, "", 3, report, 72*time.Hour, 24*time.Hour)
 	return authSvc, stores, socialSvc, searchSvc, report
 }
@@ -1387,3 +1391,11 @@ func containsAll(values []string, wanted ...string) bool {
 	}
 	return true
 }
+
+// cleanChecker reads every review as having nothing in it that holds it back.
+type cleanChecker struct{}
+
+func (cleanChecker) Check(context.Context, string) (moderation.Verdict, error) {
+	return moderation.Verdict{Findings: []moderation.Finding{}}, nil
+}
+func (cleanChecker) Model() string { return "test" }

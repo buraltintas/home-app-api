@@ -6,6 +6,48 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A review that carries a crime is not published until a person has read it
+
+The product owner's rule, and deliberately blunt: a review whose written part carries any
+element of a crime -- an insult, a threat, an accusation of a crime stated as fact, a private
+person's name or number, or anything else whose publication would itself be a crime -- is
+held off the page until an administrator has read it. Two levels, nothing in between: an
+insult is a crime here as a threat is. Only reviews; feedback and store suggestions are read
+by administrators alone and people may write there what they think.
+
+What is checked is what a visitor can read: the notes a one- or two-star score requires, what
+was bought, and the body. A review of scores alone has nothing to read and sends nothing
+anywhere. The check asks the model questions with answers -- is this an insult aimed at
+someone, a threat, an accusation, personal data -- and never whether a review is too
+negative; the prompt names blunt complaints that must pass ("personel ilgisizdi", "fiyatlar
+çok pahalı", "bir daha gitmem"). Every finding carries the passage that raised it, so the
+person deciding reads the words, not a label, and a wrong finding can be seen to be wrong.
+Probed against the production model before release: nine samples, four honest complaints and
+five crimes, nine right. `cmd/moderation-probe` runs the same samples, so a change to the
+prompt or the model is looked at before it reaches a review.
+
+A held review is not in the feed, on the shop's page, on its own page or in the shop's rating
+and criteria averages, and cannot be liked or commented on; it does not count toward its
+author's level. Its author sees it on their own list, marked, and nobody else sees it at all.
+Publishing it recounts the shop's numbers from the reviews. If the check cannot run -- the
+model times out, or no key is configured -- the review is held, not published: the rule is
+that nothing is shown before it was read.
+
+Review visibility had one filter, `deleted_at`, repeated in eleven files. Every public read
+now also asks for `moderation='published'`, and each was checked by hand -- the feed, a
+review's page, the store's list, the store's criteria averages, search highlights, the media
+endpoint, likes, comments, and all four places that recount a shop's rating.
+
+Two cache drops that were missing were added on the way. An administrator deleting a review
+did not drop the shop's page from the API's read cache, so a removed review stayed on the
+page until the cache expired while an author's new review appeared at once -- the wrong way
+round for the one that matters. The admin decision endpoints drop it now, and return the
+store's address so the web side can drop its own.
+
+Migration `000036` adds `posts.moderation` (default `published`, so nothing already on a page
+changes) and `post_moderation`, which keeps the verdict, the quoted findings, the model, and
+who decided and when.
+
 ## A dealer's shop is recognised when its sign and its registered name share nothing
 
 Vestel was imported: 1,154 dealers from Vestel's own finder. The first dry run said 1,135 of

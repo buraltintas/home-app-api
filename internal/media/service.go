@@ -40,7 +40,7 @@ func (s *Service) UploadHandler() http.Handler {
 func (s *Service) PublicURL(ctx context.Context, id uuid.UUID) (string, error) {
 	var key string
 	err := s.db.QueryRow(ctx, `SELECT m.storage_key FROM media m WHERE m.id=$1 AND m.status='ready' AND (
- EXISTS(SELECT 1 FROM post_media pm JOIN posts p ON p.id=pm.post_id WHERE pm.media_id=m.id AND p.deleted_at IS NULL)
+ EXISTS(SELECT 1 FROM post_media pm JOIN posts p ON p.id=pm.post_id WHERE pm.media_id=m.id AND p.deleted_at IS NULL AND p.moderation='published')
  OR EXISTS(SELECT 1 FROM stores s WHERE s.cover_media_id=m.id AND s.deleted_at IS NULL)
 )`, id).Scan(&key)
 	if errors.Is(err, pgx.ErrNoRows) {
