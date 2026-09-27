@@ -6,6 +6,29 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The integration suite had stopped compiling, and nothing said so
+
+`go vet -tags integration ./internal/integration/` failed on `search.SufficiencyPolicy`, a type
+removed with the Google Places integration. That was the first error of several: the whole
+suite had been written against the provider-backed search and never followed it out.
+`search.NewService` was still called with a places provider; four tests exercised Google-only
+behaviour that no longer exists (materialising a Places result into a store, keeping Places
+detail ratings out of lists, refreshing a Places-backed row cheaply, fetching Places details
+lazily on first read); and two later API changes had also gone unnoticed -- a review's
+distance became nullable, and `DeletePost` began returning the store it touched.
+
+Because the suite only builds under its build tag, `go build`, `go vet` and `go test` stayed
+green throughout, and the tests covering PostGIS, visit verification, reviews and review
+visibility were not being compiled at all -- let alone run.
+
+The Google tests and their provider stubs are gone, as is `search_gate_test.go`, which tested
+only the gate that decided when to call Google. Two behaviours that do not depend on a
+provider were kept against the catalogue-only search: an out-of-scope query returns guidance
+and no results, and a shop asked for by name is found (`search_test.go`). The stale calls were
+brought up to date. The package now compiles and vets clean under the tag; it still needs
+`TEST_DATABASE_URL` pointed at a disposable database to run, and must never be pointed at
+production, because it writes.
+
 ## A review that carries a crime is not published until a person has read it
 
 The product owner's rule, and deliberately blunt: a review whose written part carries any

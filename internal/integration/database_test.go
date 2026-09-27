@@ -13,10 +13,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,8 +23,8 @@ import (
 	"github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	"github.com/burakaltintas/home-app-api/internal/media"
-	"github.com/burakaltintas/home-app-api/internal/moderation"
 	"github.com/burakaltintas/home-app-api/internal/middleware"
+	"github.com/burakaltintas/home-app-api/internal/moderation"
 	"github.com/burakaltintas/home-app-api/internal/notification"
 	"github.com/burakaltintas/home-app-api/internal/reporting"
 	"github.com/burakaltintas/home-app-api/internal/search"
@@ -52,39 +50,6 @@ func (g googleStub) Verify(_ context.Context, token string) (auth.GoogleIdentity
 	return v, nil
 }
 
-type placesStub struct{ place search.Place }
-
-func (p placesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
-	return []search.Place{p.place}, nil
-}
-func (p placesStub) PlaceDetails(context.Context, string) (search.Place, error) { return p.place, nil }
-
-type lazyDetailsPlacesStub struct {
-	searchPlace search.Place
-	detailPlace search.Place
-	detailCalls atomic.Int32
-}
-
-func (p *lazyDetailsPlacesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
-	return []search.Place{p.searchPlace}, nil
-}
-
-func (p *lazyDetailsPlacesStub) PlaceDetails(context.Context, string) (search.Place, error) {
-	p.detailCalls.Add(1)
-	return p.detailPlace, nil
-}
-
-type countingPlacesStub struct{ calls int }
-
-func (p *countingPlacesStub) TextSearch(context.Context, string, *float64, *float64, int) ([]search.Place, error) {
-	p.calls++
-	return nil, nil
-}
-
-func (p *countingPlacesStub) PlaceDetails(context.Context, string) (search.Place, error) {
-	return search.Place{}, errors.New("unexpected place details call")
-}
-
 func database(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("TEST_DATABASE_URL")
@@ -103,7 +68,7 @@ func database(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-func services(t *testing.T, db *pgxpool.Pool, google auth.GoogleVerifier, places search.PlacesProvider) (*auth.Service, *storepkg.Service, *social.Service, *search.Service, *reporting.Service) {
+func services(t *testing.T, db *pgxpool.Pool, google auth.GoogleVerifier) (*auth.Service, *storepkg.Service, *social.Service, *search.Service, *reporting.Service) {
 	t.Helper()
 	report, err := reporting.NewService(db, "Europe/Istanbul", 72*time.Hour)
 	if err != nil {
@@ -116,7 +81,7 @@ func services(t *testing.T, db *pgxpool.Pool, google auth.GoogleVerifier, places
 	// These reviews are about PostGIS and visibility, not about what a review may say. A
 	// checker that finds nothing publishes them the way a clean review is published.
 	socialSvc.SetModerator(cleanChecker{})
-	searchSvc := search.NewService(db, stores, nil, places, "", 3, report, 72*time.Hour, 24*time.Hour)
+	searchSvc := search.NewService(db, stores, nil, "", 3, report, 72*time.Hour, 24*time.Hour)
 	return authSvc, stores, socialSvc, searchSvc, report
 }
 
@@ -162,7 +127,7 @@ func TestAuthenticationIdentityAndSessionLifecycle(t *testing.T) {
 	db := database(t)
 	email := "integration-" + uuid.NewString() + "@example.test"
 	google := googleStub{map[string]auth.GoogleIdentity{"google": {Subject: "google-" + uuid.NewString(), Email: email, EmailVerified: true}}}
-	authSvc, _, _, _, _ := services(t, db, google, nil)
+	authSvc, _, _, _, _ := services(t, db, google)
 	code := "123456"
 	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at) VALUES($1,$2,5,now()+interval '10 minutes')`, email, security.Hash([]byte(testHashKey), code)); err != nil {
 		t.Fatal(err)
@@ -207,7 +172,7 @@ func TestConcurrentIdentityCreationProducesOneUser(t *testing.T) {
 	db := database(t)
 	email := "concurrent-" + uuid.NewString() + "@example.test"
 	google := googleStub{map[string]auth.GoogleIdentity{"same-token": {Subject: "subject-" + uuid.NewString(), Email: email, EmailVerified: true}}}
-	authSvc, _, _, _, _ := services(t, db, google, nil)
+	authSvc, _, _, _, _ := services(t, db, google)
 	const attempts = 20
 	users := make(chan uuid.UUID, attempts)
 	errs := make(chan error, attempts)
@@ -248,7 +213,7 @@ func TestConcurrentEmailAndGoogleIdentityMergeProducesOneUser(t *testing.T) {
 	emailAddress := "cross-provider-" + uuid.NewString() + "@example.test"
 	code := "246810"
 	google := googleStub{map[string]auth.GoogleIdentity{"google-concurrent": {Subject: "subject-" + uuid.NewString(), Email: emailAddress, EmailVerified: true}}}
-	authSvc, _, _, _, _ := services(t, db, google, nil)
+	authSvc, _, _, _, _ := services(t, db, google)
 	if _, err := db.Exec(t.Context(), `INSERT INTO email_verification_codes(normalized_email,code_hash,max_attempts,expires_at,locale) VALUES($1,$2,5,now()+interval '10 minutes','en')`, emailAddress, security.Hash([]byte(testHashKey), code)); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +251,7 @@ func TestConcurrentEmailAndGoogleIdentityMergeProducesOneUser(t *testing.T) {
 
 func TestOTPExpiryAttemptsLimitsAndHashedStorage(t *testing.T) {
 	db := database(t)
-	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	_, _, _, _, report := services(t, db, googleStub{})
 	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
 	authSvc := auth.NewService(db, auth.Config{OTPTTL: 10 * time.Minute, OTPMaxAttempts: 2, OTPEmailLimit: 2, OTPIPLimit: 10, OTPVisitorLimit: 10, VisitorTTL: 24 * time.Hour, RefreshTTL: 24 * time.Hour, HashKey: []byte(testHashKey)}, tokens, googleStub{}, report)
 
@@ -335,7 +300,7 @@ func TestPostGISReviewSocialFeedSearchAndReporting(t *testing.T) {
 	author := user(t, db, "author-"+uuid.NewString()+"@example.test")
 	viewer := user(t, db, "viewer-"+uuid.NewString()+"@example.test")
 	storeID := store(t, db, 41.0000, 29.0000)
-	_, stores, socialSvc, searchSvc, report := services(t, db, googleStub{}, nil)
+	_, stores, socialSvc, searchSvc, report := services(t, db, googleStub{})
 
 	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Gerçek PostGIS entegrasyon yorumu", Rating: 5, Latitude: 41.003, Longitude: 29.0000, AccuracyMeters: locationAccuracy()})
 	if err != nil {
@@ -429,7 +394,7 @@ func TestStoredVisitVerificationCanCreateExactlyOneLaterReview(t *testing.T) {
 	db := database(t)
 	author := user(t, db, "visit-proof-"+uuid.NewString()+"@example.test")
 	storeID := store(t, db, 41, 29)
-	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{})
 
 	if _, err := socialSvc.VerifyVisit(t.Context(), author, storeID, 41, 29, 101); appCode(err) != "INVALID_INPUT" {
 		t.Fatalf("inaccurate visit: %v", err)
@@ -446,7 +411,7 @@ func TestStoredVisitVerificationCanCreateExactlyOneLaterReview(t *testing.T) {
 		t.Fatal(err)
 	}
 	post, err := socialSvc.GetPost(t.Context(), postID, &author)
-	if err != nil || !post.VisitVerified || post.DistanceMeters != proof.DistanceMeters {
+	if err != nil || !post.VisitVerified || post.DistanceMeters == nil || *post.DistanceMeters != proof.DistanceMeters {
 		t.Fatalf("post=%+v err=%v proof=%+v", post, err, proof)
 	}
 	if _, err = socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: "Aynı kanıt yeniden kullanılamaz", Rating: 4, VisitVerificationID: &proof.ID}); appCode(err) != "VISIT_VERIFICATION_INVALID" {
@@ -458,7 +423,7 @@ func TestFeedCursorTieBreakerHasNoDuplicatesOrGaps(t *testing.T) {
 	db := database(t)
 	author := user(t, db, "pagination-"+uuid.NewString()+"@example.test")
 	storeID := store(t, db, 41, 29)
-	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{})
 	created := time.Now().Add(24 * time.Hour).Truncate(time.Microsecond)
 	expected := map[uuid.UUID]bool{}
 	for i := 0; i < 6; i++ {
@@ -493,7 +458,7 @@ func TestFeedWithLocationRanksStoresByViewerDistance(t *testing.T) {
 	author := user(t, db, "nearby-feed-"+uuid.NewString()+"@example.test")
 	nearStore := store(t, db, 41.001, 29)
 	farStore := store(t, db, 41.02, 29)
-	_, _, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	_, _, socialSvc, _, _ := services(t, db, googleStub{})
 	nearPost, farPost := uuid.New(), uuid.New()
 	created := time.Now().Add(48 * time.Hour).Truncate(time.Microsecond)
 	for _, item := range []struct {
@@ -528,248 +493,10 @@ func TestFeedWithLocationRanksStoresByViewerDistance(t *testing.T) {
 	}
 }
 
-func TestConcurrentGoogleStoreMaterialization(t *testing.T) {
-	db := database(t)
-	placeID := "integration-place-" + uuid.NewString()
-	place := search.Place{PlaceID: placeID, Name: "Concurrent Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03}
-	_, _, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
-	const count = 20
-	ids := make(chan uuid.UUID, count)
-	errs := make(chan error, count)
-	var wg sync.WaitGroup
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(locale i18n.Locale) {
-			defer wg.Done()
-			id, err := searchSvc.MaterializeGoogleStore(i18n.WithLocale(context.Background(), locale), placeID)
-			ids <- id
-			errs <- err
-		}(i18n.Supported()[i%len(i18n.Supported())])
-	}
-	wg.Wait()
-	close(ids)
-	close(errs)
-	var want uuid.UUID
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	for id := range ids {
-		if want == uuid.Nil {
-			want = id
-		} else if id != want {
-			t.Fatalf("materialization returned %s and %s", want, id)
-		}
-	}
-	var stores, mappings int
-	if err := db.QueryRow(t.Context(), `SELECT count(DISTINCT s.id),count(DISTINCT x.id) FROM stores s JOIN store_external_sources x ON x.store_id=s.id WHERE x.provider='google' AND x.external_id=$1`, placeID).Scan(&stores, &mappings); err != nil {
-		t.Fatal(err)
-	}
-	if stores != 1 || mappings != 1 {
-		t.Fatal(fmt.Sprintf("stores=%d mappings=%d", stores, mappings))
-	}
-}
-
-func TestSearchKeepsGoogleDetailRatingsOutOfLists(t *testing.T) {
-	db := database(t)
-	searcher := user(t, db, "search-enrichment-"+uuid.NewString()+"@example.test")
-	placeID := "enrichment-place-" + uuid.NewString()
-	place := search.Place{PlaceID: placeID, Name: "External Locale Store", Address: "Kadıköy, İstanbul, TR", Latitude: 40.99, Longitude: 29.03, Rating: 4.8, RatingCount: 321, Types: []string{"furniture_store"}}
-	_, _, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
-
-	first, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleEN), &searcher, nil, search.Request{Query: "furniture store External Locale Store"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var googleOnly *search.Result
-	for i := range first.Results {
-		if first.Results[i].Google != nil && first.Results[i].Google.PlaceID == placeID {
-			googleOnly = &first.Results[i]
-			break
-		}
-	}
-	if googleOnly == nil || googleOnly.Source != "google" || googleOnly.Platform != nil {
-		t.Fatalf("google-only result=%+v", googleOnly)
-	}
-
-	storeID, err := searchSvc.MaterializeGoogleStore(i18n.WithLocale(t.Context(), i18n.LocaleDE), placeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(t.Context(), `UPDATE store_stats SET average_rating=3.25,rating_count=4,review_count=4,favorite_count=2,post_count=4 WHERE store_id=$1`, storeID); err != nil {
-		t.Fatal(err)
-	}
-	second, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleRU), &searcher, nil, search.Request{Query: "furniture store External Locale Store"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var enriched *search.Result
-	for i := range second.Results {
-		if second.Results[i].Google != nil && second.Results[i].Google.PlaceID == placeID {
-			enriched = &second.Results[i]
-			break
-		}
-	}
-	if enriched == nil || enriched.Source != "google+platform" || enriched.Platform == nil || enriched.Platform.AverageRating != 3.25 || enriched.Platform.ReviewCount != 4 || !slices.Contains(enriched.Categories, "furniture") {
-		t.Fatalf("enriched result=%+v", enriched)
-	}
-
-	// Persisted Google detail data is intentionally not copied back into an internal list
-	// result when no live provider result is available.
-	_, _, _, internalOnly, _ := services(t, db, googleStub{}, nil)
-	third, err := internalOnly.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "furniture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stored *search.Result
-	for i := range third.Results {
-		if third.Results[i].ID != nil && *third.Results[i].ID == storeID {
-			stored = &third.Results[i]
-			break
-		}
-	}
-	if stored == nil || stored.Google == nil || !slices.Contains(stored.Categories, "furniture") {
-		t.Fatalf("stored Google result=%+v", stored)
-	}
-}
-
-func TestCheapSearchRefreshPreservesMappedStoreDetailData(t *testing.T) {
-	db := database(t)
-	searcher := user(t, db, "search-refresh-"+uuid.NewString()+"@example.test")
-	placeID := "refresh-place-" + uuid.NewString()
-	place := search.Place{
-		PlaceID:           placeID,
-		Name:              "Mapped Curtain Store",
-		Address:           "Muratpasa, Antalya, TR",
-		Latitude:          36.8841,
-		Longitude:         30.7056,
-		Rating:            4.7,
-		RatingCount:       59,
-		PhotoName:         "places/refresh-store/photos/current-photo",
-		PhotoAttributions: []string{"Store photographer"},
-		Phone:             "0551 257 52 64",
-	}
-	_, stores, _, searchSvc, _ := services(t, db, googleStub{}, placesStub{place})
-
-	storeID, err := searchSvc.MaterializeGoogleStore(t.Context(), placeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution='{"provider":"Google","rating":4.7,"rating_count":59,"phone":"0551 257 52 64"}'::jsonb,refreshed_at=now()-interval '7 days' WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = db.Exec(t.Context(), `UPDATE store_external_sources SET attribution=attribution || '{"photo_name":"places/original/photos/kept","photo_attributions":["Original"]}'::jsonb WHERE store_id=$1 AND provider='google'`, storeID); err != nil {
-		t.Fatal(err)
-	}
-	// Text Search carries neither detail fields nor photo metadata. Even a richer test
-	// double must not replace or expose the stored detail photograph on a result list.
-	place.Rating = 0
-	place.RatingCount = 0
-	place.Phone = ""
-	place.Website = ""
-	_, stores, _, searchSvc, _ = services(t, db, googleStub{}, placesStub{place})
-
-	latitude, longitude := 36.8841, 30.7056
-	response, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "perde", Latitude: &latitude, Longitude: &longitude})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result *search.Result
-	for i := range response.Results {
-		if response.Results[i].ID != nil && *response.Results[i].ID == storeID {
-			result = &response.Results[i]
-			break
-		}
-	}
-	if result == nil || result.Google == nil {
-		t.Fatalf("search result=%+v", result)
-	}
-
-	detail, err := stores.Get(t.Context(), storeID, &searcher, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Phone != "0551 257 52 64" || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["photo_name"] != "places/original/photos/kept" || detail.ExternalSources[0].Attribution["rating_count"] != float64(59) {
-		t.Fatalf("detail phone=%q external_sources=%+v", detail.Phone, detail.ExternalSources)
-	}
-}
-
-func TestGoogleDetailsAreFetchedOnceOnFirstStoreRead(t *testing.T) {
-	db := database(t)
-	searcher := user(t, db, "lazy-details-"+uuid.NewString()+"@example.test")
-	placeID := "lazy-details-place-" + uuid.NewString()
-	cheap := search.Place{
-		PlaceID: placeID, Name: "Lazy Detail Furniture", Address: "Kadıköy, İstanbul, TR",
-		Latitude: 40.99, Longitude: 29.03, Types: []string{"furniture_store"},
-		PhotoName: "places/lazy-detail/photos/search-photo",
-	}
-	full := cheap
-	full.Rating, full.RatingCount = 4.8, 73
-	full.Phone, full.Website = "0212 000 00 00", "https://store.example.test"
-	full.DetailsFetched = true
-	places := &lazyDetailsPlacesStub{searchPlace: cheap, detailPlace: full}
-	_, stores, _, searchSvc, _ := services(t, db, googleStub{}, places)
-
-	response, err := searchSvc.Search(t.Context(), &searcher, nil, search.Request{Query: "furniture Lazy Detail Furniture"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var storeID uuid.UUID
-	for i := range response.Results {
-		if response.Results[i].Google != nil && response.Results[i].Google.PlaceID == placeID && response.Results[i].ID != nil {
-			storeID = *response.Results[i].ID
-		}
-	}
-	if storeID == uuid.Nil {
-		t.Fatal("search did not materialize the cheap provider result")
-	}
-
-	const readers = 12
-	var wg sync.WaitGroup
-	errs := make(chan error, readers)
-	for range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			errs <- searchSvc.EnsureGoogleStoreDetails(context.Background(), storeID)
-		}()
-	}
-	wg.Wait()
-	close(errs)
-	for err = range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	if calls := places.detailCalls.Load(); calls != 1 {
-		t.Fatalf("Place Details calls=%d, want exactly one", calls)
-	}
-	if err = searchSvc.EnsureGoogleStoreDetails(t.Context(), storeID); err != nil {
-		t.Fatal(err)
-	}
-	if calls := places.detailCalls.Load(); calls != 1 {
-		t.Fatalf("cached detail caused another Place Details call: %d", calls)
-	}
-
-	detail, err := stores.Get(t.Context(), storeID, &searcher, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if detail.Phone != full.Phone || detail.Website != full.Website || len(detail.ExternalSources) != 1 || detail.ExternalSources[0].Attribution["rating_count"] != float64(full.RatingCount) {
-		t.Fatalf("detail was not persisted: %+v", detail)
-	}
-	var fetchedAt *time.Time
-	if err = db.QueryRow(t.Context(), `SELECT details_fetched_at FROM store_external_sources WHERE store_id=$1 AND provider='google'`, storeID).Scan(&fetchedAt); err != nil || fetchedAt == nil {
-		t.Fatalf("details_fetched_at=%v err=%v", fetchedAt, err)
-	}
-}
-
-func TestOutOfScopeSearchReturnsGuidanceWithoutCallingProviders(t *testing.T) {
+func TestOutOfScopeSearchReturnsGuidance(t *testing.T) {
 	db := database(t)
 	searcher := user(t, db, "search-scope-"+uuid.NewString()+"@example.test")
-	places := &countingPlacesStub{}
-	_, _, _, searchSvc, _ := services(t, db, googleStub{}, places)
+	_, _, _, searchSvc, _ := services(t, db, googleStub{})
 
 	response, err := searchSvc.Search(i18n.WithLocale(t.Context(), i18n.LocaleTR), &searcher, nil, search.Request{Query: "Yakınımda lastikçi lazım"})
 	if err != nil {
@@ -778,16 +505,12 @@ func TestOutOfScopeSearchReturnsGuidanceWithoutCallingProviders(t *testing.T) {
 	if response.Intent.Scope != search.ScopeOutOfScope || len(response.Results) != 0 || response.Guidance == nil || response.Guidance.Reason != search.ScopeOutOfScope {
 		t.Fatalf("unexpected response: %+v", response)
 	}
-	if places.calls != 0 {
-		t.Fatalf("places calls=%d", places.calls)
-	}
-	var internalCount, externalCount int
-	var googleUsed bool
-	if err = db.QueryRow(t.Context(), `SELECT internal_result_count,external_result_count,google_places_used FROM searches WHERE id=$1`, response.SearchID).Scan(&internalCount, &externalCount, &googleUsed); err != nil {
+	var internalCount int
+	if err = db.QueryRow(t.Context(), `SELECT internal_result_count FROM searches WHERE id=$1`, response.SearchID).Scan(&internalCount); err != nil {
 		t.Fatal(err)
 	}
-	if internalCount != 0 || externalCount != 0 || googleUsed {
-		t.Fatalf("internal=%d external=%d google=%t", internalCount, externalCount, googleUsed)
+	if internalCount != 0 {
+		t.Fatalf("internal=%d", internalCount)
 	}
 }
 
@@ -796,7 +519,7 @@ func TestLocalMediaUploadFinalizeAndAttach(t *testing.T) {
 	owner := user(t, db, "media-owner-"+uuid.NewString()+"@example.test")
 	other := user(t, db, "media-other-"+uuid.NewString()+"@example.test")
 	storeID := store(t, db, 41, 29)
-	_, _, socialSvc, _, report := services(t, db, googleStub{}, nil)
+	_, _, socialSvc, _, report := services(t, db, googleStub{})
 	storage, err := media.NewLocalStorage(t.TempDir(), "http://localhost:8080/uploads", time.Minute, []byte(testHashKey))
 	if err != nil {
 		t.Fatal(err)
@@ -842,7 +565,7 @@ func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
 	author := user(t, db, "social-author-"+uuid.NewString()+"@example.test")
 	other := user(t, db, "social-other-"+uuid.NewString()+"@example.test")
 	storeID := store(t, db, 41, 29)
-	_, stores, socialSvc, _, _ := services(t, db, googleStub{}, nil)
+	_, stores, socialSvc, _, _ := services(t, db, googleStub{})
 	longGermanPost := strings.Repeat("ä", 5000)
 	criteria := social.ReviewCriteria{Availability: 5, Value: 4, Layout: 3, StaffCare: 2, StaffKnowledge: 1, Checkout: 2, Returns: 3, Cleanliness: 4}
 	postID, err := socialSvc.CreatePost(t.Context(), author, social.CreatePost{StoreID: storeID, Text: longGermanPost, Criteria: &criteria, Latitude: 41, Longitude: 29, AccuracyMeters: locationAccuracy()})
@@ -908,10 +631,10 @@ func TestSocialRemovalOwnershipAndSoftDelete(t *testing.T) {
 	if _, err = db.Exec(t.Context(), `UPDATE posts SET rating=4.125 WHERE id=$1`, postID); err != nil {
 		t.Fatal(err)
 	}
-	if err = socialSvc.DeletePost(t.Context(), other, postID); appCode(err) != "POST_NOT_FOUND" {
+	if _, err = socialSvc.DeletePost(t.Context(), other, postID); appCode(err) != "POST_NOT_FOUND" {
 		t.Fatalf("non-owner post delete: %v", err)
 	}
-	if err = socialSvc.DeletePost(t.Context(), author, postID); err != nil {
+	if _, err = socialSvc.DeletePost(t.Context(), author, postID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = socialSvc.GetPost(t.Context(), postID, nil); appCode(err) != "POST_NOT_FOUND" {
@@ -932,7 +655,7 @@ func TestSearchHistoryOwnershipAndDeletion(t *testing.T) {
 	db := database(t)
 	owner := user(t, db, "history-owner-"+uuid.NewString()+"@example.test")
 	other := user(t, db, "history-other-"+uuid.NewString()+"@example.test")
-	_, stores, _, searchSvc, report := services(t, db, googleStub{}, nil)
+	_, stores, _, searchSvc, report := services(t, db, googleStub{})
 	users := userpkg.NewService(db, report)
 	items, err := stores.Search(t.Context(), "", nil, "", nil, nil, 10000, 20, &owner)
 	if err != nil {
@@ -956,7 +679,7 @@ func TestSearchHistoryOwnershipAndDeletion(t *testing.T) {
 
 func TestReportingReadModelsExecuteAgainstAggregates(t *testing.T) {
 	db := database(t)
-	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	_, _, _, _, report := services(t, db, googleStub{})
 	if err := report.Rebuild(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -989,7 +712,7 @@ func TestReportingReadModelsExecuteAgainstAggregates(t *testing.T) {
 func TestAppReviewLoginSkipsEmailAndDeletedAccountReactivatesBlank(t *testing.T) {
 	db := database(t)
 	emailAddress := "app-review+" + uuid.NewString() + "@bosagezme.com"
-	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	_, _, _, _, report := services(t, db, googleStub{})
 	tokens := security.NewTokenManager("integration-access-secret-more-than-32-bytes", 15*time.Minute, 24*time.Hour)
 	authSvc := auth.NewService(db, auth.Config{
 		OTPTTL: 10 * time.Minute, OTPMaxAttempts: 5, OTPEmailLimit: 20, OTPIPLimit: 20,
@@ -1133,7 +856,7 @@ func TestPushDeviceReplacementPreferencesAndOutboxClaim(t *testing.T) {
 
 func TestConcurrentEmailWorkersDeliverOutboxOnce(t *testing.T) {
 	db := database(t)
-	authSvc, _, _, _, _ := services(t, db, googleStub{}, nil)
+	authSvc, _, _, _, _ := services(t, db, googleStub{})
 	recipient := "worker-once-" + uuid.NewString() + "@example.test"
 	if err := authSvc.RequestCode(i18n.WithLocale(t.Context(), i18n.LocaleRU), recipient, nil, nil); err != nil {
 		t.Fatal(err)
@@ -1183,7 +906,7 @@ func TestConcurrentEmailWorkersDeliverOutboxOnce(t *testing.T) {
 
 func TestMultilingualArchitectureMatrix(t *testing.T) {
 	db := database(t)
-	authSvc, stores, socialSvc, searchSvc, report := services(t, db, googleStub{}, nil)
+	authSvc, stores, socialSvc, searchSvc, report := services(t, db, googleStub{})
 
 	// The OTP request locale is persisted independently from the worker context.
 	for _, locale := range i18n.Supported() {
@@ -1347,7 +1070,7 @@ func TestMultilingualArchitectureMatrix(t *testing.T) {
 
 func TestPrivateDiscoveryLocationLifecycle(t *testing.T) {
 	db := database(t)
-	_, _, _, _, report := services(t, db, googleStub{}, nil)
+	_, _, _, _, report := services(t, db, googleStub{})
 	userID := user(t, db, "location-"+uuid.NewString()+"@example.test")
 	users := userpkg.NewService(db, report)
 
