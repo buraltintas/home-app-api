@@ -129,7 +129,14 @@ func Load() (Config, error) {
 	if c.OTPEmailRequestLimit, err = integer("OTP_EMAIL_REQUEST_LIMIT", 3); err != nil {
 		return c, err
 	}
-	if c.OTPIPRequestLimit, err = integer("OTP_IP_REQUEST_LIMIT", 10); err != nil {
+	// Ten an hour, when the address was the web server's, meant ten an hour for the whole
+	// website: anybody could empty it and nobody could sign in until the hour turned. The
+	// address is the person's own now, which makes the limit mean what it says -- and also
+	// makes it too tight, because one address can be a household, an office or a mobile
+	// carrier's shared address. The per-address cap on one inbox (three in ten minutes) is
+	// what stops flooding somebody; this is the backstop behind it and is sized for
+	// several strangers at once rather than for one.
+	if c.OTPIPRequestLimit, err = integer("OTP_IP_REQUEST_LIMIT", 40); err != nil {
 		return c, err
 	}
 	// Five per hour per browser was the tightest of the three limits and the weakest of

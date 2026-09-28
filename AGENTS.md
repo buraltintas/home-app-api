@@ -122,6 +122,35 @@ all.
 
 Fix the traffic, then size the timers for the quiet that fixing it creates.
 
+## A limit is only as real as the thing it counts
+
+Two of them here were counting nothing.
+
+The cap on sign-in codes counted requests per IP address, and the API never sees a
+visitor's address: every request arrives from the web server, so one address stood for the
+whole product. Ten an hour, for everybody, emptiable by anyone. The rate limiter had the
+matching fault from the other direction -- it counted against a header the caller writes,
+so a fresh value per request bought an unlimited allowance on every limiter, search
+included, where each request is a model call we pay for.
+
+Both had been written carefully and neither had been checked against the data it produced.
+That check is one query and it is the only thing that settles it:
+
+```sql
+SELECT encode(substring(request_ip_hash from 1 for 4),'hex'), count(*), count(DISTINCT normalized_email)
+FROM email_verification_codes GROUP BY 1 ORDER BY 2 DESC;
+```
+
+One row came back. Twenty-one codes, six addresses, a month apart, one bucket.
+
+So when a limit is added or changed: name what distinguishes one caller from the next, ask
+whether the caller can choose it, and then go and look at the values the running system
+actually stored. A limit keyed on something the caller controls is a formality; a limit
+keyed on something every caller shares is an outage waiting for its first busy hour.
+
+And when the key is a shared address rather than a person, size it for several strangers at
+once -- a household, an office, and a mobile carrier's NAT are all one address.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest

@@ -107,6 +107,29 @@ type Limiter struct {
 func NewLimiter(perMinute int, burst int) *Limiter {
 	return &Limiter{clients: map[string]*visitor{}, r: rate.Limit(float64(perMinute) / 60), burst: burst}
 }
+
+// One address is not one person. A household, an office and -- the case that matters in
+// Turkey -- a mobile carrier's shared address all put many readers behind one of them, so
+// an address bucket held to a single person's allowance would refuse people who did
+// nothing. It is a ceiling on rotation, not a per-person limit: the caller-written session
+// id gives an unlimited budget on its own, and this is what caps it. Twelve is a guess at
+// how many strangers plausibly share an address at once, and it is meant to be raised if
+// real traffic says otherwise, not lowered.
+const addressShare = 12
+
+func (l *Limiter) bucket(key string) *visitor {
+	v := l.clients[key]
+	if v != nil {
+		return v
+	}
+	r, burst := l.r, l.burst
+	if strings.HasPrefix(key, "a:") {
+		r, burst = r*addressShare, burst*addressShare
+	}
+	v = &visitor{rate.NewLimiter(r, burst), time.Now()}
+	l.clients[key] = v
+	return v
+}
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		l.mu.Lock()
@@ -116,11 +139,7 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		// from the address as well is what makes rotating it pointless.
 		allowed := true
 		for _, key := range limiterKeys(r) {
-			v := l.clients[key]
-			if v == nil {
-				v = &visitor{rate.NewLimiter(l.r, l.burst), time.Now()}
-				l.clients[key] = v
-			}
+			v := l.bucket(key)
 			v.seen = time.Now()
 			// Not short-circuited: a request that is refused still costs every bucket it
 			// belongs to, or the cheapest way past a full bucket would be to keep asking.
