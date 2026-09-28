@@ -6,6 +6,26 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Consumer electronics chains are not a home and living trade
+
+Two rows left the catalogue: MediaMarkt Terracity AVM and Teknosa, both Antalya/Muratpaşa,
+both `legacy` -- Google-era imports nobody had looked at since. Neither carried a review or a
+favourite, so nothing anybody wrote went with them. Soft-deleted, so they are recoverable.
+
+The decision is the owner's and the reasoning is the one this catalogue already applies to
+itself: these two sell white goods but their trade is consumer electronics, the way a
+builders' merchant sells taps without being a bathroom shop. A directory that lists them is
+wrong about what it is -- the same sentence already written above `openMapShops`, which is
+why `doityourself` and `hardware` are not read either.
+
+Recorded here because it constrains work that is coming. Reading white goods off the open map
+is the obvious way to reach the dealers of the brands whose own sites refuse us (Arçelik,
+Beko, Bosch, Siemens, Profilo -- about 512 of them, in every province). When that is built,
+the tag to read is `shop=appliance`; `shop=electronics` is read only for shops whose name
+carries one of those white goods brands. That filter excludes these two by construction, so
+the decision holds without a list of names to maintain -- which is the only kind of rule that
+survives.
+
 ## The integration suite had stopped compiling, and nothing said so
 
 `go vet -tags integration ./internal/integration/` failed on `search.SufficiencyPolicy`, a type
