@@ -14,7 +14,7 @@ import (
 )
 
 func TestBFFRejectsMissingAndInvalidSecret(t *testing.T) {
-	h := RequestID(BFF([]string{"valid-secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })))
+	h := RequestID(BFF([]string{"valid-secret"}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(204) })))
 	for _, secret := range []string{"", "wrong"} {
 		r := httptest.NewRequest("GET", "/v1/feed", nil)
 		if secret != "" {
@@ -47,7 +47,7 @@ func TestLocalizedAuthRequiredKeepsStableCode(t *testing.T) {
 	}
 }
 func TestBFFAllowsAnonymousBrowse(t *testing.T) {
-	h := BFF([]string{"valid-secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := BFF([]string{"valid-secret"}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := PrincipalFrom(r.Context()); ok {
 			t.Fatal("unexpected principal")
 		}
@@ -63,7 +63,7 @@ func TestBFFAllowsAnonymousBrowse(t *testing.T) {
 }
 
 func TestBFFAllowsEveryConfiguredRotationSecret(t *testing.T) {
-	h := BFF([]string{"current-secret", "previous-secret"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	h := BFF([]string{"current-secret", "previous-secret"}, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	for _, secret := range []string{"current-secret", "previous-secret"} {
 		r := httptest.NewRequest(http.MethodGet, "/v1/feed", nil)
 		r.Header.Set("X-BFF-Secret", secret)
@@ -134,6 +134,38 @@ func TestTheLimitCountsThePersonNotTheDeliveringServer(t *testing.T) {
 	signedIn := shared.Clone(context.WithValue(shared.Context(), principalKey, Principal{UserID: uuid.New()}))
 	if sameKeys(limiterKeys(signedIn), limiterKeys(shared)) {
 		t.Error("a signed-in request should be counted against the account")
+	}
+}
+
+// Being let in and being believed are two questions, and the mobile app answers only the
+// first. Its key travels inside the application package, so anyone holding a copy of the
+// app holds the key -- enough to reach the service, not enough to be taken at its word
+// about whose request this is. Only the web server, whose key never leaves a machine we
+// run, has its stated address read.
+func TestOnlyANamedBearerMaySpeakForSomebodyElse(t *testing.T) {
+	admitted := []string{"web-key", "mobile-key"}
+	bearers := []string{"web-key"}
+	seen := map[string]string{}
+	h := BFF(admitted, bearers)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen[r.Header.Get("X-BFF-Secret")] = ClientIP(r)
+		w.WriteHeader(204)
+	}))
+	for _, key := range admitted {
+		r := httptest.NewRequest(http.MethodGet, "/v1/feed", nil)
+		r.RemoteAddr = "10.0.0.1:4242"
+		r.Header.Set("X-BFF-Secret", key)
+		r.Header.Set(ForwardedClientIP, "203.0.113.9")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != 204 {
+			t.Fatalf("%s was not admitted: %d", key, w.Code)
+		}
+	}
+	if seen["web-key"] != "203.0.113.9" {
+		t.Errorf("the web server was not believed about the visitor's address: %q", seen["web-key"])
+	}
+	if seen["mobile-key"] != "10.0.0.1" {
+		t.Errorf("a key that ships inside an app was believed about somebody else's address: %q", seen["mobile-key"])
 	}
 }
 

@@ -6,6 +6,33 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Being admitted and being believed are two questions
+
+Every caller into `/v1` carries a shared key, and until now holding one meant both "you may
+come in" and "what you say about the person on the other end is true". Those are not the
+same claim, and one of the callers cannot support the second.
+
+The mobile application carries its key inside the application package. Anything shipped to
+a device is readable on that device, so that key is a door handle rather than a lock: enough
+to reach the service, and not enough to be taken at its word about whose request this is.
+Since the previous commit taught the API to read a stated address, a copy of the app was
+also a licence to state any address -- which is the rate-limit bypass the address was
+introduced to close, and a way to charge traffic to somebody else's address besides.
+
+`BFF_ADDRESS_BEARER_SECRETS` now names the callers whose `X-Client-IP` is read: the web
+server, whose key never leaves a machine we run. Every other admitted caller keeps the
+connection's address, which is what the mobile client always had.
+
+Empty means nobody may, and the per-address limits fall back to counting the whole website
+as one caller. That is the safe direction rather than the useful one, so `cmd/api` logs a
+warning at startup when it happens: a silent revert is how this went unnoticed the first
+time.
+
+**This closes the hole for a key we control. It does not make a key inside an app secret** --
+nothing can. The lasting answer for mobile is not a shared key at all: public endpoints
+public and limited by address, everything personal behind the user's own token, and platform
+attestation (App Attest, Play Integrity) if "only our app" ever has to be enforced.
+
 ## Ten sign-in codes an hour, for the whole website at once
 
 The per-address cap on verification codes counted every request into one bucket, because

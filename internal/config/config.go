@@ -17,7 +17,7 @@ import (
 
 type Config struct {
 	Environment, HTTPAddr, DatabaseURL                      string
-	BFFSecrets                                              []string
+	BFFSecrets, BFFAddressBearerSecrets                     []string
 	AccessTokenSecret, OTPHashSecret                        string
 	AccessTokenTTL, RefreshTokenTTL                         time.Duration
 	OTPTTL                                                  time.Duration
@@ -78,7 +78,7 @@ func Load() (Config, error) {
 	}
 	c := Config{
 		Environment: env("APP_ENV", "development"), HTTPAddr: env("HTTP_ADDR", ":8080"),
-		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")), BFFSecrets: split(os.Getenv("BFF_SECRETS")),
+		DatabaseURL: strings.TrimSpace(os.Getenv("DATABASE_URL")), BFFSecrets: split(os.Getenv("BFF_SECRETS")), BFFAddressBearerSecrets: split(os.Getenv("BFF_ADDRESS_BEARER_SECRETS")),
 		AccessTokenSecret: os.Getenv("ACCESS_TOKEN_SECRET"), OTPHashSecret: os.Getenv("OTP_HASH_SECRET"),
 		AppReviewEmail: os.Getenv("APP_REVIEW_EMAIL"), AppReviewCode: os.Getenv("APP_REVIEW_CODE"),
 		GoogleClientID: os.Getenv("GOOGLE_CLIENT_ID"),

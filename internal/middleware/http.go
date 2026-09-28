@@ -68,17 +68,33 @@ func Recover(log *slog.Logger) func(http.Handler) http.Handler {
 		})
 	}
 }
-func BFF(secrets []string) func(http.Handler) http.Handler {
+
+// BFF admits the callers that hold one of `secrets`, and separately decides which of them
+// may also speak for somebody else.
+//
+// Those are two different questions and they were one. Every caller carries a key, but the
+// mobile app carries its key inside the application package -- anything shipped to a device
+// is readable on that device, so that key is a door handle rather than a lock. It is enough
+// to be let in; it is not enough to be believed about who the request is for. Only a caller
+// holding a secret from `addressBearers` -- our own web server, whose copy never leaves a
+// machine we run -- has its `X-Client-IP` read.
+//
+// Leaving `addressBearers` empty means nobody may state an address, and the rate limits
+// fall back to the connection. That is the safe direction rather than the useful one, so
+// main says so out loud at startup when it happens.
+func BFF(secrets, addressBearers []string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !security.MatchSecret(r.Header.Get("X-BFF-Secret"), secrets) {
+			offered := r.Header.Get("X-BFF-Secret")
+			if !security.MatchSecret(offered, secrets) {
 				httpapi.WriteError(w, httpapi.ErrInvalidClient, r.Context())
 				return
 			}
-			// Past this line the caller has proved it is our own web server, which is the
-			// only reason anything it says about the person on the other end can be
-			// believed. See ClientIP.
-			next.ServeHTTP(w, WithTrustedProxy(r))
+			if len(addressBearers) > 0 && security.MatchSecret(offered, addressBearers) {
+				next.ServeHTTP(w, WithTrustedProxy(r))
+				return
+			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }

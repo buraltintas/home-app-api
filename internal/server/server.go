@@ -140,8 +140,14 @@ func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *soci
 	return &Server{db, a, st, so, se, lo, u, m, ad, rp, fb, hashKey, nil}
 }
 
+// AddressBearers names the callers whose word on who a request is for is taken. It is a
+// type of its own because the option list already carries a plain []string for the
+// administrators, and two lists that mean opposite things must not be told apart by luck.
+type AddressBearers []string
+
 func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenManager, options ...any) http.Handler {
 	metricsToken := ""
+	var addressBearers []string
 	defaultLocale := i18n.DefaultLocale
 	var adminEmails []string
 	runtimeConfig := RuntimeConfig{StoreReviewRadiusMeters: 2000}
@@ -153,6 +159,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			defaultLocale = value
 		case []string:
 			adminEmails = value
+		case AddressBearers:
+			addressBearers = value
 		case RuntimeConfig:
 			runtimeConfig = value
 		}
@@ -175,7 +183,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Mount("/uploads", http.StripPrefix("/uploads", uploads))
 	}
 	r.Route("/v1", func(r chi.Router) {
-		r.Use(appmw.BFF(bff))
+		r.Use(appmw.BFF(bff, addressBearers))
 		// Identity is read before the limit is counted, so the limit can be counted against
 		// the person rather than against the web server that delivered their request. The
 		// account lookup stays behind the limiter, because that one touches the database.

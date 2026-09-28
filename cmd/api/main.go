@@ -129,7 +129,14 @@ func main() {
 	// hours, it takes 3,817 requests down to 302 and gives the database 107 minutes of the
 	// quiet it needs to suspend itself -- 45% of the window -- where today it gets none.
 	api.SetReadCache(readcache.New(cfg.ReadCacheBytes, cfg.ReadCacheTTL))
-	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails, server.RuntimeConfig{StoreReviewRadiusMeters: cfg.StoreReviewRadiusMeters}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	// Said out loud, because the safe direction here is also the useless one: with nobody
+	// named, no caller may state who a request is for, and every rate limit counted against
+	// an address falls back to the connection -- which for the website is one address for
+	// everybody. A silent revert of that is exactly how it went unnoticed the first time.
+	if len(cfg.BFFAddressBearerSecrets) == 0 {
+		log.Warn("no BFF_ADDRESS_BEARER_SECRETS configured: the web server cannot state a visitor's address, so per-address limits count the whole site as one caller")
+	}
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: api.Router(log, cfg.BFFSecrets, tokens, cfg.MetricsToken, cfg.DefaultLocale, cfg.AdminEmails, server.AddressBearers(cfg.BFFAddressBearerSecrets), server.RuntimeConfig{StoreReviewRadiusMeters: cfg.StoreReviewRadiusMeters}), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
 	go func() {
 		log.Info("api listening", "addr", cfg.HTTPAddr, "environment", cfg.Environment)
 		if e := server.ListenAndServe(); e != nil && e != http.ErrServerClosed {
