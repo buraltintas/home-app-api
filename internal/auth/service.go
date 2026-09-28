@@ -480,8 +480,16 @@ func (s *Service) Logout(ctx context.Context, user, session uuid.UUID, all bool)
 	return e
 }
 
-func IPHash(key []byte, ip string) []byte { return security.Hash(key, ip) }
-func Unexpected(err error) error          { return fmt.Errorf("auth: %w", err) }
+// IPHash identifies an address without storing one. An address we could not establish
+// hashes to nothing at all rather than to the empty string: every such request would
+// otherwise share a single bucket, which is the fault this whole path was changed to fix.
+func IPHash(key []byte, ip string) []byte {
+	if strings.TrimSpace(ip) == "" {
+		return nil
+	}
+	return security.Hash(key, ip)
+}
+func Unexpected(err error) error { return fmt.Errorf("auth: %w", err) }
 
 // ChangeEmail moves a signed-in account to an address whose owner has just proved they can
 // read it.

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -398,8 +397,12 @@ func (s *Server) issueCode(w http.ResponseWriter, r *http.Request, permitted *ap
 	if v, ok := appmw.VisitorID(r); ok {
 		visitor = &v
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if e := s.auth.RequestCode(r.Context(), in.Email, visitor, auth.IPHash(s.hashKey, ip)); e != nil {
+	// The person's own address, not the web server's. Counted per hour and, until this
+	// line, the same value for everybody: ten requests from anyone at all and nobody could
+	// be sent a sign-in code until the hour turned. An address we cannot vouch for hashes
+	// to nothing rather than to the one shared bucket, so the per-address cap simply does
+	// not apply to that request -- the per-address and per-session caps still do.
+	if e := s.auth.RequestCode(r.Context(), in.Email, visitor, auth.IPHash(s.hashKey, appmw.ClientIP(r))); e != nil {
 		observability.Auth("otp_request", "failure")
 		WriteError(w, e, r.Context())
 		return

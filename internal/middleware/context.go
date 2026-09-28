@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 
@@ -14,10 +15,56 @@ import (
 type contextKey string
 
 const (
-	principalKey contextKey = "principal"
-	requestIDKey contextKey = "request_id"
-	visitorKey   contextKey = "visitor"
+	principalKey    contextKey = "principal"
+	requestIDKey    contextKey = "request_id"
+	visitorKey      contextKey = "visitor"
+	trustedProxyKey contextKey = "trusted_proxy"
 )
+
+// ForwardedClientIP is the address of the person the request is for, as stated by a caller
+// that has already proved it is ours.
+const ForwardedClientIP = "X-Client-IP"
+
+// WithTrustedProxy marks a request as delivered by a caller that matched the shared
+// secret. Nothing else may set it, which is what makes the forwarded address believable.
+func WithTrustedProxy(r *http.Request) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), trustedProxyKey, true))
+}
+
+func trustedProxy(ctx context.Context) bool {
+	ok, _ := ctx.Value(trustedProxyKey).(bool)
+	return ok
+}
+
+// ClientIP is whose request this is, rather than who handed it over.
+//
+// Every request from the website arrives from the web server, so `RemoteAddr` is one
+// address for the entire product. That was not a wasted signal, it was a wrong one: the
+// per-address cap on sign-in codes counted the whole site into a single bucket of ten an
+// hour, so ten requests from anyone at all left nobody able to sign in until the hour
+// turned. Measured on the live database before this was written -- every verification code
+// ever issued, across six different addresses and a month of them, sat in one bucket.
+//
+// The web server states the real address in a header. It is believed only on a request
+// that already matched the shared secret to get this far, and the header is never read on
+// the handful of routes that sit outside that gate. An address we cannot vouch for is not
+// used at all: falling back to the delivering address there would put the whole site back
+// in one bucket, which is the fault this exists to fix.
+func ClientIP(r *http.Request) string {
+	if trustedProxy(r.Context()) {
+		if forwarded := strings.TrimSpace(r.Header.Get(ForwardedClientIP)); forwarded != "" {
+			if ip := net.ParseIP(forwarded); ip != nil {
+				return ip.String()
+			}
+		}
+		return ""
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return strings.TrimSpace(r.RemoteAddr)
+	}
+	return host
+}
 
 type Principal struct{ UserID, SessionID uuid.UUID }
 

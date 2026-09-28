@@ -104,7 +104,7 @@ func TestOptionalAndRequiredAuth(t *testing.T) {
 }
 
 // Every request reaches this service from the web server, so keying the limit on the
-// remote address put the entire product in one bucket. A results page prefetching two
+// delivering address put the entire product in one bucket. A results page prefetching two
 // dozen store links emptied it, and the stores it had just listed came back as 429s.
 func TestTheLimitCountsThePersonNotTheDeliveringServer(t *testing.T) {
 	visitor := uuid.New().String()
@@ -112,24 +112,74 @@ func TestTheLimitCountsThePersonNotTheDeliveringServer(t *testing.T) {
 
 	shared := httptest.NewRequest(http.MethodGet, "/v1/stores/x", nil)
 	shared.RemoteAddr = "10.0.0.1:4242"
+	shared = WithTrustedProxy(shared)
+	shared.Header.Set(ForwardedClientIP, "203.0.113.9")
 	mine := shared.Clone(shared.Context())
 	mine.Header.Set("X-Visitor-Session-ID", visitor)
 	theirs := shared.Clone(shared.Context())
 	theirs.Header.Set("X-Visitor-Session-ID", other)
 
-	if limiterKey(mine) == limiterKey(theirs) {
-		t.Fatal("two browsing sessions from the same web server share a bucket")
+	if sameKeys(limiterKeys(mine), limiterKeys(theirs)) {
+		t.Fatal("two browsing sessions from the same web server share every bucket")
 	}
-	if limiterKey(mine) != "v:"+visitor {
-		t.Errorf("visitor key = %q", limiterKey(mine))
+	if !has(limiterKeys(mine), "v:"+visitor) {
+		t.Errorf("visitor bucket missing: %v", limiterKeys(mine))
 	}
-	// Nothing to go on falls back to the address, which is all there is.
-	if limiterKey(shared) != "10.0.0.1" {
-		t.Errorf("fallback key = %q", limiterKey(shared))
+	// And the address as well, so that rotating the session id does not buy a fresh
+	// allowance -- the whole reason the session id alone was not enough.
+	if !has(limiterKeys(mine), "a:203.0.113.9") || !has(limiterKeys(theirs), "a:203.0.113.9") {
+		t.Errorf("two sessions from one address do not share an address bucket: %v / %v", limiterKeys(mine), limiterKeys(theirs))
 	}
 
 	signedIn := shared.Clone(context.WithValue(shared.Context(), principalKey, Principal{UserID: uuid.New()}))
-	if limiterKey(signedIn) == limiterKey(shared) {
+	if sameKeys(limiterKeys(signedIn), limiterKeys(shared)) {
 		t.Error("a signed-in request should be counted against the account")
 	}
+}
+
+// The forwarded address is a claim, and a claim is only worth the proof behind it. On a
+// route that never matched the shared secret there is no proof, so the header is not read
+// at all -- believing it there would let anyone hand us whichever address they liked.
+func TestAForwardedAddressIsIgnoredWithoutTheSharedSecret(t *testing.T) {
+	forged := httptest.NewRequest(http.MethodGet, "/health", nil)
+	forged.RemoteAddr = "10.0.0.1:4242"
+	forged.Header.Set(ForwardedClientIP, "203.0.113.9")
+	if got := ClientIP(forged); got != "10.0.0.1" {
+		t.Fatalf("an unproven forwarded address was believed: %q", got)
+	}
+
+	proven := WithTrustedProxy(forged.Clone(forged.Context()))
+	if got := ClientIP(proven); got != "203.0.113.9" {
+		t.Fatalf("the web server's own statement was not used: %q", got)
+	}
+
+	// Nonsense in the header is not a licence to fall back to the delivering address:
+	// that address is the one bucket this whole mechanism exists to stop using.
+	silent := WithTrustedProxy(httptest.NewRequest(http.MethodGet, "/v1/feed", nil))
+	silent.RemoteAddr = "10.0.0.1:4242"
+	silent.Header.Set(ForwardedClientIP, "not-an-address")
+	if got := ClientIP(silent); got != "" {
+		t.Fatalf("an unreadable forwarded address fell back to the web server: %q", got)
+	}
+}
+
+func has(keys []string, want string) bool {
+	for _, k := range keys {
+		if k == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sameKeys(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

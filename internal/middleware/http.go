@@ -3,7 +3,6 @@ package middleware
 import (
 	"context"
 	"log/slog"
-	"net"
 	"net/http"
 	"runtime/debug"
 	"strconv"
@@ -76,7 +75,10 @@ func BFF(secrets []string) func(http.Handler) http.Handler {
 				httpapi.WriteError(w, httpapi.ErrInvalidClient, r.Context())
 				return
 			}
-			next.ServeHTTP(w, r)
+			// Past this line the caller has proved it is our own web server, which is the
+			// only reason anything it says about the person on the other end can be
+			// believed. See ClientIP.
+			next.ServeHTTP(w, WithTrustedProxy(r))
 		})
 	}
 }
@@ -84,6 +86,9 @@ func SecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
+		// Two years, subdomains included. The API is reachable only over TLS already; this
+		// is what stops a browser trying the other scheme even once.
+		w.Header().Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -104,15 +109,23 @@ func NewLimiter(perMinute int, burst int) *Limiter {
 }
 func (l *Limiter) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := limiterKey(r)
 		l.mu.Lock()
-		v := l.clients[key]
-		if v == nil {
-			v = &visitor{rate.NewLimiter(l.r, l.burst), time.Now()}
-			l.clients[key] = v
+		// Every bucket this request belongs to, and it has to satisfy all of them. One
+		// key was enough while the key could not be chosen by the caller; the session id
+		// can be, and a fresh one on every request emptied no bucket at all. Spending
+		// from the address as well is what makes rotating it pointless.
+		allowed := true
+		for _, key := range limiterKeys(r) {
+			v := l.clients[key]
+			if v == nil {
+				v = &visitor{rate.NewLimiter(l.r, l.burst), time.Now()}
+				l.clients[key] = v
+			}
+			v.seen = time.Now()
+			// Not short-circuited: a request that is refused still costs every bucket it
+			// belongs to, or the cheapest way past a full bucket would be to keep asking.
+			allowed = v.lim.Allow() && allowed
 		}
-		v.seen = time.Now()
-		allowed := v.lim.Allow()
 		if len(l.clients) > 10000 {
 			cut := time.Now().Add(-15 * time.Minute)
 			for k, x := range l.clients {
@@ -130,33 +143,35 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
 // Who this request is for, not who delivered it.
 //
-// Every request reaches this service from the web server, so the remote address is the
-// same for all of them -- one bucket for the entire product. It held for a while because
-// nobody generated a burst; then a results page with two dozen store links began prefetching
-// them, twenty-odd renders arriving at once from that single address, and the bucket emptied.
-// The page that emptied it then got 429s for stores that plainly exist.
+// A signed-in person is one bucket and nothing else: the account is proof, and two devices
+// on one account are still one person.
 //
-// So the key is the person: their account when they are signed in, their browsing session
-// when they are not. The address is only the last resort, for a first request that carries
-// neither.
-func limiterKey(r *http.Request) string {
+// Everyone else belongs to as many buckets as we can name them by, because neither name is
+// sound on its own. The browsing session is the better signal -- it is what stopped a
+// results page prefetching two dozen store links from emptying one shared bucket and then
+// getting 429s for stores that plainly exist -- but the caller writes it, so a new one on
+// every request is a budget with no end to it. The address cannot be chosen that way, and
+// since ClientIP now returns the person's own address rather than the web server's, it is
+// a real second name for the same request.
+func limiterKeys(r *http.Request) []string {
 	if p, ok := PrincipalFrom(r.Context()); ok {
-		return "u:" + p.UserID.String()
+		return []string{"u:" + p.UserID.String()}
 	}
+	keys := make([]string, 0, 2)
 	if visitor := strings.TrimSpace(r.Header.Get("X-Visitor-Session-ID")); visitor != "" {
 		if _, err := uuid.Parse(visitor); err == nil {
-			return "v:" + visitor
+			keys = append(keys, "v:"+visitor)
 		}
 	}
-	return clientIP(r)
-}
-
-func clientIP(r *http.Request) string {
-	h, _, e := net.SplitHostPort(r.RemoteAddr)
-	if e == nil {
-		return h
+	if ip := ClientIP(r); ip != "" {
+		keys = append(keys, "a:"+ip)
 	}
-	return r.RemoteAddr
+	// A first request carrying neither is rare and still has to be counted somewhere.
+	if len(keys) == 0 {
+		keys = append(keys, "a:unknown")
+	}
+	return keys
 }
