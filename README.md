@@ -170,9 +170,9 @@ with safe code defaults and variables for unused alternative providers are
 intentionally omitted. Important supported groups are:
 
 - core: `DATABASE_URL`, `HTTP_ADDR`, `APP_ENV`, `DEFAULT_LOCALE`
-- client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback)
+- client security: `BFF_SECRETS` (comma-separated; `BFF_SECRET` is a legacy single-secret fallback) admits a caller. `BFF_ADDRESS_BEARER_SECRETS` names which of them may also state who a request is for, in `X-Client-IP` — the web server only, never a key that ships inside a mobile application. Empty means nobody may, and per-address rate limits then count the whole website as one caller; the service logs that at startup.
 - auth: `ACCESS_TOKEN_SECRET`, `OTP_HASH_SECRET`, access/refresh/OTP TTLs, verification attempts, per-email/IP/visitor request limits, and the optional paired `APP_REVIEW_EMAIL`/`APP_REVIEW_CODE`
-- Google: `GOOGLE_CLIENT_ID`, `GOOGLE_PLACES_API_KEY`
+- Google: `GOOGLE_CLIENT_ID` (sign-in only). Places went with the catalogue move and its key is no longer read anywhere.
 - AI: `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_TIMEOUT`; an empty key cleanly disables AI
 - admin: `ADMIN_EMAILS` is a comma-separated allowlist of addresses permitted to use `/v1/admin`. An empty value closes the surface rather than opening it, so a deployment that forgets it fails safe. Administration reuses the ordinary email sign-in; this only decides who is authorised once signed in. A caller who is not on the list is answered 404, not 403, because a 403 confirms the route exists. Never commit an address here.
 - feedback: `FEEDBACK_NOTIFY_EMAIL` is where product feedback is sent as it arrives. It defaults to `info@` on the product domain, so a deployment that sets nothing still delivers; an empty value turns the mail off and leaves the admin surface as the only place feedback lands
@@ -321,7 +321,6 @@ Live providers are deliberately opt-in and skipped without credentials:
 
 ```bash
 make provider-smoke # OPENAI_API_KEY + optional OPENAI_MODEL
-make provider-smoke # GOOGLE_PLACES_API_KEY when present
 make provider-smoke # provider credentials plus an explicit RESEND_TEST_RECIPIENT or GMAIL_TEST_RECIPIENT
 make provider-smoke # GCS_TEST_BUCKET + ADC/IAM, creates and removes one smoke object
 ```
