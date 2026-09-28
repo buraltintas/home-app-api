@@ -47,9 +47,14 @@ func trustedProxy(ctx context.Context) bool {
 //
 // The web server states the real address in a header. It is believed only on a request
 // that already matched the shared secret to get this far, and the header is never read on
-// the handful of routes that sit outside that gate. An address we cannot vouch for is not
-// used at all: falling back to the delivering address there would put the whole site back
-// in one bucket, which is the fault this exists to fix.
+// the handful of routes that sit outside that gate.
+//
+// A caller that matched the secret and states nothing is not the website: the mobile app
+// holds a key of its own and reaches this service directly, so for its requests the
+// connection is the person. It keeps the address it always had. This deliberately does not
+// fall through to nothing -- an earlier draft did, and it turned the per-address cap on
+// sign-in codes off for every mobile request, which is a worse fault than the one being
+// fixed and in the same family.
 func ClientIP(r *http.Request) string {
 	if trustedProxy(r.Context()) {
 		if forwarded := strings.TrimSpace(r.Header.Get(ForwardedClientIP)); forwarded != "" {
@@ -57,7 +62,6 @@ func ClientIP(r *http.Request) string {
 				return ip.String()
 			}
 		}
-		return ""
 	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

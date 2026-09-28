@@ -18,6 +18,12 @@ The default cap is ten an hour. So ten requests from anyone at all, and nobody c
 sent a sign-in code until the hour turned. Nobody had hit it with six accounts on the
 product; at any real traffic it is an outage, and one that needs no privilege to trigger.
 
+A caller that matched the secret and states no address is not the website: the mobile app
+holds a key of its own and reaches this service directly, so for its requests the connection
+is the person and it keeps the address it always had. The first draft of this returned
+nothing there, which would have turned the per-address cap off for every mobile request --
+a worse fault than the one being fixed, and the same fault in a different place.
+
 The web server now states the real address in `X-Client-IP`, and `middleware.ClientIP`
 believes it only on a request that already matched the shared secret to get that far --
 `WithTrustedProxy` is set inside the BFF check and nowhere else, so the handful of routes

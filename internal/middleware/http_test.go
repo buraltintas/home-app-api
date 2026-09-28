@@ -153,13 +153,14 @@ func TestAForwardedAddressIsIgnoredWithoutTheSharedSecret(t *testing.T) {
 		t.Fatalf("the web server's own statement was not used: %q", got)
 	}
 
-	// Nonsense in the header is not a licence to fall back to the delivering address:
-	// that address is the one bucket this whole mechanism exists to stop using.
-	silent := WithTrustedProxy(httptest.NewRequest(http.MethodGet, "/v1/feed", nil))
-	silent.RemoteAddr = "10.0.0.1:4242"
-	silent.Header.Set(ForwardedClientIP, "not-an-address")
-	if got := ClientIP(silent); got != "" {
-		t.Fatalf("an unreadable forwarded address fell back to the web server: %q", got)
+	// The mobile app holds a key of its own and reaches this service directly, so it
+	// passes the same gate and states no address -- for those requests the connection is
+	// the person, and it keeps the address it always had. Handing back nothing here would
+	// switch the per-address cap on sign-in codes off for the whole mobile client.
+	direct := WithTrustedProxy(httptest.NewRequest(http.MethodGet, "/v1/auth/email/request-code", nil))
+	direct.RemoteAddr = "198.51.100.7:5555"
+	if got := ClientIP(direct); got != "198.51.100.7" {
+		t.Fatalf("a direct caller lost its address: %q", got)
 	}
 }
 
