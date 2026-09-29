@@ -368,6 +368,19 @@ func (s *Server) adminHeldReviews(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"items": items, "total": total})
 }
 
+// adminBlockedAttempts lists the passages the check refused before they could become
+// reviews. Nothing here is waiting on a decision -- nothing was written and nothing is
+// pending. It is here so a refusal can be read: audited, noticed as a pattern, or answered
+// if the person who wrote it asks why.
+func (s *Server) adminBlockedAttempts(w http.ResponseWriter, r *http.Request) {
+	items, total, e := s.admin.BlockedAttempts(r.Context(), queryInt(r, "limit", 50), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items, "total": total})
+}
+
 // adminDecideReview publishes a held review or keeps it off the page. Either way the shop's
 // page changes -- a review appears on it, or the shop's numbers are recounted -- so its copy
 // here is dropped, and the store's address is returned for the web side to drop its own.

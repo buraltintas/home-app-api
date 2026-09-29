@@ -888,3 +888,44 @@ func (s *Service) DeletePost(ctx context.Context, user, post uuid.UUID) (uuid.UU
 }
 
 var _ = fmt.Sprintf
+
+// BlockedField names the box the author was filling when the check stopped them. The
+// wording they are shown is the same either way; the operator wants to know which.
+type BlockedField string
+
+const (
+	BlockedCriterionNote BlockedField = "criterion_note"
+	BlockedPurchasedItem BlockedField = "purchased_item"
+)
+
+// Screen reads a passage before the review carrying it exists.
+//
+// The check used to run at the end: the review was created, held back, and shown to its
+// author as "under review". That was wrong twice over. The author was told their review
+// was on its way when it was not, and only waiting told them otherwise; and the flow moved
+// on to the next step as though nothing had happened. So the same check now runs as the
+// step is left, and nothing is written when it fails.
+//
+// A refusal that leaves no trace cannot be audited or appealed, so a blocked passage is
+// recorded for the operator -- the words, what was found in them, who wrote them and about
+// which shop. It does not become a review, so it never reaches the author's own list.
+//
+// Unreadable is not the same as clean: if the check cannot run, the passage is allowed
+// through and the review it ends up in is held at the end exactly as before. Refusing here
+// on an outage would stop people writing reviews at all.
+func (s *Service) Screen(ctx context.Context, user, store uuid.UUID, field BlockedField, body string) (bool, error) {
+	body = strings.TrimSpace(body)
+	if body == "" || s.moderator == nil {
+		return true, nil
+	}
+	verdict, e := s.moderator.Check(ctx, body)
+	if e != nil || !verdict.Severe() {
+		return true, nil
+	}
+	findings, _ := json.Marshal(verdict.Findings)
+	if _, e = s.db.Exec(ctx, `INSERT INTO blocked_review_attempts(id,user_id,store_id,field,body,model,findings) VALUES($1,$2,$3,$4,$5,$6,$7)`,
+		uuid.New(), user, store, string(field), body, s.moderator.Model(), findings); e != nil {
+		return false, e
+	}
+	return false, nil
+}

@@ -141,6 +141,12 @@ func SourceFor(spec BrandSpec, fetcher *Fetcher) (Source, bool, error) {
 			return nil, false, e
 		}
 		return source, true, nil
+	case "harvest":
+		source, e := NewHarvestSource(spec)
+		if e != nil {
+			return nil, false, e
+		}
+		return source, true, nil
 	case "", "none":
 		return nil, false, nil
 	}

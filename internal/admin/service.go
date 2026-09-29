@@ -1149,3 +1149,49 @@ UPDATE store_stats ss SET
 	}
 	return tx.Commit(ctx)
 }
+
+// BlockedAttempt is a passage the check refused before it could become a review.
+//
+// It is listed beside the held reviews because it is the same judgement made earlier, but
+// it is a different kind of row and says so: nothing was published, nothing is waiting to
+// be published, and there is no decision for an operator to take. It is here to be read --
+// so a refusal can be audited, a pattern noticed, and an author answered if they ask why.
+type BlockedAttempt struct {
+	ID        uuid.UUID       `json:"id"`
+	UserID    uuid.UUID       `json:"user_id"`
+	Author    string          `json:"author"`
+	StoreID   uuid.UUID       `json:"store_id"`
+	StoreName string          `json:"store_name"`
+	Field     string          `json:"field"`
+	Body      string          `json:"body"`
+	Findings  json.RawMessage `json:"findings"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+func (s *Service) BlockedAttempts(ctx context.Context, limit, offset int) ([]BlockedAttempt, int, error) {
+	var total int
+	if e := s.db.QueryRow(ctx, `SELECT count(*) FROM blocked_review_attempts`).Scan(&total); e != nil {
+		return nil, 0, e
+	}
+	rows, e := s.db.Query(ctx, `SELECT a.id,a.user_id,coalesce(up.display_name,''),a.store_id,st.name,a.field,a.body,a.findings,a.created_at
+ FROM blocked_review_attempts a JOIN stores st ON st.id=a.store_id LEFT JOIN user_profiles up ON up.user_id=a.user_id
+ ORDER BY a.created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+	if e != nil {
+		return nil, 0, e
+	}
+	defer rows.Close()
+	out := []BlockedAttempt{}
+	for rows.Next() {
+		var a BlockedAttempt
+		var findings []byte
+		if e = rows.Scan(&a.ID, &a.UserID, &a.Author, &a.StoreID, &a.StoreName, &a.Field, &a.Body, &findings, &a.CreatedAt); e != nil {
+			return nil, 0, e
+		}
+		if len(findings) == 0 {
+			findings = []byte("[]")
+		}
+		a.Findings = findings
+		out = append(out, a)
+	}
+	return out, total, rows.Err()
+}

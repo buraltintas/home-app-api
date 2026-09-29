@@ -268,6 +268,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/users/{id}", s.adminDeleteUser)
 			r.Delete("/reviews/{id}", s.adminDeleteReview)
 			r.Get("/moderation", s.adminHeldReviews)
+			r.Get("/moderation/blocked", s.adminBlockedAttempts)
 			r.Post("/moderation/{id}", s.adminDecideReview)
 		})
 		r.Route("/auth", func(r chi.Router) {
@@ -293,6 +294,9 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.With(writeLimit.Middleware).Post("/me/email", s.changeEmail)
 			r.Get("/me/messages", s.myMessages)
 			r.With(writeLimit.Middleware).Post("/posts", s.createPost)
+			// Read before the step is left, not after the review is written. It costs a
+			// model call, so it shares the write allowance rather than the browsing one.
+			r.With(writeLimit.Middleware).Post("/reviews/screen", s.screenReviewText)
 			r.With(writeLimit.Middleware).Post("/stores/{id}/visit-verifications", s.verifyStoreVisit)
 			r.With(writeLimit.Middleware).Post("/media/uploads", s.createMediaUpload)
 			r.With(writeLimit.Middleware).Post("/media/{id}/complete", s.completeMediaUpload)
@@ -1024,6 +1028,38 @@ func (s *Server) deleteMySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+// screenReviewText answers whether a passage may go on to the next step. It never creates
+// a review; a passage it refuses is recorded for the operator instead, and the author is
+// shown one sentence rather than a list of what was found in their words.
+func (s *Server) screenReviewText(w http.ResponseWriter, r *http.Request) {
+	p, _ := appmw.PrincipalFrom(r.Context())
+	var in struct {
+		StoreID string `json:"store_id"`
+		Field   string `json:"field"`
+		Body    string `json:"body"`
+	}
+	if e := Decode(w, r, &in, 16<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	store, e := uuid.Parse(in.StoreID)
+	if e != nil {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	field := social.BlockedField(in.Field)
+	if field != social.BlockedCriterionNote && field != social.BlockedPurchasedItem {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	allowed, e := s.social.Screen(r.Context(), p.UserID, store, field, in.Body)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]bool{"allowed": allowed})
 }
 
 func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {

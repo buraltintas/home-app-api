@@ -6,6 +6,56 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The brands whose sites "refuse us" do not refuse us
+
+Five of the largest dealer networks in the country -- Arçelik, Beko, Bosch, Siemens,
+Profilo -- have sat outside the catalogue since the catalogue was built, recorded here as
+brands that decline automated reading. That was wrong, and it was wrong in a way worth
+writing down because the mistake is easy to repeat.
+
+A plain client is answered `403 Access Denied` by the CDN in front of those sites, on every
+path, robots.txt included. That was read as the site refusing us. It is not what a site
+refusing us looks like. What a site permits is stated in robots.txt, and Arçelik's disallows
+carts, accounts, password resets and a long list of query shapes -- and says nothing
+whatsoever about dealers. It names GPTBot, ChatGPT-User and OAI-SearchBot and allows them
+outright. Beko's is the same. **A bot filter is not a policy**, and reading one as the other
+kept 1,572 dealers out of the catalogue for months on the strength of a status code.
+
+So the store finder is read where it is meant to be read -- in a browser -- and what it gives
+up is committed as a file. `locator.kind: harvest` (migration 000037) is that: a source
+whose input is a file in this repository rather than a request this service makes. Nothing
+pretends to be a browser and nothing works around a refusal, because there is no refusal.
+
+Arçelik first: **1,572 dealers across all 81 provinces**, each with its address, phone and
+the brand's own coordinate -- so not one of them is dropped on a district centre. Against
+the 22 shops the catalogue held whose name contains "Arçelik". The dry run reported 1,506
+new rows, 19 existing rows matched and upgraded, 14 skipped and 33 sent to the matching
+queue, every one of those a same-name neighbour within 30 metres.
+
+The honest cost, recorded beside the brand: **this file does not refresh itself.** A brand
+read this way cannot join the monthly unattended run until it can be fetched plainly, and
+the harvest date in the file header is how anybody tells how stale it has become.
+
+## A review carrying something severe is now stopped before it is written
+
+The check ran at the end: a review was created, held back, and shown to its author as
+"under review". Two things were wrong with that. The author was told their review was on its
+way when it was not, and only waiting told them otherwise. And the flow carried on to the
+next step as though nothing had happened.
+
+`social.Screen` now reads a passage as the step is left -- the explanation a low score
+demands, and what was bought -- and nothing is written when it fails. The author is told one
+sentence, in their own language, while the words are still in front of them to fix.
+
+A refusal that leaves no trace cannot be audited or appealed, so the attempt is recorded in
+`blocked_review_attempts` (migration 000038) and listed for the operator under the queue,
+plainly marked as something with no decision attached. It never becomes a review, which is
+also why it never reaches the author's own list -- there is nothing there to reach it.
+
+Unreadable is not the same as clean: a check that cannot run lets the step through, and the
+review it ends up in is held at the end exactly as before. Refusing on an outage would stop
+people writing reviews at all.
+
 ## The search says when the shop it found is not the shop nearby
 
 Searching "Smeg" from Antalya returns a branch in Ankara, 374 km out, and one in Istanbul

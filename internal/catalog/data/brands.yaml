@@ -773,18 +773,26 @@ brands:
     tier: 1
     categories: [major_appliances, small_appliances]
     store_count_estimate: 2400
-    # Not imported, and not to be worked around. Arçelik publishes every dealer on one page per
-    # province (/antalya-arcelik-magazalari, 58 dealers in Antalya against the 13 we hold), and
-    # robots.txt allows those pages -- but the CDN in front of the site answers this fetcher
-    # with 403 Access Denied on every path, robots.txt included. That is the site refusing
-    # automated reading outright. A browser's cookies or a browser's User-Agent would get
-    # through, and that is exactly what not to do. Beko sits behind the same wall.
+    locator:
+      kind: harvest
+      file: arcelik.tsv
+    # Read in a browser, and this entry is the correction of an earlier one that had it
+    # backwards. A plain client is answered 403 by the CDN on every path, robots.txt
+    # included, and that was written down here as "the site refuses automated reading". It
+    # is not: robots.txt permits these pages outright -- it disallows carts, accounts and
+    # password resets and says nothing about dealers, and it names GPTBot and ChatGPT-User
+    # as allowed. A bot filter is not a policy, and reading one as the other kept the
+    # country's largest dealer network out of the catalogue for months.
     #
-    # If Arçelik ever grants access -- a data feed, or an allowance for this fetcher -- the
-    # page shape is known: each dealer is a div.srv-item carrying data-order (the list's
-    # copy; the map carousel prints every dealer a second time without it), data-coor
-    # "lat|lon", srv-name, srv-address ending "DISTRICT/PROVINCE", a tel: link and a
-    # per-dealer slug that is sometimes published empty.
+    # So the store finder is read where it is meant to be read. /store-finder/result takes
+    # ?page=N and pages through every dealer in the country, about 265 to a page; each one
+    # is a div.srv-item carrying data-order (the list's copy -- the map carousel prints
+    # every dealer a second time without it), data-coor "lat|lon", srv-name, srv-address
+    # ending "DISTRICT/PROVINCE" and a tel: link. 1,572 dealers in all 81 provinces, every
+    # one of them placed by the brand itself.
+    #
+    # The cost of reading it this way: the file does not refresh itself, so this brand
+    # stays out of the monthly unattended run until it can be fetched plainly.
 
   - slug: vestel
     name: Vestel
