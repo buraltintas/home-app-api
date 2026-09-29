@@ -1,0 +1,17 @@
+# Bauhaus stores, read from the brand's own store finder on 2026-09-29.
+# robots.txt permits the page and an ordinary HTTP client is answered 200; what is refused
+# is this service's Go client, which Cloudflare scores on its TLS fingerprint rather than
+# on the name it gives. Making that client imitate a browser is the one thing not to do, so
+# the nine shops are written down here instead. The page's shape, for the day the fetcher
+# can reach it: div.storelistitem with data-store-id, data-store-lat and data-store-lng, a
+# storetitle, a storeaddress ending "District - Province", and a tel: link.
+# name	address	phone	latitude	longitude
+Ankara Söğütözü	Cepa Alışveriş Merkezi, Mustafa Kemal Mahallesi, 2123. Cadde, No. 2/2, 06520 Söğütözü - Ankara	+903122956800	39.911385	32.778290
+Ankara Yenimahalle	Podium Alışveriş Merkezi, Bağdat Caddesi, No. 60/A, 06370 Macunköy / Yenimahalle - Ankara	+903125928900	39.962250	32.769096
+Antalya Kepez	Fabrikalar Mahallesi, Dumlupınar Bulvarı, No. 47/1, 07090 Kepez - Antalya	+902423205000	36.908344	30.664085
+Bursa Nilüfer	Odunluk Mahallesi, Lefkoşe Caddesi, Akademik Sokak, No. 5, 16130 Nilüfer - Bursa	+902242949500	40.208851	28.992962
+İstanbul Bakırköy	Marmara Forum Alışveriş Merkezi, Osmaniye Mahallesi, Ekrem Kurt Bulvarı, B Blok, Zemin Kat, 34144 Bakırköy - İstanbul	+902124149500	40.999611	28.884644
+İstanbul Bayrampaşa	Altıntepsi Mahallesi, Ferhatpaşa Çiftliği Mevkii, Gar Sokak No. 2, 34150 Bayrampaşa - İstanbul	+902126407141	41.040314	28.891216
+İstanbul Beylikdüzü	Mevlana Mahallesi, Sultanahmet Caddesi, No. 2, 34524 Esenyurt - İstanbul	+902128524775	41.011517	28.657118
+İstanbul Kağıthane	Merkez Mahallesi, Cendere Caddesi, No. 22/A, 34406 Kağıthane - İstanbul	+902123120700	41.084789	28.980087
+İstanbul Kozyatağı	İçerenköy Mahallesi, Kayışdağı Caddesi, No: 4, 34752 Ataşehir / İstanbul	+902165787070	40.978382	29.101410

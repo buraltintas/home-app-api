@@ -908,13 +908,25 @@ brands:
     tier: 2
     categories: [household, garden, bathroom, lighting, kitchenware]
     store_count_estimate: 9
-    # Not imported. robots.txt allows /bauhaus-magazalari and the page carries every shop's id
-    # and point, but Cloudflare in front of it answers this fetcher with 403 while answering
-    # curl with the same User-Agent -- it is scoring the client, not the name. Making this
-    # fetcher look like another client to get through is exactly what not to do. Nine shops:
-    # the panel's store form is the honest way in. The page shape, for the day that changes:
-    # div.storeListItem with data-store-id, data-store-lat and data-store-lng, a storeTitle,
-    # a storeAddress ending "District - Province", and a tel: link.
+    locator:
+      kind: harvest
+      file: bauhaus.tsv
+    # This entry used to say "not imported", and the reason it gave was right at the time
+    # and had never been checked since. Cloudflare in front of the site answers this
+    # service's fetcher with 403; asked again on 2026-09-29, it answers an ordinary HTTP
+    # client 200 under our own name, with no header dressed up. robots.txt permits the page
+    # and always did -- it disallows the admin area, product pages, the cart, checkout and
+    # search, and says nothing about the shops.
+    #
+    # What is being refused is not the name we give but the Go client's TLS handshake, which
+    # Cloudflare scores. Teaching that client to imitate a browser's handshake is the one
+    # thing not to do, so the nine shops are read and written down instead, the same way
+    # Arçelik's and Beko's are.
+    #
+    # The page's shape, for the day the fetcher can reach it: div.storelistitem carrying
+    # data-store-id, data-store-lat and data-store-lng, a storetitle with the branch's own
+    # name, a storeaddress ending "District - Province", and a tel: link. One shop's block
+    # ends at storeworkinghourstrigger, which is the last thing in it.
 
   - slug: banio-yapi-market
     name: Banio Yapı Market

@@ -175,7 +175,15 @@ func writeManifest(dir string) error {
 	logos := map[string]string{}
 	for _, entry := range entries {
 		name := entry.Name()
-		if entry.IsDir() || name == manifestName || strings.HasPrefix(name, "_") {
+		if entry.IsDir() || strings.HasPrefix(name, "_") {
+			continue
+		}
+		// A mark is an image. This directory also holds the data files the marks are
+		// described by, and naming them by exclusion -- everything that is not
+		// manifest.json -- turned categories.json into a brand called "categories" the
+		// moment it was added. What belongs here is a short list of what an <img> can
+		// show, and anything else in the directory is left alone.
+		if !isImage(filepath.Ext(name)) {
 			continue
 		}
 		slug := strings.TrimSuffix(name, filepath.Ext(name))
@@ -194,6 +202,18 @@ func writeManifest(dir string) error {
 }
 
 const manifestName = "manifest.json"
+
+// The formats a browser will show as a brand's mark. Deliberately a list and not a
+// negation: a directory picks up files nobody planned for, and a mark that cannot be
+// displayed is worse than a missing one -- the shop shows a broken image instead of its
+// initial.
+func isImage(extension string) bool {
+	switch strings.ToLower(extension) {
+	case ".svg", ".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif":
+		return true
+	}
+	return false
+}
 
 func save(ctx context.Context, fetcher *catalog.Fetcher, website, base string) (string, error) {
 	page, e := fetcher.Get(ctx, website)

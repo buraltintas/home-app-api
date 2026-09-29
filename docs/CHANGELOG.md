@@ -6,6 +6,38 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Bauhaus was left out by a reason that had stopped being true
+
+Its entry said "not imported", and gave a reason that was correct when it was written and
+had never been asked again: Cloudflare in front of the site answered this service's fetcher
+with 403. Asked on 2026-09-29 under our own name, with no header dressed up, an ordinary
+HTTP client gets 200. robots.txt permits the page and always did -- it disallows the admin
+area, product pages, the cart, checkout and search, and says nothing about the shops.
+
+What is still refused is the Go client specifically, which Cloudflare scores on its TLS
+handshake rather than on the name it gives. Teaching that client to imitate a browser's
+handshake is the one thing not to do, so the nine shops are read and written down --
+`bauhaus.tsv`, `kind: harvest`, like Arçelik's and Beko's. The page's shape is recorded in
+the entry beside it, so the day the fetcher can reach it this becomes an ordinary `html`
+locator without anybody working the markup out again.
+
+Nine shops, all nine placed by the brand's own coordinate, none needing review.
+
+**A written-down reason has a date on it whether or not anybody typed one.** "The site
+refuses us" was true in September and false in September, and nothing in between would have
+said so. When an entry here records a refusal, it is worth re-asking before treating it as
+settled -- which is the same lesson as Arçelik's, arriving from the other direction: there
+the refusal was misread, here it had simply expired.
+
+**Two things fixed while reading it.** A slash in a Turkish address is more often a house
+number than a place -- "NO:32/1D", "No. 2/2" -- and `placeFromAddress` scanned from the end
+and took whichever came last, so a row ending in a house number handed the normaliser two
+fields of rubbish to recover from. A half carrying a digit now disqualifies the pair; no
+province or district in the country has one in its name. And `cmd/brand-logos` built its
+manifest by excluding `manifest.json` and taking everything else, which turned
+`categories.json` into a brand called "categories" the moment that file was added; a mark
+is now recognised by being an image.
+
 ## Comments are read before they are published, like the reviews they sit under
 
 The check that holds back an insult, a threat, an accusation or somebody's private details

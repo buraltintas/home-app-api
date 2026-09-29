@@ -108,9 +108,15 @@ func (s *harvestSource) Fetch(ctx context.Context) ([]RawStore, error) {
 }
 
 // placeFromAddress reads the province and district off the end of a Turkish postal address,
-// which is where this brand writes them: "... NO:33 BİSMİL/DİYARBAKIR". Some rows carry the
-// pair twice; the last one is taken, and a row that carries neither is left for the
-// normaliser rather than guessed at.
+// which is where several of these brands write them: "... NO:33 BİSMİL/DİYARBAKIR". Some
+// rows carry the pair twice; the last one is taken, and a row that carries neither is left
+// for the normaliser, which knows how to read a province out of the whole address and how
+// to fall back on the shop's own point.
+//
+// A slash in a Turkish address is far more often a house number than a place -- "NO:32/1D",
+// "No. 2/2" -- and scanning from the end finds whichever comes last. So a half carrying a
+// digit disqualifies the pair: no province or district in the country has one in its name,
+// and reading "2/2" as a place hands the normaliser two fields of rubbish to recover from.
 func placeFromAddress(address string) (city, district string) {
 	fields := strings.Fields(address)
 	for i := len(fields) - 1; i >= 0; i-- {
@@ -118,9 +124,16 @@ func placeFromAddress(address string) (city, district string) {
 		if slash <= 0 || slash == len(fields[i])-1 {
 			continue
 		}
-		district = strings.TrimSpace(fields[i][:slash])
-		city = strings.TrimSpace(fields[i][slash+1:])
-		return city, district
+		left := strings.TrimSpace(fields[i][:slash])
+		right := strings.TrimSpace(fields[i][slash+1:])
+		if left == "" || right == "" || hasDigit(left) || hasDigit(right) {
+			continue
+		}
+		return right, left
 	}
 	return "", ""
+}
+
+func hasDigit(text string) bool {
+	return strings.ContainsAny(text, "0123456789")
 }
