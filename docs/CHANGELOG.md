@@ -6,6 +6,20 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The search says when the shop it found is not the shop nearby
+
+Searching "Smeg" from Antalya returns a branch in Ankara, 374 km out, and one in Istanbul
+at 488 km. That is the rule working: a named shop is looked for inside the horizon first,
+and only when nothing of that name stands there is the nearest one anywhere worth showing.
+The list was right and it did not read as right -- two shops hundreds of kilometres away,
+under a heading that says the order is by distance, leaves the reader to work the branch out
+from the numbers.
+
+Which branch was taken is something only this service knows, so it now says so:
+`named_store_far_away` on the response. A page inferring it from the distances would be
+re-deriving a decision already made here, and would get it wrong the moment the horizon
+moves.
+
 ## Being admitted and being believed are two questions
 
 Every caller into `/v1` carries a shared key, and until now holding one meant both "you may

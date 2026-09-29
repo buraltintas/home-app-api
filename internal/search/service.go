@@ -356,6 +356,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	// and a branch four provinces away is not part of it. Only when nothing nearby carries
 	// the name is the nearest one anywhere worth showing -- which is the case the loosened
 	// rule was written for in the first place.
+	namedStoreFarAway := false
 	if in.Latitude != nil {
 		if intent.StoreName == "" {
 			results = withinLocalHorizon(results)
@@ -364,6 +365,13 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 			// right for a category and wrong for a name: the shop was found where the
 			// reader is, and a second branch four provinces away is not more of the answer.
 			results = local
+		} else {
+			// The other branch, and until now it was silent. The list is correct -- the
+			// nearest one anywhere is what was asked for once nothing carries the name
+			// nearby -- but a reader given two shops 374 and 488 km away, under a heading
+			// that says the order is by distance, has to work that out from the numbers.
+			// The service knows; it should say so.
+			namedStoreFarAway = true
 		}
 	}
 	rankResults(results, in.Latitude != nil, intent.StoreName != "")
@@ -417,7 +425,7 @@ func (s *Service) search(ctx context.Context, user, visitor *uuid.UUID, in Reque
 	}
 	observability.SearchStage("local", localElapsed)
 	observability.SearchStage("total", time.Since(start))
-	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback}, nil
+	return Response{SearchID: searchID, VisitorSessionID: visitor, Intent: intent, Results: results, Guidance: guidance, FallbackState: fallback, NamedStoreFarAway: namedStoreFarAway}, nil
 }
 
 func localContainsStoreName(items []storepkg.Item, name string) bool {

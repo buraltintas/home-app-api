@@ -387,3 +387,19 @@ func containsString(values []string, want string) bool {
 	}
 	return false
 }
+
+// A name searched for, nothing of that name nearby: the list is the nearest ones anywhere,
+// and the page has to be able to say so. Working it out from the distances would mean
+// re-deriving a decision this package already made.
+func TestTheHorizonBranchIsReportedNotInferred(t *testing.T) {
+	near := 6000.0
+	far := 374000.0
+	nearby := []Result{{DistanceMeters: &near, nameHit: true}}
+	if !containsNameHit(localOnly(nearby)) {
+		t.Fatal("a named shop inside the horizon was not seen as nearby")
+	}
+	elsewhere := []Result{{DistanceMeters: &near}, {DistanceMeters: &far, nameHit: true}}
+	if containsNameHit(localOnly(elsewhere)) {
+		t.Fatal("a named shop four provinces away was counted as nearby")
+	}
+}

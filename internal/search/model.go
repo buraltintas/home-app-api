@@ -220,6 +220,11 @@ type Response struct {
 	Results          []Result   `json:"results"`
 	Guidance         *Guidance  `json:"guidance,omitempty"`
 	FallbackState    string     `json:"fallback_state,omitempty"`
+	// NamedStoreFarAway says a shop was asked for by name and none of that name stands
+	// inside the horizon, so what came back is the nearest one anywhere. Only this service
+	// can say it -- it is the branch the rule below takes, and a reader working it out from
+	// the distances would be re-deriving a decision that was already made here.
+	NamedStoreFarAway bool `json:"named_store_far_away,omitempty"`
 }
 
 type Guidance struct {
