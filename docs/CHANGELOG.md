@@ -6,6 +6,38 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Comments are read before they are published, like the reviews they sit under
+
+The check that holds back an insult, a threat, an accusation or somebody's private details
+has been reading reviews since it was built, and was not reading the comments underneath
+them -- which are on the same page, read by the same visitors, and carry the same risk.
+A comment is shorter than a review; that is not the same as being safer.
+
+So `comments` gains the same three states `posts` has (`published`, `held`, `removed`) and
+a `comment_moderation` table beside it, both shaped exactly like the review's so there is
+one vocabulary and not two. The decision itself is now one function that both paths call:
+what happens when the model fails, or is not configured, cannot change for reviews and
+quietly miss comments.
+
+What each side sees:
+
+- **A visitor** reads published comments, and nothing else. A held comment is not in the
+  list, and the comment count on a review counts published ones -- a count that included
+  held comments would advertise that something is waiting.
+- **The author** is served their own held comment, marked "İncelemede", and is told so at
+  the moment they send it. Saying nothing would look like the comment posted and vanished.
+  A removed comment is shown to nobody, its author included: that decision was made by a
+  person and is not a waiting state.
+- **The panel** gets a second queue under the review queue, `/admin/denetim`, with the
+  review each comment was written under printed beside it -- a comment read on its own is
+  half a conversation. Publishing a comment changes no shop's score, so unlike a review
+  nothing is recounted; only who can read it changes.
+
+Two deploys, in the order the rule requires: migration 000039 first, then the code.
+
+Existing comments default to `published`, so nothing on any page changes when the
+migration runs.
+
 ## Beko's dealers are in, and Bosch, Siemens and Profilo are staying out -- in writing
 
 The four brands left over from the Arçelik correction, finished one way or the other.
