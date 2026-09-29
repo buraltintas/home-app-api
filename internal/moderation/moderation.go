@@ -69,6 +69,11 @@ type Parts struct {
 	PurchasedItem string
 	// Notes are the explanations a low score requires, keyed by the criterion they explain.
 	Notes map[string]string
+	// Comment is a reply written under somebody else's review. It is labelled separately
+	// because it is answering the text above it rather than describing a shop, and the
+	// check reads a threat aimed at another reader differently from a complaint about a
+	// till.
+	Comment string
 }
 
 // Text joins what is readable into one piece, each part labelled so the model knows which is
@@ -91,6 +96,9 @@ func Text(p Parts) string {
 	}
 	if body := strings.TrimSpace(p.Body); body != "" {
 		lines = append(lines, "Review text: "+body)
+	}
+	if comment := strings.TrimSpace(p.Comment); comment != "" {
+		lines = append(lines, "Comment written under a review: "+comment)
 	}
 	return strings.Join(lines, "\n")
 }

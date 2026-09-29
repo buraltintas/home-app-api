@@ -269,6 +269,8 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 			r.Delete("/reviews/{id}", s.adminDeleteReview)
 			r.Get("/moderation", s.adminHeldReviews)
 			r.Get("/moderation/blocked", s.adminBlockedAttempts)
+			r.Get("/moderation/comments", s.adminHeldComments)
+			r.Post("/moderation/comments/{id}", s.adminDecideComment)
 			r.Post("/moderation/{id}", s.adminDecideReview)
 		})
 		r.Route("/auth", func(r chi.Router) {
@@ -770,7 +772,7 @@ func (s *Server) comments(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	x, e := s.social.Comments(r.Context(), id, queryInt(r, "limit", 50))
+	x, e := s.social.Comments(r.Context(), id, viewer(r), queryInt(r, "limit", 50))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -1172,7 +1174,7 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 	if e == nil {
 		e = Decode(w, r, &in, 16<<10)
 	}
-	var comment uuid.UUID
+	var comment social.Created
 	if e == nil {
 		comment, e = s.social.AddCommentLocalized(r.Context(), p.UserID, id, in.Text, in.ContentLanguage)
 	}
@@ -1180,7 +1182,10 @@ func (s *Server) addComment(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	JSON(w, 201, map[string]any{"id": comment})
+	// The state goes back with the id for the same reason it does for a review: a comment
+	// held for reading is not on the page, and its author is told so rather than shown a
+	// success and an empty thread.
+	JSON(w, 201, comment)
 }
 func (s *Server) idAction(w http.ResponseWriter, r *http.Request, fn func(uuid.UUID, uuid.UUID) error) {
 	p, _ := appmw.PrincipalFrom(r.Context())

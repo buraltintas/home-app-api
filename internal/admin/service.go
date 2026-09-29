@@ -574,6 +574,89 @@ func (s *Service) DecideReview(ctx context.Context, actor uuid.UUID, email strin
 	return store, slug, tx.Commit(ctx)
 }
 
+// HeldComment is one comment waiting for a person. It carries the review it was written
+// under, because a comment read on its own is half a conversation and the decision is
+// usually about what it is answering.
+type HeldComment struct {
+	ID         uuid.UUID       `json:"id"`
+	PostID     uuid.UUID       `json:"post_id"`
+	StoreID    uuid.UUID       `json:"store_id"`
+	StoreName  string          `json:"store_name"`
+	StoreSlug  string          `json:"store_slug"`
+	UserID     uuid.UUID       `json:"user_id"`
+	Author     string          `json:"author"`
+	Body       string          `json:"body"`
+	ReviewText string          `json:"review_text,omitempty"`
+	Verdict    string          `json:"verdict"`
+	Findings   json.RawMessage `json:"findings"`
+	Error      string          `json:"error,omitempty"`
+	CreatedAt  time.Time       `json:"created_at"`
+}
+
+// HeldComments is the comment queue, newest first, and how long it is.
+func (s *Service) HeldComments(ctx context.Context, limit, offset int) ([]HeldComment, int, error) {
+	var total int
+	if e := s.db.QueryRow(ctx, `SELECT count(*) FROM comments WHERE moderation='held' AND deleted_at IS NULL`).Scan(&total); e != nil {
+		return nil, 0, e
+	}
+	rows, e := s.db.Query(ctx, `SELECT c.id,c.post_id,p.store_id,st.name,st.slug,c.user_id,coalesce(up.display_name,''),c.body,coalesce(p.body,''),
+ coalesce(m.verdict,'unchecked'),coalesce(m.findings,'[]'::jsonb),coalesce(m.error,''),c.created_at
+ FROM comments c JOIN posts p ON p.id=c.post_id JOIN stores st ON st.id=p.store_id
+ LEFT JOIN user_profiles up ON up.user_id=c.user_id
+ LEFT JOIN comment_moderation m ON m.comment_id=c.id
+ WHERE c.moderation='held' AND c.deleted_at IS NULL
+ ORDER BY c.created_at DESC LIMIT $1 OFFSET $2`, clamp(limit), offset)
+	if e != nil {
+		return nil, 0, e
+	}
+	defer rows.Close()
+	out := []HeldComment{}
+	for rows.Next() {
+		var x HeldComment
+		if e = rows.Scan(&x.ID, &x.PostID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Body, &x.ReviewText, &x.Verdict, &x.Findings, &x.Error, &x.CreatedAt); e != nil {
+			return nil, 0, e
+		}
+		out = append(out, x)
+	}
+	return out, total, rows.Err()
+}
+
+// DecideComment is a person's answer to a held comment: publish it as written, or keep it
+// off the page. Removed is kept rather than deleted so the decision can be looked at again.
+// Unlike a review there is no shop figure to recount -- a comment carries no rating -- so
+// the only thing that changes is who can read it.
+func (s *Service) DecideComment(ctx context.Context, actor uuid.UUID, email string, comment uuid.UUID, decision string) (uuid.UUID, string, error) {
+	state := map[string]string{"approved": "published", "removed": "removed"}[decision]
+	if state == "" {
+		return uuid.Nil, "", httpapi.ErrInvalidInput
+	}
+	tx, e := s.db.Begin(ctx)
+	if e != nil {
+		return uuid.Nil, "", e
+	}
+	defer tx.Rollback(ctx)
+	var store uuid.UUID
+	var slug string
+	e = tx.QueryRow(ctx, `UPDATE comments c SET moderation=$2,updated_at=now() FROM posts p, stores st
+ WHERE c.id=$1 AND c.moderation='held' AND c.deleted_at IS NULL AND p.id=c.post_id AND st.id=p.store_id RETURNING p.store_id,st.slug`, comment, state).Scan(&store, &slug)
+	if e == pgx.ErrNoRows {
+		return uuid.Nil, "", httpapi.E(404, "COMMENT_NOT_HELD", "This comment is not waiting for a decision")
+	}
+	if e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `INSERT INTO comment_moderation(comment_id,verdict) VALUES($1,'unchecked') ON CONFLICT(comment_id) DO NOTHING`, comment); e != nil {
+		return uuid.Nil, "", e
+	}
+	if _, e = tx.Exec(ctx, `UPDATE comment_moderation SET decided_by=$2,decided_at=now(),decision=$3 WHERE comment_id=$1`, comment, actor, decision); e != nil {
+		return uuid.Nil, "", e
+	}
+	if e = record(ctx, tx, actor, email, "comment.moderate", "comment", comment, map[string]any{"store_id": store.String(), "decision": decision}); e != nil {
+		return uuid.Nil, "", e
+	}
+	return store, slug, tx.Commit(ctx)
+}
+
 // RecordUserDeletion notes an administrator-initiated account deletion. The deletion itself
 // runs through the ordinary user service, so administrator and self-service deletion cannot
 // drift apart and the published account-deletion page stays accurate for both.

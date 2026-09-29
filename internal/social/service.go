@@ -272,6 +272,9 @@ type Comment struct {
 	DisplayName     string    `json:"display_name"`
 	AvatarURL       string    `json:"avatar_url"`
 	CreatedAt       time.Time `json:"created_at"`
+	// Moderation is 'published' for everything anybody else can see. A reader is shown
+	// their own comment while it waits, marked, rather than left wondering where it went.
+	Moderation string `json:"moderation,omitempty"`
 }
 
 // Created is what writing a review produced: its id, and whether it is on the page yet.
@@ -297,7 +300,19 @@ type moderationCheck struct {
 // page. A review of scores alone has nothing to read and is published without anything
 // being sent anywhere; most reviews are that.
 func (s *Service) moderate(ctx context.Context, in CreatePost) (string, *moderationCheck) {
-	text := moderation.Text(moderation.Parts{Body: in.Text, PurchasedItem: in.PurchasedItem, Notes: in.CriterionNotes})
+	return s.read(ctx, moderation.Text(moderation.Parts{Body: in.Text, PurchasedItem: in.PurchasedItem, Notes: in.CriterionNotes}))
+}
+
+// moderateComment is the same reading for a reply written under somebody else's review.
+// The rule that built the review queue says nothing about which box the words were typed
+// into, and a comment is read by the same visitors on the same page.
+func (s *Service) moderateComment(ctx context.Context, body string) (string, *moderationCheck) {
+	return s.read(ctx, moderation.Text(moderation.Parts{Comment: body}))
+}
+
+// read is the one decision both of those make, so that a change to what happens when the
+// check fails cannot apply to reviews and miss comments.
+func (s *Service) read(ctx context.Context, text string) (string, *moderationCheck) {
 	if text == "" {
 		return "published", nil
 	}
@@ -570,7 +585,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 	}
 	rows, e := s.db.Query(ctx, `WITH feed AS (SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,'') content_language,p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,
  coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),
- (SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),
+ (SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),
  EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$1),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$1),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$1),
  CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text)
  ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,
@@ -621,7 +636,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) (Post, error) {
 	var p Post
 	var storePhotoJSON []byte
-	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL AND p.moderation='published'`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media)
+	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL AND p.moderation='published'`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
@@ -631,11 +646,15 @@ func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) 
 	p.AuthorLevel = userpkg.Level(p.AuthorReviewCount)
 	return p, e
 }
-func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Comment, error) {
+// Comments are what a visitor can read under a review: the published ones, and the
+// reader's own while it waits for a person, carrying the state that says so. A removed one
+// is shown to nobody, its author included -- that decision was taken by a person and is
+// not a temporary state.
+func (s *Service) Comments(ctx context.Context, post uuid.UUID, viewer *uuid.UUID, limit int) ([]Comment, error) {
 	if limit < 1 || limit > 100 {
 		limit = 50
 	}
-	rows, e := s.db.Query(ctx, `SELECT c.id,c.user_id,c.body,coalesce(c.content_language::text,''),c.created_at,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,'') FROM comments c JOIN user_profiles p ON p.user_id=c.user_id WHERE c.post_id=$1 AND c.deleted_at IS NULL ORDER BY c.created_at,c.id LIMIT $2`, post, limit)
+	rows, e := s.db.Query(ctx, `SELECT c.id,c.user_id,c.body,coalesce(c.content_language::text,''),c.created_at,coalesce(p.username::text,''),coalesce(p.display_name,''),coalesce(p.avatar_url,''),c.moderation FROM comments c JOIN user_profiles p ON p.user_id=c.user_id WHERE c.post_id=$1 AND c.deleted_at IS NULL AND (c.moderation='published' OR (c.moderation='held' AND c.user_id=$3)) ORDER BY c.created_at,c.id LIMIT $2`, post, limit, viewer)
 	if e != nil {
 		return nil, e
 	}
@@ -643,7 +662,7 @@ func (s *Service) Comments(ctx context.Context, post uuid.UUID, limit int) ([]Co
 	var out []Comment
 	for rows.Next() {
 		var c Comment
-		if e = rows.Scan(&c.ID, &c.UserID, &c.Body, &c.ContentLanguage, &c.CreatedAt, &c.Username, &c.DisplayName, &c.AvatarURL); e != nil {
+		if e = rows.Scan(&c.ID, &c.UserID, &c.Body, &c.ContentLanguage, &c.CreatedAt, &c.Username, &c.DisplayName, &c.AvatarURL, &c.Moderation); e != nil {
 			return nil, e
 		}
 		out = append(out, c)
@@ -670,7 +689,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if column == "user_id" && viewer != nil && *viewer == id {
 		visibility = ""
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.purchased,coalesce(p.purchased_item,''),coalesce(p.criterion_notes,'{}'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness,p.moderation FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL` + visibility + ` ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.purchased,coalesce(p.purchased_item,''),coalesce(p.criterion_notes,'{}'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness,p.moderation FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL` + visibility + ` ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e
@@ -805,40 +824,56 @@ func (s *Service) uniqueMutation(ctx context.Context, add bool, insert, del, exi
 	return tx.Commit(ctx)
 }
 
-func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body string) (uuid.UUID, error) {
+func (s *Service) AddComment(ctx context.Context, user, post uuid.UUID, body string) (Created, error) {
 	return s.AddCommentLocalized(ctx, user, post, body, nil)
 }
 
-func (s *Service) AddCommentLocalized(ctx context.Context, user, post uuid.UUID, body string, language *string) (uuid.UUID, error) {
+// AddCommentLocalized returns the comment's id and whether it is on the page yet, the same
+// pair a review returns. The caller needs the second half: a comment held for reading looks
+// to its author exactly like one that was posted unless it is told otherwise.
+func (s *Service) AddCommentLocalized(ctx context.Context, user, post uuid.UUID, body string, language *string) (Created, error) {
 	body = strings.TrimSpace(body)
 	if utf8.RuneCountInString(body) < 1 || utf8.RuneCountInString(body) > 2000 {
-		return uuid.Nil, httpapi.ErrInvalidInput
+		return Created{}, httpapi.ErrInvalidInput
 	}
 	if language != nil {
 		locale, ok := i18n.Normalize(*language)
 		if !ok {
-			return uuid.Nil, httpapi.ErrInvalidInput
+			return Created{}, httpapi.ErrInvalidInput
 		}
 		value := string(locale)
 		language = &value
 	}
+	// Read before it is written, and outside the transaction: the check is a call to
+	// somebody else's service and holding a row lock across it would put the model's
+	// latency on the database.
+	state, check := s.moderateComment(ctx, body)
 	id := uuid.New()
 	tx, e := s.db.Begin(ctx)
 	if e != nil {
-		return uuid.Nil, e
+		return Created{}, e
 	}
 	defer tx.Rollback(ctx)
-	tag, e := tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body,content_language) SELECT $1,id,$3,$4,$5 FROM posts WHERE id=$2 AND deleted_at IS NULL AND moderation='published'`, id, post, user, body, language)
+	tag, e := tx.Exec(ctx, `INSERT INTO comments(id,post_id,user_id,body,content_language,moderation) SELECT $1,id,$3,$4,$5,$6 FROM posts WHERE id=$2 AND deleted_at IS NULL AND moderation='published'`, id, post, user, body, language, state)
 	if e != nil {
-		return uuid.Nil, e
+		return Created{}, e
 	}
 	if tag.RowsAffected() == 0 {
-		return uuid.Nil, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
+		return Created{}, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
+	if check != nil {
+		findings, _ := json.Marshal(check.findings)
+		if _, e = tx.Exec(ctx, `INSERT INTO comment_moderation(comment_id,model,verdict,findings,error) VALUES($1,$2,$3,$4,$5)`,
+			id, nullIfEmpty(check.model), check.verdict, findings, nullIfEmpty(check.err)); e != nil {
+			return Created{}, e
+		}
+	}
+	// Counted when it is written, not when it is published, which is how a review is
+	// counted too: the figure is what somebody wrote, and the queue is a separate question.
 	if _, e = s.report.RecordTx(ctx, tx, reporting.Event{Type: reporting.CommentCreated, IdempotencyKey: "comment-created:" + id.String(), UserID: &user, PostID: &post}); e != nil {
-		return uuid.Nil, e
+		return Created{}, e
 	}
-	return id, tx.Commit(ctx)
+	return Created{ID: id, Moderation: state}, tx.Commit(ctx)
 }
 func (s *Service) DeleteComment(ctx context.Context, user, comment uuid.UUID) error {
 	tx, e := s.db.Begin(ctx)

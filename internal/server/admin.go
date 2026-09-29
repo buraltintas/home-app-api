@@ -411,6 +411,46 @@ func (s *Server) adminDecideReview(w http.ResponseWriter, r *http.Request) {
 	JSON(w, 200, map[string]any{"store_id": store, "store_slug": slug})
 }
 
+// adminHeldComments is the same queue for replies written under a review.
+func (s *Server) adminHeldComments(w http.ResponseWriter, r *http.Request) {
+	items, total, e := s.admin.HeldComments(r.Context(), queryInt(r, "limit", 50), queryInt(r, "offset", 0))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items, "total": total})
+}
+
+// adminDecideComment publishes a held comment or keeps it off the page. The shop's page
+// carries the thread, so its held copy is dropped either way; no figure is recounted,
+// because a comment carries no rating.
+func (s *Server) adminDecideComment(w http.ResponseWriter, r *http.Request) {
+	actor, email, ok := s.adminActor(r)
+	if !ok {
+		WriteError(w, ErrAuthRequired, r.Context())
+		return
+	}
+	id, e := parseID(r)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	var in struct {
+		Decision string `json:"decision"`
+	}
+	if e = Decode(w, r, &in, 1<<10); e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	store, slug, e := s.admin.DecideComment(r.Context(), actor, email, id, in.Decision)
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	s.reads.Drop(storeGroup(store))
+	JSON(w, 200, map[string]any{"store_id": store, "store_slug": slug})
+}
+
 func (s *Server) adminCategories(w http.ResponseWriter, r *http.Request) {
 	items, e := s.admin.Categories(r.Context())
 	if e != nil {
