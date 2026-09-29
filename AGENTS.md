@@ -151,6 +151,31 @@ keyed on something every caller shares is an outage waiting for its first busy h
 And when the key is a shared address rather than a person, size it for several strangers at
 once -- a household, an office, and a mobile carrier's NAT are all one address.
 
+## A 403 is not a refusal, and a Disallow is
+
+Five of the biggest dealer networks in the country were written down as "the site refuses
+automated reading" and left out of the catalogue for months. Nobody had read the refusal,
+because there was not one. The CDN in front of those sites answers anything that is not a
+browser with 403 on every path, `robots.txt` included -- so the fetcher never got as far as
+the file that would have told it the dealer pages are permitted outright, which they are.
+It took someone asking "you found it by hand, why can't you" to get the file read.
+
+The two look identical from the client's side and mean opposite things:
+
+- **A bot filter** is a machine guessing at who you are. It blocks the document that states
+  the policy as readily as the page. Go and read the policy another way -- a browser is
+  what the page is for -- and if it permits the page, the page may be read.
+- **A stated Disallow** is the publisher answering. BSH's three Turkish sites each disallow
+  `/*graphql?operationName*`, which is the one path their dealer locator reads from, and
+  they say so in writing next to a heading naming the locator. That is a refusal, and
+  rewriting the request to miss the pattern would be working around it. Stop, and write
+  down why.
+
+So before recording a brand as unreadable: fetch its `robots.txt` in something that gets an
+answer, quote the rule that covers the path, and put the quote next to the decision. "We
+get a 403" is a symptom, not a finding, and a finding that turns out to be a symptom keeps
+real work out of the product for as long as nobody rechecks it.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest

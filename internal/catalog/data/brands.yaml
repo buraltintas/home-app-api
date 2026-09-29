@@ -822,29 +822,77 @@ brands:
     website: https://www.bosch-home.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
-    # Not imported. BSH runs one dealer finder for all its brands and it reads its data
-    # through GET /graphql?operationName=..., which robots.txt forbids by that exact pattern.
+    # Not imported, and this was re-checked on 2026-09-29 against the mistake made over
+    # Arçelik: here the refusal is the publisher's own and is stated in writing. BSH runs
+    # one dealer locator for Bosch, Siemens and Profilo -- the same Next.js app served
+    # under /dealer-locator-app on all three sites -- and it reads its dealers through
+    # GET /graphql?operationName=..., which all three robots.txt files disallow by that
+    # exact pattern. Watched in a browser to be sure it is the only path: the app's own
+    # calls are graphql?operationName=SuggestAddresses and its neighbours, and nothing
+    # else carries a dealer. Neither sitemap publishes per-dealer pages either.
+    #
+    # A bot filter answering 403 is not a policy and may be read around; a Disallow naming
+    # the endpoint is a policy and is not. Revisit only if BSH publishes the list elsewhere.
 
   - slug: beko
     name: Beko
     website: https://www.beko.com.tr
     tier: 1
     categories: [major_appliances, small_appliances]
-    # Not imported: Arçelik's group, behind the same CDN that refuses this fetcher outright.
+    store_count_estimate: 1300
+    locator:
+      kind: harvest
+      file: beko.tsv
+    # Arçelik's group and the same platform, so the same reading as arcelik.tsv above, and
+    # the same correction: the CDN's 403 was recorded here as the site refusing us, and it
+    # is not. robots.txt disallows carts, accounts, password resets and the site search,
+    # and says nothing about dealers -- it names GPTBot, ChatGPT-User and OAI-SearchBot as
+    # allowed outright.
+    #
+    # /store-finder/result takes ?page=N and pages through the whole country, 250 dealers
+    # to a page. Each one is a div.srv-item carrying data-coor "lat|lon", srv-name,
+    # srv-address ending "DISTRICT/PROVINCE" and a tel: link; the map carousel prints every
+    # dealer a second time, so rows are collapsed on name and address. 1,313 dealers in all
+    # 81 provinces, every one of them placed by the brand itself. The city, postCode and
+    # neighbourhood fields on the form are filtered in the page, not by the server -- every
+    # value returns the same list -- which is why the whole list is read and none is passed.
+    #
+    # The cost of reading it this way: the file does not refresh itself, so this brand stays
+    # out of the monthly unattended run until it can be fetched plainly.
 
   - slug: siemens
     name: Siemens
     website: https://www.siemens-home.bsh-group.com/tr
     tier: 2
     categories: [major_appliances, small_appliances]
-    # Not imported: the same BSH dealer finder as Bosch, behind the same robots.txt rule.
+    # Not imported, and this was re-checked on 2026-09-29 against the mistake made over
+    # Arçelik: here the refusal is the publisher's own and is stated in writing. BSH runs
+    # one dealer locator for Bosch, Siemens and Profilo -- the same Next.js app served
+    # under /dealer-locator-app on all three sites -- and it reads its dealers through
+    # GET /graphql?operationName=..., which all three robots.txt files disallow by that
+    # exact pattern. Watched in a browser to be sure it is the only path: the app's own
+    # calls are graphql?operationName=SuggestAddresses and its neighbours, and nothing
+    # else carries a dealer. Neither sitemap publishes per-dealer pages either.
+    #
+    # A bot filter answering 403 is not a policy and may be read around; a Disallow naming
+    # the endpoint is a policy and is not. Revisit only if BSH publishes the list elsewhere.
 
   - slug: profilo
     name: Profilo
     website: https://www.profilo.com
     tier: 2
     categories: [major_appliances, small_appliances]
-    # Not imported: the same BSH dealer finder as Bosch, behind the same robots.txt rule.
+    # Not imported, and this was re-checked on 2026-09-29 against the mistake made over
+    # Arçelik: here the refusal is the publisher's own and is stated in writing. BSH runs
+    # one dealer locator for Bosch, Siemens and Profilo -- the same Next.js app served
+    # under /dealer-locator-app on all three sites -- and it reads its dealers through
+    # GET /graphql?operationName=..., which all three robots.txt files disallow by that
+    # exact pattern. Watched in a browser to be sure it is the only path: the app's own
+    # calls are graphql?operationName=SuggestAddresses and its neighbours, and nothing
+    # else carries a dealer. Neither sitemap publishes per-dealer pages either.
+    #
+    # A bot filter answering 403 is not a policy and may be read around; a Disallow naming
+    # the endpoint is a policy and is not. Revisit only if BSH publishes the list elsewhere.
 
   - slug: arzum
     name: Arzum

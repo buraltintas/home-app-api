@@ -6,6 +6,37 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Beko's dealers are in, and Bosch, Siemens and Profilo are staying out -- in writing
+
+The four brands left over from the Arçelik correction, finished one way or the other.
+
+**Beko: 1,313 dealers, all 81 provinces.** Same group and same platform as Arçelik, so the
+same reading and the same locator (`kind: harvest`, `beko.tsv`). `/store-finder/result`
+takes `?page=N` and pages through the whole country, 250 dealers to a page; each is a
+`div.srv-item` carrying `data-coor` "lat|lon", a name, an address ending
+"DISTRICT/PROVINCE" and a `tel:` link. Two details worth knowing before anybody reads it
+again: the map carousel prints every dealer a second time, so rows are collapsed on name
+and address; and the province, postcode and neighbourhood fields on the form are filtered
+in the page, not by the server -- every value returns the identical list -- so the whole
+list is fetched and none of them is passed. Read twice, in the browser and again from the
+page's own endpoint, and both reads gave the same 1,313.
+
+Applied: 1,266 new rows, 14 existing rows matched and upgraded, 2 skipped and 31 sent to
+the matching queue -- nearly all of those a same-name neighbour within thirty metres, which
+is what a dealer selling two brands from one door looks like from here. The catalogue is
+**13,840 to 15,106**, and Beko carries 1,270 shops in all 81 provinces.
+
+**Bosch, Siemens and Profilo: not imported, and this time the refusal is real.** After the
+Arçelik mistake the earlier note on these three could not be taken on trust, so it was
+re-checked from the start. It holds. BSH runs one dealer locator for all three brands --
+the same application served under `/dealer-locator-app` on all three sites -- and it reads
+its dealers through `GET /graphql?operationName=...`, which all three `robots.txt` files
+disallow by that exact pattern, one of them under a heading that names the dealer locator.
+Watched in a browser to be sure nothing else carries a dealer, and neither sitemap
+publishes per-dealer pages. So: **a bot filter answering 403 is not a policy and may be
+read around; a Disallow naming the endpoint is a policy and is not.** That distinction is
+now a rule in `AGENTS.md` rather than a thing learned twice.
+
 ## The brands whose sites "refuse us" do not refuse us
 
 Five of the largest dealer networks in the country -- Arçelik, Beko, Bosch, Siemens,
