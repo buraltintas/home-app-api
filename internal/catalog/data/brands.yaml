@@ -713,6 +713,26 @@ brands:
     website: https://www.isbiryatak.com
     tier: 3
     categories: [bedding, home_textile]
+    store_count_estimate: 242
+    # Publishes 242 shops and we still cannot take them, which is a different answer from
+    # "publishes nothing" and worth the detail.
+    #
+    # The complete list exists as JSON at /srv/service/store/get -- every shop with its
+    # province id, district id, address and telephone. robots.txt disallows /srv/ outright,
+    # so that is a stated refusal and the file is not read.
+    #
+    # What is allowed is /magazalarimiz, which renders 70 shops a page. Two things stop it
+    # being usable. The cards carry no province or district at all, and the addresses do not
+    # name one either -- "Yüzüncü Yıl Mahallesi Sadık Ahmet Bulvarı No:91/K" and nothing
+    # else -- so nothing places a shop. Some cards embed a Google map whose URL holds the
+    # point, but not all do, and a row pattern wide enough to reach the next map silently
+    # takes the following shop's coordinate: checked, and 56 of 70 "matched" that way, with
+    # the wrong point on several. The other pages are behind ?pg=, which robots.txt also
+    # disallows.
+    #
+    # Each shop's own page is allowed and does carry İl and İlçe. Reading them means
+    # following a link per row, which this fetcher cannot do. That is the one thing that
+    # would open this brand, and it would open others too.
 
   - slug: lova-yatak
     name: Lova Yatak
@@ -725,6 +745,28 @@ brands:
     website: https://www.idas.com.tr
     tier: 3
     categories: [bedding, home_textile]
+    store_count_estimate: 470
+    locator:
+      kind: html
+      # This brand was in the block above as one that "publishes no store list we can read
+      # yet". It publishes one, it always did, and nobody had looked: 467 dealers rendered
+      # into /tr/bayilerimiz, which robots.txt allows outright -- it disallows /en/ and
+      # nothing else for us.
+      #
+      # One dealer is a div.col-base carrying the sign on the shop as b.title, the trading
+      # company under it, the address, and a tel: link. The block ends at the directions
+      # link, which is the last thing in it and the only stable marker before the next one
+      # starts. The overseas list at /tr/yurtdisi-bayilerimiz is a separate page and is not
+      # read.
+      #
+      # No coordinates: the map link is a shortened one that would have to be followed per
+      # shop. The address ends "District / PROVINCE", so the town places them and each row
+      # records that its point came from a centre rather than from the brand.
+      url: https://www.idas.com.tr/tr/bayilerimiz
+      row: '(?s)(<div class=" col-base col-md-3">.*?haritada-goster)'
+      name: '<b class="title">\s*([^<]+)'
+      address: '(?s)<b>Adres</b>\s*([^<]+)'
+      phone: 'href="tel:([0-9+]{7,})"'
 
   - slug: bambi
     name: Bambi
@@ -743,6 +785,26 @@ brands:
     website: https://www.konforyatak.com.tr
     tier: 3
     categories: [bedding]
+    store_count_estimate: 104
+    locator:
+      kind: html
+      # Also recorded above as publishing nothing; it publishes 104 shops in 47 provinces,
+      # rendered into /pages/magazalar. The site serves no robots.txt at all, which is the
+      # web's way of saying nothing is disallowed.
+      #
+      # The heading over the list reads "Size En Yakın Mağazalarımız", which suggests the
+      # page is filtered to the reader. It is not -- a fetch with no location at all returns
+      # all 104, spread across the country -- so the whole list is read and nothing is
+      # passed.
+      #
+      # The markup is utility classes rather than named ones, so a row is anchored on the
+      # shop's name and ends at its telephone link. If the page is restyled these break
+      # loudly, in the import, rather than quietly returning a shorter list.
+      url: https://www.konforyatak.com.tr/pages/magazalar
+      row: '(?s)(<div class="text-primary-01 mb-1 text-lg font-semibold">.*?href="tel:[^"]*")'
+      name: '<div class="text-primary-01 mb-1 text-lg font-semibold">\s*([^<]+)'
+      address: '(?s)</svg><div>\s*([^<]+)</div>'
+      phone: 'href="tel:\s*([^"]+)"'
 
   - slug: halsa-yatak
     name: Halsa Yatak

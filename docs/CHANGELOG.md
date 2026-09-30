@@ -6,6 +6,42 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Two of the brands recorded as publishing nothing publish plenty
+
+The register carried eleven small brands under a note saying none of them published a store
+list we could read. Nobody had checked; it was written once and inherited. Asked properly,
+nearly all of them publish one.
+
+**İdaş: 467 dealers**, rendered into `/tr/bayilerimiz`, which its `robots.txt` allows --
+that file disallows `/en/` and nothing else for us. One dealer is a `div.col-base` carrying
+the sign on the shop, the trading company under it, the address and a telephone. No
+coordinates, so the town in the address places each one and every row records that its
+point came from a centre. Applied: 240 new, 5 upgraded, 13 skipped, **209 to the matching
+queue** -- İdaş has several shops in one district and nothing to tell them apart with.
+
+**Konfor Yatak: 104 shops in 47 provinces**, at `/pages/magazalar`, on a site that serves
+no `robots.txt` at all. The heading over the list says "Size En Yakın Mağazalarımız", which
+reads as geo-filtered and is not: a fetch with no location returns all 104 across the
+country. Applied: 67 new, 3 upgraded, 30 to review.
+
+Catalogue **15,115 to 15,422**.
+
+**İşbir Yatak publishes 242 and we still cannot take them**, which is a different answer
+from "publishes nothing" and is recorded on the entry in full. The complete list is JSON at
+`/srv/service/store/get`; `robots.txt` disallows `/srv/`, so it is not read. The list page
+that is allowed carries no province, no district, and addresses that name neither. Some
+cards embed a map whose URL holds the point and some do not -- and a row pattern wide
+enough to reach the next map takes the following shop's coordinate instead, which is worth
+saying out loud because it looked like it worked: 56 of 70 rows "matched", several with
+another shop's position. The per-shop pages do carry İl and İlçe and are allowed, but
+reading them means following a link per row, which this fetcher cannot do. **That single
+capability is what would open this brand, and others with it.**
+
+**The queue this leaves.** 209 and 30 rows went to `/admin/eslesme`, which now holds 606 in
+all. Nearly every one is the same question -- two shops of one chain in one district with
+no coordinate to separate them -- and nobody can answer 606 of those. Worth deciding how
+that queue is meant to be worked before adding more brands that feed it.
+
 ## Bauhaus was left out by a reason that had stopped being true
 
 Its entry said "not imported", and gave a reason that was correct when it was written and
