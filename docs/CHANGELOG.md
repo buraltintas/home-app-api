@@ -6,6 +6,35 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A search allowed ninety results was returning twenty-one
+
+Asked why an Arçelik search in Antalya lists 21 shops -- and why every search seemed to
+stop around there -- the answer turned out to be a bug rather than a rule.
+
+`maxResults` is 90. The store layer's search began:
+
+```go
+if limit < 1 || limit > 50 { limit = 20 }
+```
+
+Ninety is more than fifty, so the request was not clamped to fifty. It was replaced with
+**twenty** -- the default meant for a caller that asked for nothing. The ceiling a search
+actually had was therefore lower than the thirty it was raised from, and the comment above
+`maxResults` explaining why thirty was not enough has been describing something that never
+happened.
+
+The log had been saying so all along: over thirty days, **125 searches returned exactly 21**
+and almost nothing returned more; the 30s in the same table are from before the raise. The
+extra one over twenty is the named-store match arriving beside the twenty.
+
+The same fault had already been found and fixed in `SearchByName` -- the other half of the
+same search -- and it survived here because only the half that was reported got looked at.
+A clamp now does its two jobs separately: over the ceiling gives the ceiling, missing gives
+the default. The other five limits in that file were checked against their callers; none of
+them is asked for more than it allows, so this was the only one lying.
+
+`AGENTS.md` gains the rule, because this is the second time.
+
 ## Four shops that were sitting in the Mediterranean
 
 The catalogue held 82 distinct cities for a country with 81 provinces. The eighty-second

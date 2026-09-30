@@ -877,8 +877,23 @@ func (s *Service) searchByNameQuery(ctx context.Context, fn, q string, lat, lon 
 func (s *Service) Search(ctx context.Context, q string, categories []string, location string, lat, lon *float64, radius int, limit int, viewer *uuid.UUID) ([]Item, error) {
 	q = strings.TrimSpace(q)
 	location = strings.ToLower(strings.TrimSpace(location))
-	if limit < 1 || limit > 50 {
+	// The same fault SearchByName had, in the other half of the same search, and it
+	// outlived the fix there because only the reported half was looked at.
+	//
+	// A search asks for ninety. Ninety is more than fifty, so this clamped it -- not down
+	// to fifty, but back to twenty, its default for a caller that asked for nothing. So the
+	// ceiling a search actually had was twenty, lower than the thirty it was raised from,
+	// and the comment on maxResults explaining why thirty was not enough has been describing
+	// something that never happened. The searches log shows it plainly: 125 searches
+	// returning exactly 21 and almost nothing above it.
+	//
+	// A ceiling is a ceiling now. Asking for more than the most this will give returns the
+	// most it will give; it never returns less than a caller who asked for nothing.
+	if limit < 1 {
 		limit = 20
+	}
+	if limit > maxNameMatches {
+		limit = maxNameMatches
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$9),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL ELSE ST_Distance(s.location,ST_SetSRID(ST_MakePoint($3,$2),4326)::geography) END,

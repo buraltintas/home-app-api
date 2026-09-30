@@ -176,6 +176,35 @@ answer, quote the rule that covers the path, and put the quote next to the decis
 get a 403" is a symptom, not a finding, and a finding that turns out to be a symptom keeps
 real work out of the product for as long as nobody rechecks it.
 
+## A ceiling that answers with a floor
+
+A search is allowed ninety results and was returning twenty-one. Not because twenty-one was
+right, and not because a cap said twenty-one: `maxResults` said ninety, the store layer
+said
+
+```go
+if limit < 1 || limit > 50 { limit = 20 }
+```
+
+and ninety is more than fifty. So asking for more than the ceiling did not get the ceiling.
+It got `20` -- the default meant for a caller who asked for nothing at all. The effective
+ceiling was therefore lower than the thirty it had been raised from, the comment explaining
+why thirty was too few had been describing something that never happened for months, and
+the searches log said so the whole time: 125 searches returning exactly 21, and almost
+nothing above it.
+
+The same line had already been found and fixed in `SearchByName`, in the other half of the
+same search, and it survived here because only the half that was reported got looked at.
+
+So: a clamp has two jobs and they are not the same job. Out of range upwards means *give
+the maximum*. Missing or nonsense means *give the default*. One `if` cannot do both, and
+written as one it silently hands the caller less than it was asked for -- which no error
+reports, no test catches unless it asserts the number, and nobody notices until somebody
+counts what came back.
+
+And when a limit changes, count what the running system returns afterwards. `GROUP BY
+total_result_count` over the log is one query and it would have shown this the same day.
+
 ## Keep the log
 
 Every change that a person would want explained later goes in `docs/CHANGELOG.md`, newest
