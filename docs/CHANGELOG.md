@@ -6,6 +6,33 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Four shops that were sitting in the Mediterranean
+
+The catalogue held 82 distinct cities for a country with 81 provinces. The eighty-second
+was the empty string: four Merinos dealers with no city, no district and no address,
+published at 36,29 and 37,27 -- whole degrees, which is not a position but a truncated
+field, and which lands in the open sea off Fethiye and Bodrum.
+
+`placePoint` has refused exactly this since it learned to, and `import.go` retires a stored
+row that becomes Outside. Both only ever ran against rows arriving from a publisher, and
+these four arrived on 11 September, before the rule. Nothing re-reads a stored row until
+its brand is imported again.
+
+**Re-importing Merinos would have fixed them and was not the way to do it.** A dry run says
+1,604 fetched and 232 to review, and the matching queue already holds 606 -- paying 232
+questions a person has to answer to retire four rows is the wrong trade, and it would have
+buried the real ones.
+
+So the same question is asked of what is already stored. `cmd/unplaced-stores` offers every
+city-less store to the resolver with everything its row holds -- name, address, its own
+coordinate -- and keeps the ones that produce a city, retiring only those that cannot be
+placed in Turkey at all. Soft-deleted, so anything anybody wrote about them survives the
+decision. Four retired, none placeable, and the catalogue now reports **exactly 81 cities**.
+
+It is worth having as a command rather than four statements: every brand read before that
+rule existed may hold rows like these, and this asks all of them at once, again, whenever
+somebody wants to know.
+
 ## Two of the brands recorded as publishing nothing publish plenty
 
 The register carried eleven small brands under a note saying none of them published a store
