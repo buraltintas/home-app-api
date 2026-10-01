@@ -6,6 +6,35 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A shop can be one branch, not three: the matching queue stops asking the same question
+
+The queue a person works through held 606 rows, and most of them were the same question
+asked several times over with no way to answer it.
+
+Banio publishes Aspendos, Lara and Osmangazi, none of them with a coordinate. All three
+landed on the one "Banio Yapı Market" the catalogue already held in that district, and all
+three were held with "this branch, or another one?". At most one of them can be that shop.
+The other two are new, certainly, by counting alone -- and the two questions asked about
+them had no answer for anybody to give.
+
+So a store is questioned once per run. A second row raising the same shop finds it already
+spoken for and is added instead of held. The set is kept apart from `claimed`, because a
+held row has not taken the store -- a later row may still merge with it; what it has taken
+is the question.
+
+**Which row stays held is arbitrary, and that costs nothing.** It is whichever arrived
+first and nothing in the data can say better. If the held row turns out to be the new one,
+then the shop it was held against is a branch the publisher no longer lists, and the row is
+added on the person's word. What this never does is create a duplicate: the surplus over
+the shops available is new whichever way round the pairing falls.
+
+The same arithmetic applies to the other hold -- a row near an existing shop sharing a rare
+word -- and is applied there too.
+
+Measured on İdaş, the worst contributor: **209 rows waiting became 144**, and 65 shops that
+had been held as possible duplicates are branches, now in the catalogue. The queue as a
+whole is 606 to 540 from that one brand's re-run; the rest come down as each is read again.
+
 ## A search allowed ninety results was returning twenty-one
 
 Asked why an Arçelik search in Antalya lists 21 shops -- and why every search seemed to

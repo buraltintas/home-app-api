@@ -69,9 +69,15 @@ type Matcher struct {
 	// In how many shop names each word appears, read once per run the first time it is
 	// needed. It is what tells a business's own name from the words every business uses.
 	shopsWithWord map[string]int
+	// Which existing stores a row of this run is already waiting on a person about. Kept
+	// apart from claimed: a held row has not taken the store, so a later row may still
+	// merge with it -- what it has taken is the question.
+	questioned map[string]bool
 }
 
-func NewMatcher(tx pgx.Tx) *Matcher { return &Matcher{tx: tx, claimed: map[string]bool{}} }
+func NewMatcher(tx pgx.Tx) *Matcher {
+	return &Matcher{tx: tx, claimed: map[string]bool{}, questioned: map[string]bool{}}
+}
 
 func (m *Matcher) claim(id string) { m.claimed[id] = true }
 
@@ -331,11 +337,15 @@ LIMIT 10`, *in.Latitude, *in.Longitude, float64(dealerMeters))
 		}
 	}
 	for _, n := range near {
-		if m.claimed[n.id] {
+		// The same arithmetic as the district hold below: one shop can be one of these
+		// rows, not several. A second row raising the same neighbour is asking a question
+		// that has already been asked and cannot be answered twice.
+		if m.claimed[n.id] || m.questioned[n.id] {
 			continue
 		}
 		for _, word := range strings.Fields(textnorm.Key(n.name)) {
 			if own[word] {
+				m.questioned[n.id] = true
 				decision.Action = ActionReview
 				decision.StoreID = ""
 				decision.Reason = fmt.Sprintf("%.0f m from %q, and both names carry %q -- one dealer's door, or two shops side by side?", n.metres, n.name, word)
@@ -378,9 +388,24 @@ LIMIT 10`, in.City, in.District, brandCompact, brand.ID)
 		if e = rows.Scan(&id, &name); e != nil {
 			return decision, e
 		}
-		if m.claimed[id] || !carriesBrandWord(name, brand.Name) {
+		// Already questioned means an earlier row of this run is waiting on a person about
+		// this very shop, and that is the whole of the arithmetic: a shop can be one
+		// branch, not three. Banio publishes Aspendos, Lara and Osmangazi, all three
+		// pointless, all three landing on the one "Banio Yapı Market" the catalogue holds
+		// -- so at most one of them is it and the other two are certainly new. Asking about
+		// all three asked two questions that have no answer, and a queue of questions
+		// nobody can answer is a queue nobody opens.
+		//
+		// Which one stays held is arbitrary: it is whichever arrived first, and nothing
+		// here can tell. That costs nothing either way -- if the held row turns out to be
+		// the new one, the shop it was held against is simply a branch the publisher no
+		// longer lists, and the row is added on the person's word. What it never does is
+		// create a duplicate, because the surplus over the shops available is new whichever
+		// way round the pairing falls.
+		if m.claimed[id] || m.questioned[id] || !carriesBrandWord(name, brand.Name) {
 			continue
 		}
+		m.questioned[id] = true
 		decision.Action = ActionReview
 		decision.StoreID = ""
 		decision.Reason = fmt.Sprintf("no published point, and %q in the same district is signed with this chain's name -- this branch, or another one?", name)
