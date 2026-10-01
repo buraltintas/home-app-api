@@ -6,6 +6,27 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A name with a town inserted into it is still the same name
+
+"Banio Yapı Market Uncalı Şubesi" and "Banio Yapı Market Konyaaltı Antalya Uncalı Şubesi"
+are one shop. They scored 0.57 and sat in the queue, because a row's name is composed
+before it is matched -- chain, town, district, then what the publisher wrote -- and the
+shop it is compared against may have been stored before that rule existed. The two names
+differ by the name of the town the row is already known to be in.
+
+The substring test could not see it either: the town sits in the middle, so neither name
+contains the other. What it was reaching for is that every word of the shorter name is in
+the longer one, and that is now its own test.
+
+It counts in the no-coordinate case, which is where it was most needed and where only the
+raw similarity score had a vote. Guarded, because the guard is the whole difference: the
+two names must also share a word that belongs to neither the chain nor the town -- the word
+that says which branch this is. Without that guard a bare "Banio Yapı Market" would swallow
+"Banio Yapı Market Aspendos", whose every word it holds and all of them the chain's.
+
+Banio: 4 rows waiting became 2. One of the two is a real question -- one bare shop in
+Osmangazi, one row that might be it.
+
 ## A shop can be one branch, not three: the matching queue stops asking the same question
 
 The queue a person works through held 606 rows, and most of them were the same question

@@ -90,6 +90,64 @@ func containment(a, b string) bool {
 	return strings.Contains(a, b) || strings.Contains(b, a)
 }
 
+// everyWordIn reports whether one name's words all appear in the other's, which is
+// containment for a name the other has words inserted into rather than appended to.
+//
+// A row's name is composed before it is matched -- chain, town, district, then the branch
+// the publisher wrote -- and it is compared against a stored name that may have been
+// composed by an older rule or not at all. "Banio Yapı Market Uncalı Şubesi" is not a
+// substring of "Banio Yapı Market Konyaaltı Antalya Uncalı Şubesi", because the town sits
+// in the middle of it, so the substring test says nothing and the similarity score drops
+// to 0.57 for two names that differ by the name of the town the shop is already known to
+// be in. Every word of the shorter name is in the longer one, which is the thing the
+// substring test was reaching for.
+//
+// Like containment, this counts only alongside proximity -- never on its own. Three words
+// minimum, because two short ones are a coincidence waiting to happen.
+func everyWordIn(a, b string) bool {
+	short, long := strings.Fields(a), strings.Fields(b)
+	if len(short) > len(long) {
+		short, long = long, short
+	}
+	if len(short) < 3 {
+		return false
+	}
+	have := make(map[string]bool, len(long))
+	for _, word := range long {
+		have[word] = true
+	}
+	for _, word := range short {
+		if !have[word] {
+			return false
+		}
+	}
+	return true
+}
+
+// sharesBranchWord reports whether the two names share a word that belongs to neither the
+// chain nor the town -- the word that says which branch this is. It is what separates "the
+// same shop written at two lengths" from "the chain's bare name and one of its branches".
+func (m *Matcher) sharesBranchWord(in RawStore, candidate Candidate, brand BrandSpec) bool {
+	ignore := map[string]bool{}
+	for _, text := range []string{in.City, in.District, brand.Name} {
+		for _, word := range strings.Fields(textnorm.Key(text)) {
+			ignore[word] = true
+		}
+	}
+	theirs := map[string]bool{}
+	for _, word := range strings.Fields(textnorm.Key(candidate.Name)) {
+		if len([]rune(word)) >= 4 && !ignore[word] {
+			theirs[word] = true
+		}
+	}
+	for _, word := range strings.Fields(textnorm.Key(in.Name)) {
+		if len([]rune(word)) >= 4 && !ignore[word] && theirs[word] {
+			return true
+		}
+	}
+	return false
+}
+
 // located reports whether this row's coordinate is the publisher's own.
 //
 // A point we put there ourselves is not evidence of where the shop is. When a chain
@@ -242,7 +300,8 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// One name containing the other is identity evidence that similarity scores badly:
 	// "englishhome" inside "englishhomeantlaracad" is 0.42 by trigram and obviously the
 	// same shop on the ground. It counts only alongside proximity, never on its own.
-	contained := containment(CompactName(in.Name), candidate.CompactName)
+	contained := containment(CompactName(in.Name), candidate.CompactName) ||
+		everyWordIn(textnorm.Key(in.Name), textnorm.Key(candidate.Name))
 	// A nearby shop whose own sign names this chain is this chain's shop. It is the
 	// strongest evidence on offer and the one similarity is worst at: "Çelik Mağazacılık
 	// Konyaaltı Bellona" and our "Bellona - Antalya Çelik Centroom Konyaaltı" stand seven
@@ -269,9 +328,25 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 		}
 		decision.Reason = fmt.Sprintf("same place: %.0f m away, %s, matched %q", candidate.Distance, why, candidate.Name)
 		m.claim(candidate.ID)
-	case !hasPoint && candidate.Similarity >= placeOnlySimilarity:
+	// Without a point, similarity was the only thing counted, and it is the thing that
+	// suffers most from how a name is built. A row's name is composed before it is matched
+	// -- chain, town, district, branch -- and the shop it is compared against may have been
+	// stored before that rule existed. "Banio Yapı Market Uncalı Şubesi" and "Banio Yapı
+	// Market Konyaaltı Antalya Uncalı Şubesi" are one shop and score 0.57, because they
+	// differ by the name of the town the row is already known to be in.
+	//
+	// So one name holding all of the other's words counts here too -- but only when they
+	// share a word that is the branch's own. Without that the bare "Banio Yapı Market" in a
+	// district would swallow "Banio Yapı Market Aspendos", which is a different shop: every
+	// word of the shorter name is in the longer one and all of them belong to the chain.
+	case !hasPoint && (candidate.Similarity >= placeOnlySimilarity ||
+		(everyWordIn(textnorm.Key(in.Name), textnorm.Key(candidate.Name)) && m.sharesBranchWord(in, candidate, brand))):
 		decision.Action = ActionUpdated
-		decision.Reason = fmt.Sprintf("no published coordinates; %.2f name similarity to %q in the same district", candidate.Similarity, candidate.Name)
+		why := fmt.Sprintf("%.2f name similarity", candidate.Similarity)
+		if candidate.Similarity < placeOnlySimilarity {
+			why = "one name holds every word of the other, branch word and all"
+		}
+		decision.Reason = fmt.Sprintf("no published coordinates; %s to %q in the same district", why, candidate.Name)
 		m.claim(candidate.ID)
 	case candidate.Similarity >= reviewSimilarity:
 		decision.Action = ActionReview
