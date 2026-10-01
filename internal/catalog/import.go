@@ -245,6 +245,16 @@ UPDATE stores SET deleted_at=now(), updated_at=now()
 			if decision, e = i.apply(ctx, tx, brand, decision); e != nil {
 				return report, e
 			}
+			// A shop this run has just created belongs to the row that created it, and no
+			// other row of the same published list can be it: a publisher's list does not
+			// hold one shop twice, and the rows that would have are settled earlier by the
+			// brand's own id and by name. Without this the matcher kept finding its own
+			// work -- İdaş's second branch in a district was held against the first one,
+			// which had been added a moment before from another line of the same file, and
+			// an apply therefore asked more questions than the dry run that preceded it.
+			if decision.Action == ActionInserted && decision.StoreID != "" {
+				matcher.claim(decision.StoreID)
+			}
 		}
 		switch decision.Action {
 		case ActionInserted:

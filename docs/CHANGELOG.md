@@ -31,9 +31,28 @@ the shops available is new whichever way round the pairing falls.
 The same arithmetic applies to the other hold -- a row near an existing shop sharing a rare
 word -- and is applied there too.
 
-Measured on İdaş, the worst contributor: **209 rows waiting became 144**, and 65 shops that
-had been held as possible duplicates are branches, now in the catalogue. The queue as a
-whole is 606 to 540 from that one brand's re-run; the rest come down as each is read again.
+**And then the largest class of all, which was none of the above.** 341 of the 540 rows
+said "nearest match X was already matched by another store in this list" -- a branch named
+after one place being asked whether it was a branch named after another, when that other
+had already been taken by a different line of the same file. "Balıkesir Edremit Altınoluk
+İdaş" asking whether it is "Balıkesir Edremit Akçay İdaş".
+
+There is nothing in that to decide either. The publisher listed both, so by its own account
+they are two shops, and the one this row was compared against is spoken for. The candidate
+is dropped and the row carries on down the ordinary path -- which ends at the
+proximity-and-rare-word check that guards every insert, not at a blind one. It is the same
+authority the rule directly above it already grants a brand over which of its own shops are
+distinct; it simply had not been extended to this case.
+
+Two smaller leaks closed with it. A shop this run has just created is claimed by the row
+that created it, so the matcher stops finding its own work -- İdaş's second branch in a
+district was being held against the first, added a moment earlier from another line of the
+same file, which is why an apply asked more questions than the dry run before it. And a
+shop the brand already published under its own id is never a candidate for holding, for the
+same reason across runs rather than within one.
+
+Measured on İdaş, the worst contributor: **209 rows waiting became 46**, and **123 shops**
+that had been stuck in the queue since the first import are branches, now added.
 
 ## A search allowed ninety results was returning twenty-one
 

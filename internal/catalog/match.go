@@ -219,11 +219,23 @@ func (m *Matcher) Match(ctx context.Context, brand BrandSpec, in RawStore) (Deci
 	// twice. Without this a chain with two branches near one another, and one vague old
 	// row between them, collapses into a single shop -- and the second row would quietly
 	// steal the first one's source id on its way.
+	//
+	// It used to stop here and ask a person, and that was the largest thing in the queue by
+	// far: 341 of 540 rows, almost all of them a branch named after one place looking at a
+	// branch named after another -- "Balıkesir Edremit Altınoluk İdaş" asked whether it was
+	// "Balıkesir Edremit Akçay İdaş", which another line of the same file had already taken.
+	//
+	// There is nothing in that to decide. The publisher listed both, so by its own account
+	// they are two shops, and the one this row was compared against is spoken for. So the
+	// candidate is simply dropped and the row carries on down the ordinary path -- which
+	// ends at the proximity-and-rare-word check that guards every insert, not at a blind
+	// insert. The same authority the rule above this one already grants the brand over
+	// which of its shops are distinct.
 	if m.claimed[candidate.ID] {
-		decision.Action = ActionReview
-		decision.Reason = fmt.Sprintf("nearest match %q was already matched by another store in this list", candidate.Name)
+		decision.Action = ActionInserted
+		decision.Reason = fmt.Sprintf("nearest match %q is another row of this same list", candidate.Name)
 		decision.StoreID = ""
-		return decision, nil
+		return m.holdSameDealer(ctx, in, brand, decision)
 	}
 
 	hasPoint := located(in)
@@ -373,12 +385,19 @@ func (m *Matcher) holdSignedInDistrict(ctx context.Context, in RawStore, brand B
 	if brandCompact == "" {
 		return decision, nil
 	}
+	// A shop this brand already published under its own id is another line of this very
+	// list, and the row being matched is not it -- the publisher does not list one shop
+	// twice, and a row that is the same shop was settled by that id long before here. Left
+	// in, these were the questions that never went away: İdaş's second branch in a
+	// district was held against the first, which had been added from another line of the
+	// same file, and it was held again on every run after.
 	rows, e := m.tx.Query(ctx, `
 SELECT id::text, name FROM stores
 WHERE deleted_at IS NULL AND city=$1 AND ($2='' OR district=$2)
   AND compact_name LIKE '%' || $3 || '%'
   AND (brand_id IS NULL OR brand_id::text = $4)
-LIMIT 10`, in.City, in.District, brandCompact, brand.ID)
+  AND NOT EXISTS (SELECT 1 FROM store_external_sources x WHERE x.store_id=stores.id AND x.provider=$5)
+LIMIT 10`, in.City, in.District, brandCompact, brand.ID, brand.Provider())
 	if e != nil {
 		return decision, e
 	}
