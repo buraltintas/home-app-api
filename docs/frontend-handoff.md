@@ -136,6 +136,7 @@ Every row below requires BFF unless explicitly marked “No”. `optional` auth 
 | `GET /v1/feed` | optional | `cursor`, `limit` → `{items,next_cursor}`; default 20/max 50 | invalid cursor |
 | `GET /v1/locations/search` | optional | manual city/district/neighbourhood text → Turkish administrative places from our own table; default 5/max 10 | input/rate errors |
 | `POST /v1/search` | optional | search request → structured results; no pagination, max 30 | input/rate/provider errors |
+| `GET /v1/stores/names` | optional | typed letters (`q`, two or more after folding) + coordinate pair → `{items:[{name,brand_slug?,stores,nearest_meters,district?,city?}]}`; names with a shop within 50 km only, default 6/max 8; no coordinates → empty list | `INVALID_INPUT` |
 | `GET /v1/stores/search`, `/nearby` | optional | `q`, coordinate pair, radius, limit → `{search_id,visitor_session_id,items}`; default 20/max 50 | `INVALID_INPUT` |
 | `POST /v1/stores/resolve-external` | required | `{provider:"google",place_id}` → `{id}` | provider errors |
 | `GET /v1/stores/{id}` | optional | optional coordinate pair → `{store,recent_posts}` (5 posts) | not found/input |

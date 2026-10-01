@@ -200,6 +200,11 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		// the broken thumbnails were. A search is an AI call plus a provider round trip; a
 		// photo is proxied bytes, and the two do not belong on the same allowance.
 		writeLimit := appmw.NewLimiter(20, 6)
+		// Names offered while somebody types arrive one request per pause in typing, and a
+		// store name is a dozen letters. On the search allowance they would spend the budget
+		// the search itself needs a moment later; they are one cheap query each, so they get
+		// a budget of their own sized for typing.
+		typeaheadLimit := appmw.NewLimiter(120, 20)
 		socialLimit := appmw.NewLimiter(60, 15)
 		r.Get("/feed", s.feed)
 		r.With(searchLimit.Middleware).Post("/search", s.searchStores)
@@ -221,6 +226,7 @@ func (s *Server) Router(log *slog.Logger, bff []string, tokens *security.TokenMa
 		r.Get("/discovery/city-brands", s.cityBrands)
 		r.Get("/discovery/brand-stores", s.cityBrandStores)
 		r.Get("/stores/search", s.storeSearch)
+		r.With(typeaheadLimit.Middleware).Get("/stores/names", s.storeNames)
 		r.Get("/stores/nearby", s.storeSearch)
 		r.Get("/stores/{id}", s.storeDetail)
 		r.Get("/stores/{id}/posts", s.postsByStore)
@@ -1254,6 +1260,30 @@ func (s *Server) searchSuggestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items, e := s.search.NearbySuggestions(r.Context(), *latitude, *longitude, queryInt(r, "limit", 60))
+	if e != nil {
+		WriteError(w, e, r.Context())
+		return
+	}
+	JSON(w, 200, map[string]any{"items": items})
+}
+
+// storeNames answers what is being typed into the search field with the names in the
+// catalogue it could be the start of (R70). It needs the point being searched from,
+// because a name is only offered when the search it starts can reach that shop; without
+// one there is nothing honest to offer and the answer is an empty list.
+func (s *Server) storeNames(w http.ResponseWriter, r *http.Request) {
+	lat, e := queryFloat(r, "latitude")
+	lon, lonErr := queryFloat(r, "longitude")
+	typed := r.URL.Query().Get("q")
+	if e != nil || lonErr != nil || (lat == nil) != (lon == nil) || (lat != nil && !storepkg.ValidCoordinates(*lat, *lon)) || utf8.RuneCountInString(typed) > 100 {
+		WriteError(w, ErrInvalidInput, r.Context())
+		return
+	}
+	if lat == nil {
+		JSON(w, 200, map[string]any{"items": []any{}})
+		return
+	}
+	items, e := s.stores.SuggestNames(r.Context(), typed, *lat, *lon, queryInt(r, "limit", 6))
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

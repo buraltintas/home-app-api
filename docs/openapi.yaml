@@ -148,6 +148,17 @@ paths:
         - {name: radius_meters, in: query, schema: {type: integer, minimum: 100, maximum: 50000, default: 10000}}
         - {$ref: '#/components/parameters/PageLimit50'}
       responses: {'200': {$ref: '#/components/responses/StoreSearch'}, '400': {$ref: '#/components/responses/Error'}}
+  /v1/stores/names:
+    get:
+      tags: [Discovery]
+      summary: Catalogue names that what is being typed could be the start of
+      description: Typeahead for the search field. Matches the start of any word of a chain's name or a single shop's sign, folded the way search folds Turkish. A chain is one item however many branches it has; a single shop's sign that only lengthens another listed name is left out. Only names with a shop within the search's 50 km horizon of the given point are returned. Without a coordinate pair the list is empty. Fewer than two letters after folding returns an empty list without a query.
+      parameters:
+        - {name: q, in: query, required: true, schema: {type: string, maxLength: 100}}
+        - {name: latitude, in: query, schema: {type: number, minimum: -90, maximum: 90}}
+        - {name: longitude, in: query, schema: {type: number, minimum: -180, maximum: 180}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 8, default: 6}}
+      responses: {'200': {description: Names to offer, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 8, items: {type: object, required: [name, stores, nearest_meters], properties: {name: {type: string}, brand_slug: {type: string}, stores: {type: integer, description: Shops of this name within the horizon}, nearest_meters: {type: number}, district: {type: string}, city: {type: string}}}}}}}}}, '400': {$ref: '#/components/responses/Error'}, '429': {$ref: '#/components/responses/Error'}}
   /v1/stores/nearby:
     get:
       tags: [Discovery]

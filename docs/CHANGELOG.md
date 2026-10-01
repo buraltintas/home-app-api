@@ -6,6 +6,29 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## Store names offered while somebody types them
+
+`GET /v1/stores/names?q=&latitude=&longitude=` answers the letters typed so far with the
+catalogue names they could be the start of: "arçel" is answered with Arçelik before the
+word is finished, the way "antal" is answered with Antalya when a location is picked. The
+web search panel asks it on every pause in typing.
+
+Three decisions in it are worth knowing:
+
+- **A word, not the name.** "home" finds English Home as well as Home Bazaar. Names that
+  begin with the letters still come first, then chains before single shops, the chain with
+  more branches nearby first.
+- **Only what the search can reach.** A name is offered only if it has a shop within the
+  search's own 50 km horizon. Offering a shop 300 km away would lead straight to "there is
+  no such shop within 50 km", which is worse than not offering it.
+- **One line per answer.** A chain is one line however many branches it has. A shop whose
+  sign only lengthens another name on the list ("Yatsan Urla" beside "Yatsan") is dropped,
+  because the search for the shorter name already finds it. A chain is never the one
+  dropped: Karaca and Karaca Home are two companies.
+
+It has its own rate allowance. Typing makes a request per pause, and on the search
+allowance those would spend the budget the search itself needs a moment later.
+
 ## A name with a town inserted into it is still the same name
 
 "Banio Yapı Market Uncalı Şubesi" and "Banio Yapı Market Konyaaltı Antalya Uncalı Şubesi"
