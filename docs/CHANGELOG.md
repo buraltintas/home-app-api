@@ -6,6 +6,75 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The catalogue is read from memory, so the database can sleep
+
+The database had not suspended once in three days. Over 79 hours of request logs there was
+not a single five-minute gap, and 99.1% of the requests that reached Postgres were
+anonymous catalogue reads: a shop's page (57%), its neighbours (34%), the city lists (8%),
+nearly all of them crawlers having the web server render store pages. The read cache did not
+change that. It hit 3.6% of store pages and 39% of neighbour blocks, because a crawler asks
+for each shop about once per language and every deploy empties it. Blocking crawlers did not
+either: replayed without the worst of them, and then without every bot but Google and Bing,
+the database was still awake 100% and 68% of the time. The traffic is not the lever; the
+read path is.
+
+So the API now holds the whole live catalogue in memory -- 15,600 shops, their figures,
+categories, translations, brands and provider records, read in one repeatable-read
+transaction -- and answers every anonymous catalogue read from it: `/v1/stores/{id}`,
+`/v1/stores/{id}/nearby`, `/v1/discovery/city-categories`, `/v1/discovery/stores`,
+`/v1/discovery/city-brands`, `/v1/discovery/brand-stores`, `/v1/stores/index` and
+`/v1/categories`. All of them at once, because they have to go together: with only the store
+page and its neighbours moved, the lists alone still kept the database awake 97% of the time.
+
+What stays with the database, deliberately:
+
+- **Anybody signed in, and any request with coordinates** -- the read cache's two rules,
+  unchanged.
+- **A shop with any post at all**, published or waiting for a moderator. This is the
+  owner's standing decision for the read cache (ten shops of 15,600): everything on such a
+  page a reader would notice going stale is a review, and a write can only reach the copy in
+  the process it landed in.
+- **Anything the copy has not seen.** A shop imported after it was read, a city or brand it
+  does not know, a city whose address two spellings share. The copy never answers "not
+  found"; the database does, or knows better.
+
+**The one thing a reader can notice.** A change written outside this process -- a catalogue
+import run from a laptop, which writes straight to the database, or an edit that landed on
+another instance -- reaches anonymous store pages and lists within `CATALOG_SNAPSHOT_MAX_AGE`,
+six hours, and usually within the hour. A change written through this process is visible on
+the next request: a review, a merge, a category, a cover or a new shop sends every catalogue
+read to the database until the catalogue has been read again, and a favourite or a premium
+or catalogue flag sends only that shop's page. Store pages and neighbour blocks were already
+held up to six hours by the read cache, and a day by the web; the city lists, the category
+list and the sitemap index were read fresh on every request and now share the same six hours.
+
+**Keeping it fresh must not wake the database either**, or the saving is spent on the
+upkeep. A copy is read again on three occasions: when a write here makes it stale or none is
+held (the request is about to ask the database anyway); when it is over an hour old and this
+process heard from the database in the last half minute, so it is awake for somebody else;
+and when it reaches its maximum age, which is the only read that may wake it -- at most once
+per instance per six hours. Every read runs inside the request that found the need for it,
+never on a goroutine of its own: Cloud Run throttles an instance's CPU between requests, and
+a query left half-run on a throttled instance keeps the database awake until the next
+request. Readers never wait on somebody else's read; they keep the old copy, without a lock,
+and a failed read leaves the old copy answering. Startup reads it before the port opens.
+
+**How it was checked.** On a seeded catalogue every answer from the copy is the database's,
+byte for byte, for every shop by id and by slug, in all four languages. Two things are allowed
+to differ because the database does not pin them down: distances, which PostGIS measures with
+Karney's series and the copy with Vincenty's, agree to a tenth of a micrometre; and shops that
+tie on everything their list is ordered by -- the same distance from one district centre --
+may come in either order. `CATALOG_SNAPSHOT=shadow`, the default, serves nothing from memory:
+it compares every answer with the database's on real traffic and logs each difference as
+"catalog snapshot differs from the database", with the snapshot's age so staleness can be told
+from a fault. `on` serves. `off` is the old path entirely.
+
+**What it costs.** About 20-25 MB of heap for the full catalogue (measured on a seeded
+full-size one; the startup log line "catalog snapshot read" gives the real figure), twice that
+for a moment while a new copy replaces the old, in a 512 MB container that peaks at 250. A read
+takes a second or two against Neon and moves roughly 15 MB. A neighbour block is computed in
+about 0.2 ms.
+
 ## Store names offered while somebody types them
 
 `GET /v1/stores/names?q=&latitude=&longitude=` answers the letters typed so far with the

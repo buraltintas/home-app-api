@@ -210,6 +210,7 @@ func (s *Server) adminSetPremium(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.storePageChanged(id)
 	JSON(w, 200, map[string]any{"id": id, "is_premium": body.IsPremium})
 }
 
@@ -235,6 +236,7 @@ func (s *Server) adminSetCatalogStore(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.storePageChanged(id)
 	JSON(w, 200, map[string]any{"id": id, "is_catalog_store": body.IsCatalogStore})
 }
 
@@ -260,6 +262,8 @@ func (s *Server) adminSetStoreCover(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	// The cover is the shop's picture in every list it appears in, not only on its page.
+	s.catalogueChanged(id)
 	JSON(w, http.StatusOK, map[string]any{"id": id, "cover_media_id": body.MediaID})
 }
 
@@ -278,6 +282,7 @@ func (s *Server) adminClearStoreCover(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.catalogueChanged(id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -332,6 +337,7 @@ func (s *Server) adminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.reviewsChanged()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -354,7 +360,7 @@ func (s *Server) adminDeleteReview(w http.ResponseWriter, r *http.Request) {
 	// The shop's page held here still carries the review. Creating one dropped this copy and
 	// deleting one did not, so an administrator's removal waited out the cache while the
 	// author's own appearance was instant -- the wrong way round for the one that matters.
-	s.reads.Drop(storeGroup(store))
+	s.reviewsChanged(store)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -407,7 +413,7 @@ func (s *Server) adminDecideReview(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.reads.Drop(storeGroup(store))
+	s.reviewsChanged(store)
 	JSON(w, 200, map[string]any{"store_id": store, "store_slug": slug})
 }
 
@@ -447,7 +453,7 @@ func (s *Server) adminDecideComment(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.reads.Drop(storeGroup(store))
+	s.storePageChanged(store)
 	JSON(w, 200, map[string]any{"store_id": store, "store_slug": slug})
 }
 
@@ -488,6 +494,7 @@ func (s *Server) adminSetStoreCategories(w http.ResponseWriter, r *http.Request)
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.catalogueChanged(id)
 	JSON(w, 200, map[string]any{"id": id, "slugs": body.Slugs})
 }
 
@@ -586,6 +593,7 @@ func (s *Server) adminCreateStore(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.catalogueChanged()
 	JSON(w, 201, map[string]any{"id": id})
 }
 
@@ -626,6 +634,7 @@ func (s *Server) adminResolveMatch(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.catalogueChanged()
 	JSON(w, 200, map[string]any{"id": id, "merged": body.Merge})
 }
 
@@ -651,6 +660,8 @@ func (s *Server) adminImportBrand(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	report, e := s.admin.ImportBrand(r.Context(), actor, email, chi.URLParam(r, "slug"))
+	// Even a failed import may have written some of the chain's shops before it stopped.
+	s.catalogueChanged()
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -690,5 +701,6 @@ func (s *Server) adminMergeStores(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	s.catalogueChanged(keep, drop)
 	JSON(w, 200, map[string]any{"id": keep, "merged": drop})
 }

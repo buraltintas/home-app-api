@@ -136,3 +136,27 @@ func TestLoadRejectsIncompleteOrInvalidAppReviewLogin(t *testing.T) {
 		})
 	}
 }
+
+// The catalogue copy starts in shadow, where it changes nothing a reader sees, and its
+// maximum age cannot be set short enough to become a wake source of its own.
+func TestCatalogSnapshotDefaultsToShadowAndRefusesAShortMaximumAge(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("CATALOG_SNAPSHOT", "")
+	t.Setenv("CATALOG_SNAPSHOT_MAX_AGE", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CatalogSnapshot != "shadow" || cfg.CatalogSnapshotMaxAge.Hours() != 6 {
+		t.Fatalf("mode %q, max age %s", cfg.CatalogSnapshot, cfg.CatalogSnapshotMaxAge)
+	}
+	t.Setenv("CATALOG_SNAPSHOT", "always")
+	if _, err = Load(); err == nil {
+		t.Fatal("an unknown mode was accepted")
+	}
+	t.Setenv("CATALOG_SNAPSHOT", "on")
+	t.Setenv("CATALOG_SNAPSHOT_MAX_AGE", "10m")
+	if _, err = Load(); err == nil {
+		t.Fatal("a ten-minute maximum age was accepted")
+	}
+}

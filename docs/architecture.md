@@ -287,3 +287,27 @@ Businesses Google is explicit about being something else — bakeries, schools, 
 clinics, warehouses — are refused at import by `IsHomeLivingPlace`. Silence keeps a place:
 most shops carry nothing but `store`, and demanding proof of belonging would empty the
 catalogue.
+
+## Reads that do not wake the database
+
+The managed Postgres suspends after five quiet minutes and bills every minute it is awake,
+so what decides the bill is how often anything touches it, not how hard. Nearly all of the
+traffic is anonymous -- crawlers having the web server render store pages. These are what
+let it sleep anyway:
+
+- **`store.Snapshot` / `store.Catalog`** hold the whole live catalogue in the API process and
+  answer the anonymous catalogue routes from it (`CATALOG_SNAPSHOT=off|shadow|on`). It answers
+  only what it is sure of and leaves everything else to the database: signed-in readers,
+  requests with coordinates, shops with any post, and anything it has not seen. A copy is
+  read again inside the request that needs it -- after a write here, when it is over an hour
+  old and the database is already awake, or at `CATALOG_SNAPSHOT_MAX_AGE` -- and replaced
+  atomically; readers never lock. Writes in this process invalidate it at once; writes
+  elsewhere reach it within the maximum age.
+- **`readcache.Cache`** holds rendered answers for six hours: the store pages the snapshot
+  leaves to the database.
+- **`database.Activity`** listens to the pool's connections being handed back, so the process
+  knows whether the database is awake without asking it. The snapshot refreshes on it.
+
+The snapshot and the held answers read the database only inside the request that needs
+them, never on a goroutine of their own. Cloud Run throttles an idle instance's CPU, and a
+query left half-run there keeps the database awake until the next request arrives.

@@ -51,6 +51,10 @@ type Server struct {
 	// catalogue does not wake the database. See internal/readcache for why, and for the
 	// three rules that keep it honest.
 	reads *readcache.Cache
+	// The whole catalogue, held in this process for the same reason; see store.Snapshot and
+	// SetCatalog. Nil when switched off.
+	catalog       *storepkg.Catalog
+	catalogShadow bool
 }
 
 // SetReadCache hands the server its catalogue cache. Separate from the constructor because
@@ -137,7 +141,7 @@ type RuntimeConfig struct {
 }
 
 func NewServer(db *pgxpool.Pool, a *auth.Service, st *storepkg.Service, so *social.Service, se *searchpkg.Service, lo *locationpkg.Service, u *userpkg.Service, m *media.Service, ad *adminpkg.Service, rp *reporting.Service, fb *feedback.Service, hashKey []byte) *Server {
-	return &Server{db, a, st, so, se, lo, u, m, ad, rp, fb, hashKey, nil}
+	return &Server{db: db, auth: a, stores: st, social: so, search: se, places: lo, users: u, media: m, admin: ad, report: rp, feedback: fb, hashKey: hashKey}
 }
 
 // AddressBearers names the callers whose word on who a request is for is taken. It is a
@@ -626,7 +630,15 @@ func (s *Server) storeSearch(w http.ResponseWriter, r *http.Request) {
 // is the set of pages worth publishing. Read by the pages themselves and by the sitemap, so
 // neither can advertise a page the other does not believe in.
 func (s *Server) cityCategories(w http.ResponseWriter, r *http.Request) {
-	items, e := s.stores.CityCategories(r.Context(), queryInt(r, "minimum", 0))
+	minimum := queryInt(r, "minimum", 0)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return map[string]any{"items": c.CityCategories(minimum, i18n.FromContext(r.Context()))}, true
+	})
+	if served {
+		return
+	}
+	items, e := s.stores.CityCategories(r.Context(), minimum)
+	compare(map[string]any{"items": items}, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -642,7 +654,15 @@ func (s *Server) cityCategoryStores(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
-	page, e := s.stores.ByCityCategory(r.Context(), city, category, queryInt(r, "limit", 60), queryInt(r, "offset", 0))
+	limit, offset := queryInt(r, "limit", 60), queryInt(r, "offset", 0)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return c.ByCityCategory(city, category, limit, offset, i18n.FromContext(r.Context()))
+	})
+	if served {
+		return
+	}
+	page, e := s.stores.ByCityCategory(r.Context(), city, category, limit, offset)
+	compare(page, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -655,7 +675,15 @@ func (s *Server) cityCategoryStores(w http.ResponseWriter, r *http.Request) {
 // category pages do not: somebody who names a chain has already chosen it and is deciding
 // which branch.
 func (s *Server) cityBrands(w http.ResponseWriter, r *http.Request) {
-	items, e := s.stores.CityBrands(r.Context(), queryInt(r, "minimum", 0))
+	minimum := queryInt(r, "minimum", 0)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return map[string]any{"items": c.CityBrands(minimum)}, true
+	})
+	if served {
+		return
+	}
+	items, e := s.stores.CityBrands(r.Context(), minimum)
+	compare(map[string]any{"items": items}, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -671,7 +699,15 @@ func (s *Server) cityBrandStores(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, ErrInvalidInput, r.Context())
 		return
 	}
-	page, e := s.stores.ByCityBrand(r.Context(), city, brand, queryInt(r, "limit", 60), queryInt(r, "offset", 0))
+	limit, offset := queryInt(r, "limit", 60), queryInt(r, "offset", 0)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return c.ByCityBrand(city, brand, limit, offset, i18n.FromContext(r.Context()))
+	})
+	if served {
+		return
+	}
+	page, e := s.stores.ByCityBrand(r.Context(), city, brand, limit, offset)
+	compare(page, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -682,7 +718,15 @@ func (s *Server) cityBrandStores(w http.ResponseWriter, r *http.Request) {
 // storeIndex enumerates stores for sitemap generation. Search is query driven and can
 // never answer "every store you have", which left the sitemap listing no stores at all.
 func (s *Server) storeIndex(w http.ResponseWriter, r *http.Request) {
-	items, e := s.stores.Index(r.Context(), queryInt(r, "offset", 0), queryInt(r, "limit", 1000))
+	offset, limit := queryInt(r, "offset", 0), queryInt(r, "limit", 1000)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return map[string]any{"items": c.Index(offset, limit)}, true
+	})
+	if served {
+		return
+	}
+	items, e := s.stores.Index(r.Context(), offset, limit)
+	compare(map[string]any{"items": items}, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return
@@ -696,6 +740,13 @@ func (s *Server) storeIndex(w http.ResponseWriter, r *http.Request) {
 // searches nobody performed.
 func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
 	limit := queryInt(r, "limit", 6)
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		items, ok := c.Nearby(chi.URLParam(r, "id"), limit)
+		return map[string]any{"items": items}, ok
+	})
+	if served {
+		return
+	}
 	// Which shops are near this one does not depend on who is asking or where they are
 	// standing: it is measured from the shop. So the answer is the same bytes for everybody
 	// who asks in the same language for the same number of them.
@@ -706,9 +757,11 @@ func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
 	s.answer(w, r, key, func() (any, string, error) {
 		id, e := parseStoreRef(r, s)
 		if e != nil {
+			compare(nil, e)
 			return nil, "", e
 		}
 		items, e := s.stores.Nearby(r.Context(), id, limit)
+		compare(map[string]any{"items": items}, e)
 		if e != nil {
 			return nil, "", e
 		}
@@ -724,7 +777,16 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Answered from this process when nobody is signed in and no coordinates were sent --
-	// which is every page built on the server, and so every crawl. See internal/readcache.
+	// which is every page built on the server, and so every crawl. The copy of the whole
+	// catalogue answers first (store.Snapshot); a shop it leaves to the database -- one with
+	// reviews, one it has not seen -- may still be in the read cache. See internal/readcache.
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		x, ok := c.Store(chi.URLParam(r, "id"), i18n.FromContext(r.Context()))
+		return map[string]any{"store": x, "recent_posts": []social.Post(nil)}, ok
+	})
+	if served {
+		return
+	}
 	key := ""
 	if cacheableRead(r) {
 		key = fmt.Sprintf("store|%s|%s", chi.URLParam(r, "id"), i18n.FromContext(r.Context()))
@@ -732,10 +794,12 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 	s.answer(w, r, key, func() (any, string, error) {
 		id, e := parseStoreRef(r, s)
 		if e != nil {
+			compare(nil, e)
 			return nil, "", e
 		}
 		x, e := s.stores.Get(r.Context(), id, viewer(r), lat, lon)
 		if e != nil {
+			compare(nil, e)
 			return nil, "", e
 		}
 		// Every review the shop has, near enough. It was five, which was chosen when a shop
@@ -743,6 +807,7 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		// number. A shop's page is the place its reviews live, so the number is set where a
 		// page stops being readable rather than where the query starts to cost something.
 		posts, e := s.social.PostsBy(r.Context(), "store_id", id, viewer(r), 200)
+		compare(map[string]any{"store": x, "recent_posts": posts}, e)
 		if e != nil {
 			return nil, "", e
 		}
@@ -948,6 +1013,8 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	// The account's reviews and saved shops went with it, and shops' counts with them.
+	s.reviewsChanged()
 	w.WriteHeader(204)
 }
 
@@ -1083,8 +1150,9 @@ func (s *Server) createPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := created.ID
-	// Written, so the copy of this shop's page held here is wrong from this moment.
-	s.reads.Drop(storeGroup(in.StoreID))
+	// Written, so the copy of this shop's page held here is wrong from this moment, and so
+	// is every list that counts its reviews.
+	s.reviewsChanged(in.StoreID)
 	if in.OriginSearchID != nil && in.OriginSearchResultID != nil {
 		_ = s.search.Attribute(r.Context(), *in.OriginSearchID, *in.OriginSearchResultID, p.UserID, in.StoreID, "review_created", "review:"+id.String())
 	}
@@ -1118,8 +1186,12 @@ func (s *Server) deletePost(w http.ResponseWriter, r *http.Request) {
 	s.idAction(w, r, func(p, id uuid.UUID) error {
 		store, e := s.social.DeletePost(r.Context(), p, id)
 		// The shop's page is held for anonymous readers and says how many reviews it has.
-		// A deleted review leaves it now rather than when the entry ages out.
-		s.reads.Drop(storeGroup(store))
+		// A deleted review leaves it now rather than when the entry ages out. Only a delete
+		// that happened: a refused one changed nothing, and must not make the catalogue be
+		// read again for nothing.
+		if e == nil {
+			s.reviewsChanged(store)
+		}
 		return e
 	})
 }
@@ -1154,7 +1226,7 @@ func (s *Server) favoriteAction(w http.ResponseWriter, r *http.Request, add bool
 	}
 	if changed {
 		// "Kaydedenler" is on the page, so the page has changed.
-		s.reads.Drop(storeGroup(storeID))
+		s.storePageChanged(storeID)
 	}
 	searchID, se := uuid.Parse(r.Header.Get("X-Origin-Search-ID"))
 	resultID, re := uuid.Parse(r.Header.Get("X-Origin-Search-Result-ID"))
@@ -1317,7 +1389,14 @@ func (s *Server) searchPopularCities(w http.ResponseWriter, r *http.Request) {
 // storeCategories lists browsable categories with how often each has been searched, so the
 // client can order them by what people actually want rather than alphabetically.
 func (s *Server) storeCategories(w http.ResponseWriter, r *http.Request) {
+	served, compare := s.fromCatalog(w, r, func(c *storepkg.Snapshot) (any, bool) {
+		return map[string]any{"items": c.Categories(i18n.FromContext(r.Context()))}, true
+	})
+	if served {
+		return
+	}
 	items, e := s.stores.Categories(r.Context())
+	compare(map[string]any{"items": items}, e)
 	if e != nil {
 		WriteError(w, e, r.Context())
 		return

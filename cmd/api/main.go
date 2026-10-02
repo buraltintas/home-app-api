@@ -52,7 +52,10 @@ func main() {
 		defer cancel()
 		_ = shutdownTracing(shutdown)
 	}()
-	db, e := database.Open(ctx, cfg.DatabaseURL)
+	// Told about every round trip, so work that can wait is done while the database is
+	// already awake for somebody else rather than waking it on its own.
+	activity := &database.Activity{}
+	db, e := database.OpenWatched(ctx, cfg.DatabaseURL, activity)
 	if e != nil {
 		log.Error("database unavailable", "error", e)
 		os.Exit(1)
@@ -129,6 +132,22 @@ func main() {
 	// hours, it takes 3,817 requests down to 302 and gives the database 107 minutes of the
 	// quiet it needs to suspend itself -- 45% of the window -- where today it gets none.
 	api.SetReadCache(readcache.New(cfg.ReadCacheBytes, cfg.ReadCacheTTL))
+	// And the rest of them from a copy of the whole catalogue: the per-answer cache above hit
+	// 4% of store pages, because a crawler asks for each shop about once per language, so the
+	// database still never got five quiet minutes. Read here, before the port opens, while
+	// Cloud Run gives a starting container its CPU and the database is awake from the
+	// connection check above. If it cannot be read, the service starts anyway and the database
+	// answers as before until a later read succeeds.
+	if cfg.CatalogSnapshot != "off" {
+		catalog := storepkg.NewCatalog(db, activity, cfg.CatalogSnapshotMaxAge, log)
+		loadCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		if e := catalog.Load(loadCtx); e != nil {
+			log.Warn("catalog snapshot unavailable at startup; catalogue reads go to the database until it can be read", "error", e)
+		}
+		cancel()
+		api.SetCatalog(catalog, cfg.CatalogSnapshot == "shadow")
+		log.Info("catalog snapshot enabled", "mode", cfg.CatalogSnapshot, "max_age", cfg.CatalogSnapshotMaxAge.String())
+	}
 	// Said out loud, because the safe direction here is also the useless one: with nobody
 	// named, no caller may state who a request is for, and every rate limit counted against
 	// an address falls back to the connection -- which for the website is one address for

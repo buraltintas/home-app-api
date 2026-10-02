@@ -29,7 +29,14 @@ var (
 	// this one is the difference between a database that sleeps and one that does not.
 	readCache      = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_read_cache_total", Help: "Anonymous catalogue reads answered from this process, by outcome."}, []string{"outcome"})
 	readCacheBytes = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_read_cache_bytes", Help: "Bytes currently held as cached catalogue answers."})
-	workerRetries  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
+	// The catalogue held in memory: what each anonymous catalogue read was answered from, and
+	// what each read of the whole catalogue cost. Served and fallthrough together say how
+	// much of the crawl still reaches the database.
+	catalogReads  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_reads_total", Help: "Anonymous catalogue reads by what answered them: served, fallthrough, shadow_match, shadow_mismatch."}, []string{"outcome"})
+	catalogLoads  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_loads_total", Help: "Reads of the whole catalogue by reason and outcome."}, []string{"reason", "outcome"})
+	catalogStores = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_stores", Help: "Live stores in the catalogue copy held in memory."})
+	catalogBytes  = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_bytes", Help: "Approximate bytes held by the catalogue copy in memory."})
+	workerRetries = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
 	// What the search sufficiency gate decided, and why. The decision counter gives the
 	// Local Only Rate and the Places Fallback Rate; the reason counter says which of the
 	// gate's four conditions is driving the calls that remain, which is the difference
@@ -43,7 +50,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, readCache, readCacheBytes, searchGate, searchGateReason, searchShadow, searchStage)
+	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, readCache, readCacheBytes, catalogReads, catalogLoads, catalogStores, catalogBytes, searchGate, searchGateReason, searchShadow, searchStage)
 }
 
 type statusWriter struct {
@@ -145,6 +152,20 @@ func ReadCache(hit bool, bytes int) {
 	}
 	readCache.WithLabelValues(outcome).Inc()
 	readCacheBytes.Set(float64(bytes))
+}
+
+// CatalogRead records what answered one anonymous catalogue read.
+func CatalogRead(outcome string) { catalogReads.WithLabelValues(outcome).Inc() }
+
+// CatalogLoad records one read of the whole catalogue and, when it worked, its size.
+func CatalogLoad(reason string, ok bool, stores, bytes int) {
+	if !ok {
+		catalogLoads.WithLabelValues(reason, "failure").Inc()
+		return
+	}
+	catalogLoads.WithLabelValues(reason, "success").Inc()
+	catalogStores.Set(float64(stores))
+	catalogBytes.Set(float64(bytes))
 }
 
 func Worker(worker, outcome string, retry bool) {

@@ -64,11 +64,23 @@ type Config struct {
 	// than they already were.
 	ReadCacheTTL   time.Duration
 	ReadCacheBytes int
-	MetricsToken   string
-	AdminEmails    []string
-	OTELEnabled    bool
-	OTLPEndpoint   string
-	DefaultLocale  i18n.Locale
+	// The whole live catalogue held in memory, so anonymous catalogue reads -- every crawler
+	// fetch of a store page, its neighbours and the city lists -- never reach the database.
+	// "off" leaves every read on the database as before; "shadow" reads the catalogue and
+	// compares its answers with the database's without serving them; "on" serves them.
+	//
+	// The maximum age is the one thing a reader can notice: a change made outside this
+	// process -- a catalogue import from a laptop, an edit that landed on another instance --
+	// reaches anonymous catalogue pages within it, and usually within the hour (see
+	// store.Catalog). Each time it runs out on a sleeping database it wakes it, so it has a
+	// floor: an hour.
+	CatalogSnapshot       string
+	CatalogSnapshotMaxAge time.Duration
+	MetricsToken          string
+	AdminEmails           []string
+	OTELEnabled           bool
+	OTLPEndpoint          string
+	DefaultLocale         i18n.Locale
 }
 
 func Load() (Config, error) {
@@ -209,6 +221,17 @@ func Load() (Config, error) {
 	// handful of shops with reviews, inside a container with 512.
 	if c.ReadCacheBytes, err = integer("READ_CACHE_BYTES", 64<<20); err != nil {
 		return c, err
+	}
+	switch c.CatalogSnapshot = env("CATALOG_SNAPSHOT", "shadow"); c.CatalogSnapshot {
+	case "off", "shadow", "on":
+	default:
+		return c, errors.New("CATALOG_SNAPSHOT must be off, shadow or on")
+	}
+	if c.CatalogSnapshotMaxAge, err = duration("CATALOG_SNAPSHOT_MAX_AGE", 6*time.Hour); err != nil {
+		return c, err
+	}
+	if c.CatalogSnapshotMaxAge < time.Hour {
+		return c, errors.New("CATALOG_SNAPSHOT_MAX_AGE must be at least an hour: each time it runs out it may wake the database")
 	}
 	if c.SearchLocationRetentionDays, err = integer("SEARCH_LOCATION_RETENTION_DAYS", 30); err != nil {
 		return c, err
