@@ -6,6 +6,14 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The integration suite no longer says to run against `DATABASE_URL`
+
+The README told whoever ran the integration suite to `export TEST_DATABASE_URL=
+"$DATABASE_URL"`. With a development `.env` that points at production -- which this
+repository's has -- that writes test users, stores, reviews and searches into the live
+catalogue and its analytics. It now points at a throwaway local database, and the new
+catalogue tests refuse any host but this machine.
+
 ## An empty outbox is asked about again in six hours, not in a second
 
 After every instance start and every mail sent, the outbox worker polled again at one second

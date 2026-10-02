@@ -305,12 +305,20 @@ tokens, OTPs and provider keys are not logged.
 ## Database integration and provider tests
 
 The integration suite never substitutes SQLite for PostgreSQL behavior. Prepare
-a migrated PostgreSQL/PostGIS database, then run:
+a migrated PostgreSQL/PostGIS database of its own -- the compose service above,
+or a throwaway local cluster -- and point the suite at that:
 
 ```bash
-export TEST_DATABASE_URL="$DATABASE_URL"
+export TEST_DATABASE_URL="postgres://home_app:home_app@localhost:5432/home_app?sslmode=disable"
 make integration-test
 ```
+
+Never point it at the `DATABASE_URL` of a deployed environment. The suite writes
+users, stores, reviews and searches and deletes some of them again; against
+production that is test data in the live catalogue and its analytics. The
+catalogue-snapshot tests refuse any host but this machine. Run the packages one
+at a time (`go test -p 1 -tags=integration ./internal/store ./internal/server
+./internal/search`), because they share the one database.
 
 It covers OTP identity/session lifecycle, cross-provider identity merge,
 refresh rotation/reuse/logout, PostGIS proximity rejection/acceptance, social
