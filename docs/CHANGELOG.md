@@ -20,11 +20,20 @@ After every instance start and every mail sent, the outbox worker polled again a
 and doubled from there, so it asked an empty queue at roughly four, eight, seventeen,
 thirty-four, sixty-eight and 136 minutes. On a quiet night each of those was its own wake of
 the database. Every writer of the outbox already tells the worker the moment it commits
-(`Notify`), so the climb was protecting against nothing: an empty poll now waits the six-hour
-ceiling at once. A due retry is still waited for exactly, a queue with mail is still drained
-at once, and a round that could not read the outbox backs off from a second, because that says
-nothing about whether somebody's sign-in code is in it. A test fails if a new outbox writer
-forgets to notify.
+(`Notify`), so the climb was protecting against nothing: an outbox with nothing waiting in it
+now waits the six-hour ceiling at once. A queue with mail is still drained at once, and a round
+that could not read the outbox backs off from a second, because that says nothing about
+whether somebody's sign-in code is in it. A test fails if a new outbox writer forgets to
+notify.
+
+A row that is waiting -- a delivery that failed and is due again, a claim another instance
+never finished -- is waited for exactly, and that wait is read from the outbox on every look
+rather than remembered. A first version remembered only the retries scheduled in the same
+round, and that lost one: a sign-in code whose delivery failed, followed by any other mail,
+was not tried again for six hours, because the round after the other mail found nothing due
+yet. Checked against a database with a sender that fails once. The look is one statement on
+its own; a transaction is opened only when something is due, so a look that stalls on a
+throttled instance cannot hold one open.
 
 The ceiling is the longest a row nobody told this process about can wait -- one left by an
 instance that died -- and jumping to it would have made that wait longer than the doubling

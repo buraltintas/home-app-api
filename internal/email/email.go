@@ -362,10 +362,11 @@ needs, because a ceiling shorter than that saves nothing at all.
 // be longer than the gaps it is sitting in, not comparable to them.
 //
 // Nothing waits on the ceiling any more in the normal case: a new row arrives through
-// Notify, and a row that failed and is due again says when it is due, which the loop below
-// waits for exactly. What is left is a row written by an instance that died before it could
-// say so, and that is picked up by the next instance to start, or the next time somebody
-// uses the database for anything else (DatabaseInUse).
+// Notify, and every look at the outbox also asks when its next row is due -- a retry, or one
+// another instance claimed and never finished -- which the loop below waits for exactly.
+// What is left is a row written since the last look by an instance that died before it
+// could send it, and that is picked up by the next instance to start, or the next time
+// somebody uses the database for anything else (DatabaseInUse).
 const (
 	emailPollBusy = time.Second
 	emailPollIdle = 6 * time.Hour
@@ -421,12 +422,14 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // nextPoll decides how long the worker waits before asking the outbox again.
 //
-// A queue with something in it is asked about again immediately. A delivery that failed and
-// will be tried again says when it is due, because this process wrote that row's next
-// attempt and waits exactly that long rather than discovering it on some later sweep.
+// A queue with something in it is asked about again immediately. A row that is waiting --
+// a delivery that failed and will be tried again, a claim another instance never finished --
+// says when it is due (see once), and the worker waits exactly that long rather than
+// discovering it on some later sweep.
 //
-// A queue that came back empty waits the whole ceiling, at once. It used to creep up to it
-// by doubling from a second, and every step of the climb was a query of its own: after each
+// A queue with nothing waiting in it at all waits the whole ceiling, at once. It used to
+// creep up to it by doubling from a second, and every step of the climb was a query of its
+// own: after each
 // instance start and after every mail sent, the outbox was asked about again at roughly four,
 // eight, seventeen, thirty-four, sixty-eight and a hundred and thirty-six minutes. On a quiet
 // night each of those was a separate wake of the database, five minutes of compute apiece,
@@ -462,9 +465,9 @@ const emailPollPiggyback = 10 * time.Minute
 DatabaseInUse is told when this process has just had an answer from the database for some
 other reason, and asks the outbox about itself if nobody has for a while.
 
-The ceiling above is the longest a row this process was never told about waits: a retry that
-came due, or a row left by an instance that died before it could send it. Jumping straight to
-it would make that wait longer than the doubling used to, so this takes it back: whenever the
+The ceiling above is the longest a row this process was never told about waits: one written
+since the last look by an instance that died before it could send it. Jumping straight to it
+would make that wait longer than the doubling used to, so this takes it back: whenever the
 database is awake anyway -- somebody signed in, a review, a search -- and the last look is ten
 minutes old, the worker looks again. It costs a query on a database that is already up, which
 is no wake at all, and it means an orphaned row waits for the next person to use the product
@@ -483,10 +486,33 @@ func (w *Worker) DatabaseInUse() {
 	w.Notify()
 }
 
-// once takes at most one job. It reports whether it took one, and -- when a delivery failed
-// and is due to be tried again -- how long until that attempt, so the caller can wait for it
-// instead of polling for it.
+// once takes at most one job. It reports whether it took one, and how long until the outbox
+// next has one to give -- a delivery that failed and is due to be tried again, a row another
+// instance claimed and never finished -- so the caller can wait for it instead of polling for
+// it.
+//
+// That wait is read from the outbox, not remembered. The worker used to know only the retries
+// it had scheduled in the same round, so a failed sign-in code followed by any other mail was
+// forgotten: the next round found nothing due yet, and an empty round waits the ceiling. Asked
+// here, a retry is found whoever scheduled it and whatever went out in between.
+//
+// The question is one statement on its own, before any transaction: an outbox with nothing due
+// -- nearly every time it is asked -- never opens one, so a look that stalls on a throttled
+// instance cannot leave the database holding a transaction open.
 func (w *Worker) once(ctx context.Context) (bool, time.Duration, error) {
+	var next *float64
+	e := w.db.QueryRow(ctx, `SELECT extract(epoch FROM least(
+ (SELECT min(available_at) FROM email_outbox WHERE status IN ('pending','failed') AND available_at<'infinity'),
+ (SELECT min(locked_at) FROM email_outbox WHERE status='processing')+interval '5 minutes')-now())::float8`).Scan(&next)
+	if e != nil {
+		return false, 0, e
+	}
+	if next == nil {
+		return false, 0, nil
+	}
+	if *next > 0 {
+		return false, max(time.Duration(*next*float64(time.Second)), time.Millisecond), nil
+	}
 	tx, e := w.db.BeginTx(ctx, pgx.TxOptions{})
 	if e != nil {
 		return false, 0, e
@@ -495,7 +521,9 @@ func (w *Worker) once(ctx context.Context) (bool, time.Duration, error) {
 	var j job
 	e = tx.QueryRow(ctx, `SELECT id,recipient,template,payload,attempts,locale::text FROM email_outbox WHERE ((status IN ('pending','failed') AND available_at<=now()) OR (status='processing' AND locked_at<now()-interval '5 minutes')) ORDER BY available_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&j.ID, &j.Recipient, &j.Template, &j.Payload, &j.Attempts, &j.Locale)
 	if errors.Is(e, pgx.ErrNoRows) {
-		return false, 0, nil
+		// Due a moment ago, and taken by another instance in between. Whatever it leaves
+		// behind is asked about again shortly.
+		return false, emailPollBusy, nil
 	}
 	if e != nil {
 		return false, 0, e

@@ -309,9 +309,10 @@ let it sleep anyway:
   every language, dropped by a review written, deleted or moderated here.
 - **`database.Activity`** listens to the pool's connections being handed back, so the process
   knows whether the database is awake without asking it. The snapshot refreshes on it.
-- **The email outbox worker** is told about new mail by its writers, waits six hours between
-  looks at an empty queue, and looks again whenever `database.Activity` says the database is
-  awake anyway and the last look is ten minutes old.
+- **The email outbox worker** is told about new mail by its writers, waits exactly until the
+  next waiting row is due (a retry, an unfinished claim), six hours when nothing is waiting,
+  and looks again whenever `database.Activity` says the database is awake anyway and the last
+  look is ten minutes old.
 
 The snapshot and the held answers read the database only inside the request that needs
 them, never on a goroutine of their own. Cloud Run throttles an idle instance's CPU, and a
