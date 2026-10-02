@@ -105,6 +105,7 @@ func TestAnOldCopyIsReadAgainOnlyOnAnAwakeDatabase(t *testing.T) {
 func TestAWriteHereSendsReadsToTheDatabaseUntilReadAgain(t *testing.T) {
 	tc := newTestCatalog(t)
 	before := tc.Current(context.Background())
+	tc.advance(catalogReloadEvery)
 	tc.Invalidate()
 	after := tc.Current(context.Background())
 	if n := tc.reads.Load(); n != 1 || after == nil || after == before {
@@ -122,6 +123,7 @@ func TestAWriteHereSendsReadsToTheDatabaseUntilReadAgain(t *testing.T) {
 func TestAWriteDuringAReadIsNotLost(t *testing.T) {
 	tc := newTestCatalog(t)
 	tc.gate = make(chan struct{})
+	tc.advance(catalogReloadEvery)
 	tc.Invalidate()
 	done := make(chan *Snapshot)
 	go func() { done <- tc.Current(context.Background()) }()
@@ -137,6 +139,7 @@ func TestAWriteDuringAReadIsNotLost(t *testing.T) {
 	if got := <-done; got != nil {
 		t.Fatal("a copy read before the second write was trusted after it")
 	}
+	tc.advance(catalogReloadEvery)
 	if got := tc.Current(context.Background()); got == nil || tc.reads.Load() != 2 {
 		t.Fatal("the next reader did not read the catalogue again")
 	}
@@ -160,6 +163,7 @@ func TestAChangeToOneShopLeavesTheRestInMemory(t *testing.T) {
 	if n := tc.reads.Load(); n != 0 {
 		t.Fatalf("one page changing read the whole catalogue (%d reads)", n)
 	}
+	tc.advance(catalogReloadEvery)
 	tc.Invalidate()
 	if _, ok := tc.Current(context.Background()).Store(storeID(1).String(), i18n.LocaleTR); !ok {
 		t.Fatal("a copy read after the change still treats the page as changed")
@@ -172,7 +176,8 @@ func TestAnUnreachableDatabaseKeepsTheOldCopy(t *testing.T) {
 	tc := newTestCatalog(t)
 	held := tc.Current(context.Background())
 	tc.fail.Store(true)
-	tc.advance(7 * time.Hour)
+	tc.up.Store(true)
+	tc.advance(2 * time.Hour)
 	for i := 0; i < 50; i++ {
 		if got := tc.Current(context.Background()); got != held {
 			t.Fatal("a failed refresh dropped the copy that was answering")
@@ -188,13 +193,16 @@ func TestAnUnreachableDatabaseKeepsTheOldCopy(t *testing.T) {
 	}
 }
 
-// Readers never wait for a read somebody else is doing: they keep the copy they have.
+// Readers never wait for a read somebody else is doing: they keep the copy they have, or,
+// once it is past its maximum age, go to the database.
 func TestReadersDoNotWaitForARefresh(t *testing.T) {
 	tc := newTestCatalog(t)
 	held := tc.Current(context.Background())
 	tc.gate = make(chan struct{})
-	tc.advance(7 * time.Hour)
-	go tc.Current(context.Background())
+	tc.up.Store(true)
+	tc.advance(2 * time.Hour)
+	done := make(chan struct{})
+	go func() { tc.Current(context.Background()); close(done) }()
 	for tc.reads.Load() == 0 {
 		time.Sleep(time.Millisecond)
 	}
@@ -202,7 +210,100 @@ func TestReadersDoNotWaitForARefresh(t *testing.T) {
 	if got := tc.Current(context.Background()); got != held || time.Since(start) > 100*time.Millisecond {
 		t.Fatal("a reader waited on somebody else's refresh")
 	}
+	tc.gate <- struct{}{}
+	<-done
+
+	tc.up.Store(false)
+	tc.advance(6 * time.Hour)
+	go tc.Current(context.Background())
+	for tc.reads.Load() == 1 {
+		time.Sleep(time.Millisecond)
+	}
+	start = time.Now()
+	if got := tc.Current(context.Background()); got != nil || time.Since(start) > 100*time.Millisecond {
+		t.Fatal("a reader waited on a refresh, or was answered from a copy past its maximum age")
+	}
 	close(tc.gate)
+}
+
+// A copy that could not be replaced by its maximum age is not answered from: the most a page
+// may lag is the maximum age, whatever is wrong with reading the catalogue. The database
+// answers instead, and is asked for a new copy once a minute until it gives one.
+func TestACopyPastItsMaximumAgeIsNeverServed(t *testing.T) {
+	tc := newTestCatalog(t)
+	tc.fail.Store(true)
+	tc.advance(6 * time.Hour)
+	for i := 0; i < 50; i++ {
+		if got := tc.Current(context.Background()); got != nil {
+			t.Fatal("a copy past its maximum age answered because it could not be replaced")
+		}
+	}
+	if n := tc.reads.Load(); n != 1 {
+		t.Fatalf("the catalogue was read %d times in a minute", n)
+	}
+	tc.fail.Store(false)
+	tc.advance(catalogRetryAfter)
+	if got := tc.Current(context.Background()); got == nil || got.LoadedAt() != tc.now() {
+		t.Fatal("the copy was not replaced once the catalogue could be read again")
+	}
+}
+
+// An administrator making edit after edit has the catalogue read at most once a minute; in
+// between, the database answers, so every edit still shows on the next page.
+func TestWritesInQuickSuccessionReadTheCatalogueOnceAMinute(t *testing.T) {
+	tc := newTestCatalog(t)
+	for i := 0; i < 10; i++ {
+		tc.Invalidate()
+		if got := tc.Current(context.Background()); got != nil {
+			t.Fatal("a copy from before a write answered after it")
+		}
+		tc.advance(5 * time.Second)
+	}
+	if n := tc.reads.Load(); n != 0 {
+		t.Fatalf("ten edits in under a minute read the catalogue %d times", n)
+	}
+	tc.advance(catalogReloadEvery)
+	if got := tc.Current(context.Background()); got == nil || tc.reads.Load() != 1 {
+		t.Fatal("the catalogue was not read again a minute after the last read")
+	}
+}
+
+// A copy that could not be read at startup is not tried again by the first request: that
+// request would wait out the same failure. It waits for the retry interval like any other.
+func TestAFailedStartupReadIsNotRetriedAtOnce(t *testing.T) {
+	tc := newTestCatalog(t)
+	failing := newCatalog(func(context.Context) (*Snapshot, error) {
+		tc.reads.Add(1)
+		return nil, errors.New("database unreachable")
+	}, tc.up.Load, 6*time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	failing.now = tc.now
+	if failing.Load(context.Background()) == nil {
+		t.Fatal("a failed read reported success")
+	}
+	if failing.Current(context.Background()) != nil || tc.reads.Load() != 1 {
+		t.Fatalf("the first request read again straight after a failed startup (%d reads)", tc.reads.Load())
+	}
+	tc.advance(catalogRetryAfter)
+	failing.Current(context.Background())
+	if n := tc.reads.Load(); n != 2 {
+		t.Fatalf("the catalogue was not tried again after the retry interval (%d reads)", n)
+	}
+}
+
+// Two writes at once may take their numbers in one order and record them in the other. The
+// later number must win, or a copy read between them would be trusted with the later write.
+func TestAnEarlierWriteRecordedLastDoesNotHideALaterOne(t *testing.T) {
+	tc := newTestCatalog(t)
+	tc.stale.Store(10)
+	tc.dirty.Store(storeID(1), uint64(10))
+	tc.Invalidate()
+	tc.InvalidateStore(storeID(1))
+	if got := tc.stale.Load(); got != 10 {
+		t.Fatalf("an earlier write lowered the mark from 10 to %d", got)
+	}
+	if got, _ := tc.dirty.Load(storeID(1)); got.(uint64) != 10 {
+		t.Fatalf("an earlier change to a shop lowered its mark from 10 to %d", got)
+	}
 }
 
 // A catalogue that has never been read answers nothing; the database does, as it did before.

@@ -33,7 +33,14 @@ import (
 // half-run on a throttled instance keeps the database awake until the next request arrives
 // -- up to a quarter of an hour at night. A reader therefore waits the second or two a read
 // takes, once an hour at most; everybody else keeps reading the old copy meanwhile, without
-// a lock, and swaps to the new one when it is ready. If the read fails the old copy stays.
+// a lock, and swaps to the new one when it is ready.
+//
+// If the read fails the old copy stays -- but never past the maximum age. That is the most a
+// page may lag, and a copy that could not be replaced by then is not answered from: the
+// database answers instead, as it did before any of this, until a read succeeds. Otherwise a
+// read that has started to fail for a reason of its own -- a catalogue grown past the
+// timeout, a query a migration broke -- would freeze every anonymous page at an old catalogue
+// for as long as nobody read the error log.
 type Catalog struct {
 	load     func(context.Context) (*Snapshot, error)
 	awake    func() bool
@@ -61,11 +68,16 @@ const (
 	// How old a copy may get before a database that is awake anyway is used to replace it.
 	catalogFreshFor = time.Hour
 	// A read of the catalogue takes a second or two. One that has not finished in this long
-	// is not going to, and the request waiting on it has better things to do.
-	catalogLoadTimeout = 30 * time.Second
+	// is not going to, and the request waiting on it has better things to do -- including
+	// being answered before the server's own write timeout cuts it off.
+	catalogLoadTimeout = 10 * time.Second
 	// After a failed read the database is left alone this long, so an outage is not met with
 	// a read attempt from every request.
 	catalogRetryAfter = time.Minute
+	// The most often a write here makes the catalogue be read again. An administrator making
+	// ten edits in a minute would otherwise have it read ten times, fifteen megabytes apiece;
+	// in between, the database answers, which is what a write here needs anyway.
+	catalogReloadEvery = time.Minute
 )
 
 // NewCatalog returns a catalogue that reads from db and learns from activity whether the
@@ -88,7 +100,12 @@ func newCatalog(load func(context.Context) (*Snapshot, error), awake func() bool
 func (c *Catalog) Load(ctx context.Context) error {
 	c.loading.Store(true)
 	defer c.loading.Store(false)
-	return c.reload(ctx, "startup")
+	e := c.reload(ctx, "startup")
+	if e != nil {
+		// The first request would otherwise try again at once and wait out the same failure.
+		c.retryAt.Store(c.now().Add(catalogRetryAfter).UnixNano())
+	}
+	return e
 }
 
 // Current returns the copy to answer from, or nil when the database must answer instead. It
@@ -103,6 +120,8 @@ func (c *Catalog) Current(ctx context.Context) *Snapshot {
 		reason := "invalidated"
 		if snap == nil {
 			reason = "missing"
+		} else if c.now().Sub(snap.loadedAt) < catalogReloadEvery {
+			return nil
 		}
 		c.refresh(ctx, reason)
 		if snap = c.current.Load(); snap == nil || snap.epoch < c.stale.Load() {
@@ -110,7 +129,9 @@ func (c *Catalog) Current(ctx context.Context) *Snapshot {
 		}
 	case c.now().Sub(snap.loadedAt) >= c.maxAge:
 		c.refresh(ctx, "max_age")
-		snap = c.current.Load()
+		if snap = c.current.Load(); c.now().Sub(snap.loadedAt) >= c.maxAge {
+			return nil
+		}
 	case c.now().Sub(snap.loadedAt) >= c.freshFor && c.awake():
 		c.refresh(ctx, "awake")
 		snap = c.current.Load()
@@ -121,22 +142,37 @@ func (c *Catalog) Current(ctx context.Context) *Snapshot {
 // Invalidate says this process has just changed the catalogue in a way that can move any
 // list -- a review, a merge, a category, a new shop. Until a copy read after this moment is
 // in place, every catalogue read goes to the database, so whoever made the change sees it at
-// once; the next catalogue read after it reads the catalogue again.
+// once; the next catalogue read after it reads the catalogue again, or a minute after the
+// last read if that is later.
 func (c *Catalog) Invalidate() {
 	if c == nil {
 		return
 	}
-	c.stale.Store(c.epoch.Add(1))
+	mark := c.epoch.Add(1)
+	// Raised, never lowered: two writes at once may arrive here in either order, and the
+	// earlier number landing last would trust a copy read before the later write.
+	for {
+		held := c.stale.Load()
+		if held >= mark || c.stale.CompareAndSwap(held, mark) {
+			return
+		}
+	}
 }
 
 // InvalidateStore says this process has just changed one shop's own page and nothing that
-// any list shows -- a favourite count, a premium or catalogue flag. That page goes to the
-// database until a copy read after this moment is in place; everything else stays here.
+// any list shows -- a favourite count. That page goes to the database until a copy read
+// after this moment is in place; everything else stays here.
 func (c *Catalog) InvalidateStore(id uuid.UUID) {
 	if c == nil {
 		return
 	}
-	c.dirty.Store(id, c.epoch.Add(1))
+	mark := c.epoch.Add(1)
+	for {
+		held, found := c.dirty.LoadOrStore(id, mark)
+		if !found || held.(uint64) >= mark || c.dirty.CompareAndSwap(id, held, mark) {
+			return
+		}
+	}
 }
 
 func (c *Catalog) refresh(ctx context.Context, reason string) {
@@ -157,7 +193,7 @@ func (c *Catalog) reload(ctx context.Context, reason string) error {
 	snap, e := c.load(ctx)
 	if e != nil {
 		observability.CatalogLoad(reason, false, 0, 0)
-		c.log.Error("catalog snapshot read failed; keeping the copy already held", "reason", reason, "error", e)
+		c.log.Error("catalog snapshot read failed; the copy held answers until its maximum age, the database after", "reason", reason, "error", e)
 		return e
 	}
 	snap.epoch, snap.loadedAt, snap.dirty = epoch, started, &c.dirty

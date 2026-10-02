@@ -301,8 +301,9 @@ let it sleep anyway:
   requests with coordinates, shops with any post, and anything it has not seen. A copy is
   read again inside the request that needs it -- after a write here, when it is over an hour
   old and the database is already awake, or at `CATALOG_SNAPSHOT_MAX_AGE` -- and replaced
-  atomically; readers never lock. Writes in this process invalidate it at once; writes
-  elsewhere reach it within the maximum age.
+  atomically; readers never lock. A copy that could not be replaced by its maximum age is not
+  answered from. Writes in this process invalidate it at once; writes elsewhere reach it
+  within the maximum age.
 - **`readcache.Cache`** holds rendered answers for six hours: the store pages the snapshot
   leaves to the database.
 - **The home page's highlights and popular cities** are held in the same cache, one copy for

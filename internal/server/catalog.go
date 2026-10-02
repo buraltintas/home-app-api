@@ -206,17 +206,17 @@ func sortedStrings(values []any) []any {
 const highlightsGroup = "home:highlights"
 
 // storePageChanged is called after this process changes one shop's own page and nothing a
-// list shows: a favourite, a premium or catalogue flag. Both copies of that page held here
-// go, the rest stay.
+// list or the sitemap index shows: a favourite, a comment's moderation. Both copies of that
+// page held here go, the rest stay.
 func (s *Server) storePageChanged(id uuid.UUID) {
 	s.reads.Drop(storeGroup(id))
 	s.catalog.InvalidateStore(id)
 }
 
 // catalogueChanged is called after this process changes something any catalogue list may
-// show -- a new shop, a merge, categories, a cover photo. Until the catalogue has been read
-// again every catalogue read here goes to the database, so whoever made the change sees it
-// on the next page they open.
+// show -- a new shop, a merge, categories, a cover photo, a flag that moves the shop's date
+// in the sitemap index. Until the catalogue has been read again every catalogue read here
+// goes to the database, so whoever made the change sees it on the next page they open.
 func (s *Server) catalogueChanged(stores ...uuid.UUID) {
 	for _, id := range stores {
 		s.reads.Drop(storeGroup(id))

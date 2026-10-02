@@ -210,7 +210,8 @@ func (s *Server) adminSetPremium(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.storePageChanged(id)
+	// The flag is on the shop's page, and the write moves its date in the sitemap index.
+	s.catalogueChanged(id)
 	JSON(w, 200, map[string]any{"id": id, "is_premium": body.IsPremium})
 }
 
@@ -236,7 +237,7 @@ func (s *Server) adminSetCatalogStore(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.storePageChanged(id)
+	s.catalogueChanged(id)
 	JSON(w, 200, map[string]any{"id": id, "is_catalog_store": body.IsCatalogStore})
 }
 
@@ -333,11 +334,12 @@ func (s *Server) adminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
+	// Said as soon as the reviews are gone, even if the audit line below fails to write.
+	s.reviewsChanged()
 	if e = s.admin.RecordUserDeletion(r.Context(), actor, email, id); e != nil {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.reviewsChanged()
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -701,6 +703,7 @@ func (s *Server) adminMergeStores(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, e, r.Context())
 		return
 	}
-	s.catalogueChanged(keep, drop)
+	// The merged-away shop's reviews move to the one kept, so the home page's counts move too.
+	s.reviewsChanged(keep, drop)
 	JSON(w, 200, map[string]any{"id": keep, "merged": drop})
 }

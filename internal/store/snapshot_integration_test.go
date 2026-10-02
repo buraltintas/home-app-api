@@ -103,9 +103,11 @@ func seedCatalogue(t *testing.T, db *pgxpool.Pool, n int, seed int64) seeded {
 		categories = append(categories, slug)
 	}
 	rows.Close()
+	// A day the database already counted -- by its own rollup, or a seed -- keeps its count:
+	// the comparison reads both answers from the same rows, so whose rows they are is moot.
 	for _, c := range categories {
 		if rng.Intn(3) > 0 {
-			exec(`INSERT INTO search_intent_daily_metrics(metric_date,dimension,value,search_count,updated_at) VALUES(current_date - $1::int,'category',$2,$3,'2001-01-01')`, rng.Intn(40), c, rng.Intn(50))
+			exec(`INSERT INTO search_intent_daily_metrics(metric_date,dimension,value,search_count,updated_at) VALUES(current_date - $1::int,'category',$2,$3,'2001-01-01') ON CONFLICT DO NOTHING`, rng.Intn(40), c, rng.Intn(50))
 		}
 	}
 	user := uuid.New()

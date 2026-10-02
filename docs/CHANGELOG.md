@@ -93,11 +93,21 @@ What stays with the database, deliberately:
 import run from a laptop, which writes straight to the database, or an edit that landed on
 another instance -- reaches anonymous store pages and lists within `CATALOG_SNAPSHOT_MAX_AGE`,
 six hours, and usually within the hour. A change written through this process is visible on
-the next request: a review, a merge, a category, a cover or a new shop sends every catalogue
-read to the database until the catalogue has been read again, and a favourite or a premium
-or catalogue flag sends only that shop's page. Store pages and neighbour blocks were already
-held up to six hours by the read cache, and a day by the web; the city lists, the category
-list and the sitemap index were read fresh on every request and now share the same six hours.
+the next request: a review, a merge, a category, a cover, a premium or catalogue flag or a new
+shop sends every catalogue read to the database until the catalogue has been read again (at
+most once a minute, however many edits an administrator makes), and a favourite sends only
+that shop's page. Store pages and neighbour blocks were already held up to six hours by the
+read cache, and a day by the web; the city lists, the category list and the sitemap index
+were read fresh on every request and now share the same six hours.
+
+The case that matters is a shop's first review landing on one instance while another is
+serving too -- two instances were up together in 0.3% of the measured minutes. A store page
+rendered through the other instance can then show the shop without the review until that
+instance reads the catalogue again, and the web holds what it rendered for up to a day, so
+that page can lag the review by up to a day, not six hours. A shop that already has a post
+never has this problem: it stays with the database. Closing it needs a way to tell the other
+instances that does not touch the database, which this does not build; `on` is a decision to
+accept it.
 
 **Keeping it fresh must not wake the database either**, or the saving is spent on the
 upkeep. A copy is read again on three occasions: when a write here makes it stale or none is
@@ -107,8 +117,16 @@ and when it reaches its maximum age, which is the only read that may wake it -- 
 per instance per six hours. Every read runs inside the request that found the need for it,
 never on a goroutine of its own: Cloud Run throttles an instance's CPU between requests, and
 a query left half-run on a throttled instance keeps the database awake until the next
-request. Readers never wait on somebody else's read; they keep the old copy, without a lock,
-and a failed read leaves the old copy answering. Startup reads it before the port opens.
+request. Readers never wait on somebody else's read; they keep the old copy, without a lock.
+A failed read leaves the old copy answering until its maximum age and never past it: a copy
+that could not be replaced by then is not answered from, and the database answers as it did
+before, until a read succeeds. A read gets ten seconds. Startup reads it before the port opens,
+and if that fails the first request does not try again at once.
+
+Even in shadow mode one thing changes: the request that finds the copy due for a new read waits
+for that read -- a second or two, about once an hour per instance -- and a new instance takes
+that long longer to open its port. The startup log line gives the real time (`took_ms`); read
+it before switching to `on`.
 
 **How it was checked.** On a seeded catalogue every answer from the copy is the database's,
 byte for byte, for every shop by id and by slug, in all four languages. Two things are allowed
