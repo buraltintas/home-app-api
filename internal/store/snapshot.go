@@ -284,9 +284,9 @@ func loadSnapshot(ctx context.Context, db *pgxpool.Pool) (*Snapshot, error) {
 	}); e != nil {
 		return nil, e
 	}
-	// Built by the same expression the store page uses, so decoding it gives the page the
-	// same values it would have read itself.
-	if e = scanAll(ctx, tx, `SELECT x.store_id,jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider)
+	// Built by the expression the store page uses (sourcesJSON), so decoding it gives the page
+	// the same values, in the same order, it would have read itself.
+	if e = scanAll(ctx, tx, `SELECT x.store_id,`+sourcesJSON+`
  FROM store_external_sources x JOIN stores s ON s.id=x.store_id AND s.deleted_at IS NULL GROUP BY x.store_id`, func(r pgx.Rows) error {
 		var id uuid.UUID
 		var raw []byte

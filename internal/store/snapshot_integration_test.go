@@ -207,6 +207,26 @@ func seedCatalogue(t *testing.T, db *pgxpool.Pool, n int, seed int64) seeded {
 		if i%15 == 0 {
 			exec(`INSERT INTO store_external_sources(store_id,provider,external_id,attribution) VALUES($1,'osm',$2,'{}')`, id, "o-"+slug)
 		}
+		if i%15 == 7 {
+			// Two map records for one shop, written by one import: the same provider and the
+			// same moment, as 35 shops in the real catalogue have.
+			exec(`INSERT INTO store_external_sources(store_id,provider,external_id,attribution) VALUES($1,'osm',$2,'{}'),($1,'osm',$3,'{}')`,
+				id, fmt.Sprintf("node/%d", 9e8-i), fmt.Sprintf("node/%d", 9e8+i))
+		}
+		if i%3 == 1 {
+			// A brand's list read again under a new id, as some 2,450 shops in the real
+			// catalogue have: two links under one provider, and for some shops the older one
+			// refreshed after the newer arrived, so the rows are not stored in the order they
+			// were made. Ordered by provider alone these tied, and the copy broke the tie the
+			// other way round from the page for half of them.
+			for _, x := range []string{"b", "a"} {
+				exec(`INSERT INTO store_external_sources(store_id,provider,external_id,attribution,refreshed_at) VALUES($1,'brand:snaptest',$2,'{}',now()-interval '20 days')`,
+					id, fmt.Sprintf("derived:%s-%05d", x, i))
+			}
+			if i%6 == 1 {
+				exec(`UPDATE store_external_sources SET refreshed_at=now()-interval '1 day' WHERE store_id=$1 AND external_id=$2`, id, fmt.Sprintf("derived:b-%05d", i))
+			}
+		}
 		if i%67 == 0 && i > 0 {
 			exec(`INSERT INTO posts(user_id,store_id,body,rating,verification_distance_meters,verified_at,moderation) VALUES($1,$2,'Güzel','4',12,now(),$3)`, user, id, []string{"published", "held"}[i%2])
 		}
@@ -217,7 +237,7 @@ func seedCatalogue(t *testing.T, db *pgxpool.Pool, n int, seed int64) seeded {
 	exec(`UPDATE stores SET deleted_at=now(), merged_into=$2 WHERE id=$1`, out.stores[3], out.stores[4])
 	exec(`UPDATE stores SET deleted_at=now() WHERE id=$1`, out.stores[6])
 	// With statistics, as the real catalogue has them, so the store page's plan is the real one.
-	exec(`ANALYZE stores, store_stats, store_category_links, store_categories, store_translations`)
+	exec(`ANALYZE stores, store_stats, store_category_links, store_categories, store_translations, store_external_sources`)
 	for p := range pairs {
 		out.pairs = append(out.pairs, p)
 	}

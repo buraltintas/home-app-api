@@ -119,6 +119,21 @@ type ExternalSource struct {
 	RefreshedAt *time.Time     `json:"refreshed_at,omitempty"`
 }
 
+// sourcesJSON is a shop's provider records, x, as its page lists them. Every read of them
+// builds them with this one expression -- the store page, the saved list and the copy held in
+// memory -- so no two can list them differently.
+//
+// By provider, and within one provider in the order the rows are stored (ctid). A shop can
+// hold several records from one provider -- a brand's list read again under a new id, two map
+// nodes for one shop -- and ordered by provider alone those tie, so each query broke the tie
+// its own way: the page read a shop's few rows through an index, which hands them over in the
+// order they are stored, while the copy sorted the whole table at once and left each tie in
+// whichever order that sort finished with. Half of the 2,485 shops with such a tie came out
+// the other way round. The stored order is the one the page has always shown, so naming it
+// changes nothing a reader sees. A record rewritten by a refresh may move within it, and does
+// so for every read alike.
+const sourcesJSON = `jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider,x.ctid)`
+
 func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat, lon *float64) (Item, error) {
 	var x Item
 	var distance *float64
@@ -128,7 +143,7 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID, viewer *uuid.UUID, lat,
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$5 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$5),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
  EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=s.id AND f.user_id=$2),
  (SELECT count(*) FROM posts p WHERE p.store_id=s.id AND p.user_id=$2 AND p.deleted_at IS NULL),
- coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
+ coalesce((SELECT `+sourcesJSON+` FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,'')
  FROM stores s JOIN store_stats ss ON ss.store_id=s.id LEFT JOIN store_category_links l ON l.store_id=s.id LEFT JOIN store_categories c ON c.id=l.category_id
@@ -952,7 +967,7 @@ func (s *Service) Favorites(ctx context.Context, viewer uuid.UUID, limit int) ([
 	}
 	rows, e := s.db.Query(ctx, `SELECT s.id,coalesce((SELECT display_name FROM store_translations WHERE store_id=s.id AND locale=$3),s.name),s.slug,coalesce(s.brand_name,''),coalesce(s.address,''),s.city,coalesce(s.district,''),coalesce(s.phone,''),coalesce(s.website,''),ST_Y(s.location::geometry),ST_X(s.location::geometry),
  coalesce(array_agg(c.slug) FILTER(WHERE c.slug IS NOT NULL),'{}'),coalesce((SELECT array_agg(t.name ORDER BY c2.slug) FROM store_category_links l2 JOIN store_categories c2 ON c2.id=l2.category_id JOIN store_category_translations t ON t.category_id=c2.id AND t.locale=$3 WHERE l2.store_id=s.id),'{}'),coalesce((SELECT description FROM store_translations WHERE store_id=s.id AND locale=$3),s.description,''),ss.average_rating,ss.rating_count,ss.review_count,ss.favorite_count,ss.post_count,s.is_premium,s.is_catalog_store,s.location_from LIKE 'placed at%',
- coalesce((SELECT jsonb_agg(jsonb_build_object('provider',x.provider,'external_id',x.external_id,'attribution',x.attribution,'refreshed_at',x.refreshed_at) ORDER BY x.provider) FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
+ coalesce((SELECT `+sourcesJSON+` FROM store_external_sources x WHERE x.store_id=s.id),'[]'::jsonb),
  coalesce((SELECT slug FROM brands WHERE id=s.brand_id),''),
  coalesce(s.cover_media_id::text,''),
  (SELECT count(*) FROM posts p WHERE p.store_id=s.id AND p.user_id=$1 AND p.deleted_at IS NULL),f.created_at
