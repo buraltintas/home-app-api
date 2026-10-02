@@ -6,6 +6,24 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## An empty outbox is asked about again in six hours, not in a second
+
+After every instance start and every mail sent, the outbox worker polled again at one second
+and doubled from there, so it asked an empty queue at roughly four, eight, seventeen,
+thirty-four, sixty-eight and 136 minutes. On a quiet night each of those was its own wake of
+the database. Every writer of the outbox already tells the worker the moment it commits
+(`Notify`), so the climb was protecting against nothing: an empty poll now waits the six-hour
+ceiling at once. A due retry is still waited for exactly, a queue with mail is still drained
+at once, and a round that could not read the outbox backs off from a second, because that says
+nothing about whether somebody's sign-in code is in it. A test fails if a new outbox writer
+forgets to notify.
+
+The ceiling is the longest a row nobody told this process about can wait -- one left by an
+instance that died -- and jumping to it would have made that wait longer than the doubling
+did. So whenever the database answers this process for any other reason and the outbox has
+not been looked at for ten minutes, it is looked at then: a query on a database that is
+already awake, which is no wake at all.
+
 ## The home page's community blocks are read once every six hours
 
 `/v1/search/highlights` took three seconds a request and was asked about 113 times a day: once

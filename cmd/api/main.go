@@ -182,6 +182,9 @@ func main() {
 		}
 	}()
 	if cfg.DeliversMail() {
+		// A row this process was never told about -- a retry come due, one left by an
+		// instance that died -- is looked for whenever the database is awake anyway.
+		activity.OnUse(emailWorker.DatabaseInUse)
 		go func() {
 			log.Info("email worker started", "email_provider", cfg.EmailProvider)
 			if e := emailWorker.Run(ctx); e != nil && !errors.Is(e, context.Canceled) {

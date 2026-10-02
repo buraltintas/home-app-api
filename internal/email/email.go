@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/brand"
@@ -295,6 +296,8 @@ type Worker struct {
 	log    *slog.Logger
 	// Nudged by whoever just wrote a row; see Notify.
 	wake chan struct{}
+	// When the outbox was last asked about, so DatabaseInUse can tell whether to ask again.
+	lastPoll atomic.Int64
 }
 
 func NewWorker(db *pgxpool.Pool, s Sender, from string, key []byte, log *slog.Logger) *Worker {
@@ -344,9 +347,9 @@ suspends after a few minutes without a connection and bills the hours it is
 awake, and a queue poll made sure those minutes never arrived — every night,
 for a queue that is empty all night.
 
-So an empty queue is asked about less and less, up to the ceiling below, and a
-row that actually arrives says so through Notify rather than waiting to be
-found. The ceiling is the longest a row written somewhere this process cannot
+So an empty queue waits the ceiling below (see nextPoll), and a row that
+actually arrives says so through Notify rather than waiting to be found. The
+ceiling is the longest a row written somewhere this process cannot
 hear about — a due retry, or an instance that died holding one — waits to be
 noticed. It is deliberately longer than the few minutes of quiet the database
 needs, because a ceiling shorter than that saves nothing at all.
@@ -361,7 +364,8 @@ needs, because a ceiling shorter than that saves nothing at all.
 // Nothing waits on the ceiling any more in the normal case: a new row arrives through
 // Notify, and a row that failed and is due again says when it is due, which the loop below
 // waits for exactly. What is left is a row written by an instance that died before it could
-// say so, and that can wait for the next one.
+// say so, and that is picked up by the next instance to start, or the next time somebody
+// uses the database for anything else (DatabaseInUse).
 const (
 	emailPollBusy = time.Second
 	emailPollIdle = 6 * time.Hour
@@ -369,6 +373,7 @@ const (
 
 func (w *Worker) Run(ctx context.Context) error {
 	wait := emailPollBusy
+	failures := 0
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	for {
@@ -385,7 +390,9 @@ func (w *Worker) Run(ctx context.Context) error {
 		case <-timer.C:
 		}
 
+		w.lastPoll.Store(time.Now().UnixNano())
 		sent := false
+		failed := false
 		var due time.Duration
 		for i := 0; i < 10; i++ {
 			ok, retryIn, e := w.once(ctx)
@@ -394,6 +401,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			if e != nil {
 				w.log.Error("email worker iteration failed", "error", e)
+				failed = true
 				break
 			}
 			if !ok {
@@ -401,26 +409,80 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			sent = true
 		}
-
-		// A queue with something in it is asked about again immediately; one that came
-		// back empty is asked about half as often, to the ceiling. A delivery that failed
-		// and will be tried again is the third case, and the one the ceiling used to get
-		// wrong: this process wrote that row's next attempt, so it knows when it is due and
-		// waits that long rather than discovering it on some later sweep.
-		switch {
-		case due > 0:
-			wait = due
-		case sent:
-			wait = emailPollBusy
-		case wait < emailPollIdle:
-			wait *= 2
-			if wait > emailPollIdle {
-				wait = emailPollIdle
-			}
+		if failed {
+			failures++
+		} else {
+			failures = 0
 		}
+		wait = nextPoll(due, sent, failures)
 		timer.Reset(wait)
 	}
 }
+
+// nextPoll decides how long the worker waits before asking the outbox again.
+//
+// A queue with something in it is asked about again immediately. A delivery that failed and
+// will be tried again says when it is due, because this process wrote that row's next
+// attempt and waits exactly that long rather than discovering it on some later sweep.
+//
+// A queue that came back empty waits the whole ceiling, at once. It used to creep up to it
+// by doubling from a second, and every step of the climb was a query of its own: after each
+// instance start and after every mail sent, the outbox was asked about again at roughly four,
+// eight, seventeen, thirty-four, sixty-eight and a hundred and thirty-six minutes. On a quiet
+// night each of those was a separate wake of the database, five minutes of compute apiece,
+// to look at a queue that nothing had written to -- because everything that writes to it
+// says so through Notify, in this process, the moment it commits. The climb was protecting
+// against nothing.
+//
+// A round that failed is the one case that still backs off from a second: the outbox could
+// not be asked, which says nothing about whether it is empty, and the mail somebody is
+// waiting for may be in it.
+func nextPoll(due time.Duration, sent bool, failures int) time.Duration {
+	switch {
+	case due > 0:
+		return due
+	case sent:
+		return emailPollBusy
+	case failures > 0:
+		wait := emailPollBusy
+		for i := 1; i < failures && wait < emailPollIdle; i++ {
+			wait *= 2
+		}
+		return min(wait, emailPollIdle)
+	default:
+		return emailPollIdle
+	}
+}
+
+// emailPollPiggyback is how stale the last look at the outbox may get before a query made for
+// some other reason is taken as the moment to look again.
+const emailPollPiggyback = 10 * time.Minute
+
+/*
+DatabaseInUse is told when this process has just had an answer from the database for some
+other reason, and asks the outbox about itself if nobody has for a while.
+
+The ceiling above is the longest a row this process was never told about waits: a retry that
+came due, or a row left by an instance that died before it could send it. Jumping straight to
+it would make that wait longer than the doubling used to, so this takes it back: whenever the
+database is awake anyway -- somebody signed in, a review, a search -- and the last look is ten
+minutes old, the worker looks again. It costs a query on a database that is already up, which
+is no wake at all, and it means an orphaned row waits for the next person to use the product
+rather than for the ceiling.
+
+It is called on the goroutine handing a connection back to the pool, so it only reads a clock
+and, at most, nudges.
+*/
+func (w *Worker) DatabaseInUse() {
+	if w == nil {
+		return
+	}
+	if last := w.lastPoll.Load(); last == 0 || time.Since(time.Unix(0, last)) < emailPollPiggyback {
+		return
+	}
+	w.Notify()
+}
+
 // once takes at most one job. It reports whether it took one, and -- when a delivery failed
 // and is due to be tried again -- how long until that attempt, so the caller can wait for it
 // instead of polling for it.
