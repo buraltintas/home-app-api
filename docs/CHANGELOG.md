@@ -26,16 +26,23 @@ suspending, which is the reason the copies exist.
   list moved, whether the home page's highlights did, with a sequence number, a timestamp and
   the writing instance. The append reads the object and writes it back only if its generation
   has not moved; when it has, it reads the other writer's entry and adds to it, so two writes at
-  once cannot lose either. It runs inside the write's own request (Cloud Run throttles the CPU
-  once the response is sent), within two seconds, and it never fails the write: news that
-  cannot be written is kept and written with that instance's next write or next look. Only an
-  instance stopped before then loses it, and the maximum age covers that.
+  once cannot lose either. Cloud Storage takes about one write a second to one object and
+  answers a faster one with 429; a write answered that way, or with 408 or a 5xx, waits half a
+  second to a second, at random, and is tried again. The storage client does not do this
+  itself here: the upload is a single request with no buffered copy to send again. It all runs
+  inside the write's own request (Cloud Run throttles the CPU once the response is sent),
+  within two seconds, and it never fails the write: news that still cannot be written is kept
+  and written with that instance's next write, its next look, or when it is told to stop, in
+  the seconds Cloud Run gives it. Only an instance killed outright, or whose last attempt
+  fails too, loses it, and the maximum age covers that.
 - **Learning.** Each instance looks at the object's generation at most once every
   `CATALOG_CHANGES_INTERVAL` (30 seconds by default), inside an anonymous catalogue read, with
   a one-second limit. That is one metadata read; the object itself is read only when the
   generation has moved. It drops exactly what the new entries name -- one shop's page, or the
-  whole catalogue copy, the read cache's pages for those shops and the highlights -- and skips
-  its own entries. An instance that missed entries already dropped from the object (it keeps
+  whole catalogue copy, the read cache's pages for those shops, every neighbours' list it holds
+  and the highlights -- and skips its own entries. A look comes before telling news of its own
+  that is still waiting, so a store slow to take that write cannot cost the reader the look.
+  An instance that missed entries already dropped from the object (it keeps
   the last 64, about a fortnight of writes), or finds the object broken or started again,
   drops everything. A new instance takes only what was written since it started, because
   everything before is in what it read at startup.
@@ -44,10 +51,23 @@ suspending, which is the reason the copies exist.
   database; the catalogue is read again only when a look has made the copy stale, which is the
   read a write here already caused.
 
-One gap closed with it. Deleting an account removes its reviews from shops the write does not
-name, so nothing held about those shops was dropped: the neighbour lists counting their
-reviews stayed until they expired. Every answer held now goes, here and on the other
-instances.
+Four gaps closed with it, each of which left an answer standing after a write, on the
+instance that took the write too:
+
+- Deleting an account removes its reviews from shops the write does not name, so nothing held
+  about those shops was dropped. Every answer held now goes, here and on the other instances.
+- A list of a shop's neighbours is held under that shop and shows the neighbours' review
+  counts, ratings, names and photos, so a review of one of them left it standing for the read
+  cache's lifetime. Any change that can move a list -- a review, an administrator's edit, a
+  new shop -- now drops every neighbours' list held. Few are asked for twice in six hours
+  anyway (a crawler asks for each shop about once per language, which is why the read cache
+  answered 4% of shop pages), so this costs the database little.
+- The highlights, held for six hours since an entry below, show each shop's name, categories
+  and photo, but were dropped only by a review; an administrator's edit to a shop in them left
+  them standing. They now go with any change that can move a list.
+- A read that began before a write committed could store what it read after the write had
+  dropped it, here or at another instance's look, and that old answer then stood for six
+  hours. The read cache now refuses an answer if anything was dropped after its read began.
 
 **What a visitor sees after a review, today and after this.** Today's production runs the read
 cache and not the catalogue copy. A review through the web goes to one API instance, and the
@@ -63,15 +83,15 @@ lists are cached by the web for an hour.
 
 After this, every API instance answers the write within the interval instead of six hours: with
 `CATALOG_SNAPSHOT=on`, store pages, neighbours, lists, the sitemap index and categories; in
-every mode, the read cache's pages for the shops named and the highlights. The web
-side is unchanged, and that is where the rule is still not met: its one-day page cache, dropped
-only on the web server that handled a web review, and never for a mobile one. One API-side gap
-remains as well: the reviewer's own reload arrives a second or two after the write, and if it
-reaches a second API instance whose last look predates the write, that instance still answers
-from its copy, and the web keeps that page for a day. It needs two API instances up at that
-moment, and it is closed by a shorter interval -- at `CATALOG_CHANGES_INTERVAL=1s` a reload two
-seconds after the write finds that instance has looked since, unless Cloud Storage did not
-answer -- for the cost below.
+every mode, the read cache's pages for the shops named, every neighbours' list and the
+highlights. The web side is unchanged, and that is where the rule is still not met: its one-day
+page cache, dropped only on the web server that handled a web review, and never for a mobile
+one. One API-side gap remains as well: the reviewer's own reload arrives a second or two after
+the write, and if it reaches a second API instance whose last look predates the write, that
+instance still answers from its copy, and the web keeps that page for a day. It needs two API
+instances up at that moment, and it is closed by a shorter interval -- at
+`CATALOG_CHANGES_INTERVAL=1s` a reload two seconds after the write finds that instance has
+looked since, unless Cloud Storage did not answer -- for the cost below.
 
 **What it costs.** Measured on 1 October: 55,091 API requests (926 to 10,772 an hour), one
 instance nearly all day; between 25 September and 1 October, about thirty writes that tell
@@ -91,8 +111,9 @@ allowance applies to US buckets only):
 About $0.04 a month in all. At a one-second interval the looks become nearly one per anonymous
 catalogue read -- around 1.6 million a month at today's traffic, about $0.65. Each look adds a
 cross-region round trip (tens of milliseconds, estimated rather than measured) to the one
-request that takes it; each write adds two. Cloud Storage accepts about one write a second to one object, so a burst of writes
-is spaced out by the retries, and what does not fit in two seconds is told with the next look.
+request that takes it; each write adds two, and a write Cloud Storage refuses as too soon
+after another adds the half second to a second it waits before trying again. What still does
+not fit in two seconds is told with that instance's next write or look, or as it stops.
 
 Nothing new is created: the runtime service account can already write the media bucket, and
 the object sits under `_cache/`, where no media key can fall (those begin with `users/`). It is
@@ -106,8 +127,12 @@ unreachable store is tried once per interval and changes nothing; concurrent wri
 nothing; a catalogue copy is not read during a look. Every write route was run against one
 instance and read from a second over a throwaway local database, and the same routes still
 succeed with the marker unwritable. The adapter was checked through the real Cloud Storage
-client against a fake server: one request per operation, and a moved generation comes back as
-a conflict.
+client against a fake server: one request per operation, a moved generation comes back as a
+conflict, 429, 408 and 5xx come back as busy and 403 as itself, and a write refused once with
+429 lands on the second try. In memory: a store busy past two seconds keeps the news and it is
+told later; a hanging write cannot cost the look; a stopping instance flushes what it kept; a
+review on one instance drops neighbours' lists held under other shops on both, a favourite
+does not; and an answer read before a write is not stored after its drop.
 
 ## The integration suite no longer says to run against `DATABASE_URL`
 

@@ -3,6 +3,7 @@ package changes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -60,7 +61,8 @@ func (g *GCS) Read(ctx context.Context, name string) ([]byte, int64, error) {
 }
 
 // Write is one upload, conditional on the generation the caller read: a Class A operation.
-// Precondition failures come back as ErrConflict.
+// Precondition failures come back as ErrConflict, and what Cloud Storage asks to be tried
+// again -- 408, 429, 5xx, a dropped connection -- as ErrBusy.
 func (g *GCS) Write(ctx context.Context, name string, body []byte, generation int64) error {
 	object := g.bucket.Object(name)
 	if generation == 0 {
@@ -70,21 +72,32 @@ func (g *GCS) Write(ctx context.Context, name string, body []byte, generation in
 	}
 	w := object.NewWriter(ctx)
 	// One request rather than a resumable session: the object is a few kilobytes, and a
-	// session is a second billed operation for nothing.
+	// session is a second billed operation for nothing. Without a chunk the client keeps no
+	// copy to send again, so it never retries the upload itself; the marker does, after a
+	// pause, when the answer is ErrBusy.
 	w.ChunkSize = 0
 	w.ContentType = "application/json"
 	w.CacheControl = "no-store"
 	if _, e := w.Write(body); e != nil {
 		_ = w.Close()
-		return conflict(e)
+		return classify(ctx, e)
 	}
-	return conflict(w.Close())
+	return classify(ctx, w.Close())
 }
 
-func conflict(e error) error {
+// classify turns the service's answer to an upload into what the marker acts on. Retryable
+// is Cloud Storage's own list (storage.ShouldRetry), minus the caller's deadline having
+// passed, which no pause can help.
+func classify(ctx context.Context, e error) error {
+	if e == nil || ctx.Err() != nil {
+		return e
+	}
 	var api *googleapi.Error
 	if errors.As(e, &api) && api.Code == http.StatusPreconditionFailed {
 		return ErrConflict
+	}
+	if storage.ShouldRetry(e) {
+		return fmt.Errorf("%w: %w", ErrBusy, e)
 	}
 	return e
 }

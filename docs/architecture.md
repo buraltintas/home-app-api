@@ -306,18 +306,26 @@ let it sleep anyway:
   reach it through the change marker below, and anything written outside the API (an
   import run from a laptop) within the maximum age.
 - **`readcache.Cache`** holds rendered answers for six hours: the store pages the snapshot
-  leaves to the database.
+  leaves to the database. A write drops its shop's answers; a change that can move a list
+  also drops every neighbours' list held, whichever shop it is about, since each shows other
+  shops' counts and photos. An answer whose build began before a drop is not stored after
+  it, so a read racing a write cannot outlive the write's drop.
 - **`changes.Marker`** carries what a write on one instance made out of date to the others,
   through one object in the media bucket (`_cache/<APP_ENV>/catalog-changes.json`): every
   write that invalidates the copies here appends an entry -- shops, and whether every list
   moved -- with a write conditional on the object's generation, inside the write's request,
-  and never fails the write. Every instance reads the object's generation at most once per
+  and never fails the write. A conflict is read again and appended to; a busy answer (429,
+  408, 5xx) is waited for and tried again within two seconds; anything still not written is
+  kept for the instance's next write, its next look, or its shutdown. Every instance reads
+  the object's generation at most once per
   `CATALOG_CHANGES_INTERVAL` (30s) inside an anonymous catalogue read, and drops exactly what
   the new entries name, or everything when it cannot tell what it missed. It never asks the
   database. When the object cannot be read the look is skipped and the maximum age rules,
   as before.
 - **The home page's highlights and popular cities** are held in the same cache, one copy for
-  every language, dropped by a review written, deleted or moderated here.
+  every language. The highlights are dropped by any change that can move a list -- a review
+  written, deleted or moderated, an administrator's edit -- here at once and on the other
+  instances at their next look; the popular cities, a thirty-day search count, age out.
 - **`database.Activity`** listens to the pool's connections being handed back, so the process
   knows whether the database is awake without asking it. The snapshot refreshes on it.
 - **The email outbox worker** is told about new mail by its writers, waits exactly until the

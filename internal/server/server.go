@@ -111,6 +111,9 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request, key string, buil
 			return
 		}
 	}
+	// Taken before the build reads anything, so an answer read before a write that is dropped
+	// meanwhile -- here or by a look at another instance's news -- is not stored after it.
+	mark := s.reads.Mark()
 	value, group, e := build()
 	if e != nil {
 		WriteError(w, e, r.Context())
@@ -128,7 +131,7 @@ func (s *Server) answer(w http.ResponseWriter, r *http.Request, key string, buil
 	}
 	body = append(body, '\n')
 	if key != "" {
-		s.reads.Put(key, group, body)
+		s.reads.Put(key, group, body, mark)
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if key != "" {
@@ -757,7 +760,7 @@ func (s *Server) storeNearby(w http.ResponseWriter, r *http.Request) {
 	// who asks in the same language for the same number of them.
 	key := ""
 	if cacheableRead(r) {
-		key = fmt.Sprintf("nearby|%s|%s|%d", chi.URLParam(r, "id"), i18n.FromContext(r.Context()), limit)
+		key = nearbyKeys + fmt.Sprintf("%s|%s|%d", chi.URLParam(r, "id"), i18n.FromContext(r.Context()), limit)
 	}
 	s.answer(w, r, key, func() (any, string, error) {
 		id, e := parseStoreRef(r, s)
@@ -1377,7 +1380,8 @@ func (s *Server) storeNames(w http.ResponseWriter, r *http.Request) {
 // The home page asks for it once an hour per language per web server, and again after every
 // web deploy; each of those took the database three seconds and, once the catalogue stopped
 // keeping it awake, would on their own have woken it a fifth of the time. Nothing in it is
-// in a language, so one copy answers all four. A review written, removed or moderated here
+// in a language, so one copy answers all four. A change here that can move a list -- a
+// review written, removed or moderated, an administrator's edit to a shop it may show --
 // drops it at once; one that lands on another instance drops it at this one's next look at
 // the change marker, or within the lifetime when the marker is off or cannot be read.
 func (s *Server) searchHighlights(w http.ResponseWriter, r *http.Request) {

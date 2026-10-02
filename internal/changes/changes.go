@@ -17,10 +17,11 @@
 // Every write that drops something here also appends one entry to that object -- which
 // shops, and whether every list moved -- with a numbered sequence, a timestamp and the
 // writing instance. The append is a conditional write on the object's generation, retried
-// when somebody else wrote in between, so two writes at once cannot lose either entry. It
-// runs inside the write's own request, because Cloud Run throttles the CPU once the response
-// is sent, and it can never fail the write: news that cannot be written is kept and written
-// with the next write or the next look.
+// when somebody else wrote in between, so two writes at once cannot lose either entry, and
+// retried after a pause when Cloud Storage says it is busy -- it takes about one write a
+// second to one object. It runs inside the write's own request, because Cloud Run throttles
+// the CPU once the response is sent, and it can never fail the write: news that cannot be
+// written is kept and written with the next write, the next look, or as the process stops.
 //
 // Every instance looks at the object's generation at most once per interval, inside an
 // anonymous catalogue read: one metadata read, never the database. Only when the generation
@@ -62,6 +63,11 @@ type Objects interface {
 
 // ErrConflict says the object was written by somebody else between the read and the write.
 var ErrConflict = errors.New("changes: the marker was written by somebody else in between")
+
+// ErrBusy says the store did not take the write this time and asks for it to be tried again
+// after a pause: Cloud Storage answers 429 to a second write to one object within about a
+// second, and 408 or 5xx when it could not finish one. Wrapped around the store's own error.
+var ErrBusy = errors.New("changes: the store asked for the write to be tried again later")
 
 // Change is what one write made out of date.
 type Change struct {
@@ -126,6 +132,10 @@ const (
 	// How long telling the others may add to a write. A read and a conditional write are
 	// two round trips; the rest is room for one write having to be retried.
 	writeTimeout = 2 * time.Second
+	// The least a write waits before trying again after the store said it was busy; it waits
+	// up to twice this, at random. Cloud Storage takes about one write a second to one
+	// object, so a shorter pause would only be refused again.
+	busyWait = 500 * time.Millisecond
 	// Clocks on two instances agree to far better than this. An entry stamped by another
 	// instance this long before this one started is already in what this one read at
 	// startup; one stamped after might not be.
@@ -220,7 +230,12 @@ func (m *Marker) keep(c Change) {
 }
 
 // write appends c to the object, reading what is there and writing it back only if nobody
-// has written in between; when somebody has, it reads theirs and tries again.
+// has written in between; when somebody has, it reads theirs and tries again. When the store
+// says it is busy -- writes to one object faster than it takes them, or a request it could not
+// finish -- it waits half a second to a second and tries again, for as long as ctx leaves room.
+// A request that failed after the store had in fact taken it is read back on the next try and
+// appended to again: the entry is then there twice, which drops the same pages twice and
+// nothing more.
 func (m *Marker) write(ctx context.Context, c Change) error {
 	for attempt := 0; ; attempt++ {
 		body, generation, e := m.objects.Read(ctx, m.name)
@@ -242,12 +257,23 @@ func (m *Marker) write(ctx context.Context, c Change) error {
 		if e != nil {
 			return e
 		}
-		if e = m.objects.Write(ctx, m.name, encoded, generation); !errors.Is(e, ErrConflict) {
+		e = m.objects.Write(ctx, m.name, encoded, generation)
+		var wait time.Duration
+		switch {
+		case errors.Is(e, ErrConflict):
+			// Somebody else wrote it in between. Waiting a moment, longer each time and never
+			// in step with them, lets one of the two finish before the other reads again.
+			wait = time.Duration(5+rand.IntN(20)*(attempt+1)) * time.Millisecond
+		case errors.Is(e, ErrBusy):
+			wait = busyWait + rand.N(busyWait)
+		default:
 			return e
 		}
-		// Somebody else wrote it in between. Waiting a moment, longer each time and never in
-		// step with them, lets one of the two finish before the other reads again.
-		wait := time.Duration(5+rand.IntN(20)*(attempt+1)) * time.Millisecond
+		// A pause that would outlast the time left only turns the store's answer into a
+		// timeout; the news is kept either way.
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < wait {
+			return e
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -281,8 +307,11 @@ func (m *Marker) Check(ctx context.Context, forget func(Change)) {
 	// finished: a crawler hanging up must not leave the look half done.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), lookTimeout)
 	defer cancel()
-	m.flush(ctx)
 	news, e := m.look(ctx)
+	// The look first, because it is what this reader's answer depends on; news an earlier
+	// write here could not tell goes out in whatever time is left, so a busy store cannot
+	// spend the look's.
+	_ = m.flush(ctx)
 	if e != nil {
 		observability.CatalogChange("look", "failure")
 		m.log.Warn("catalog change marker could not be read; writes on other instances reach this one by its copy's maximum age", "error", e)
@@ -296,21 +325,37 @@ func (m *Marker) Check(ctx context.Context, forget func(Change)) {
 	forget(*news)
 }
 
+// Flush writes news that an earlier write here could not, and waits for it: at most until
+// ctx is done, and never longer than a write may. Called when the process is told to stop --
+// Cloud Run gives a stopping instance its CPU for a few seconds -- so news that a failed write
+// left behind is not lost with an instance that would otherwise have had no later write or
+// look to tell it with. An error means it is still not told; the other instances then show it
+// by their copies' maximum age.
+func (m *Marker) Flush(ctx context.Context) error {
+	if m == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, writeTimeout)
+	defer cancel()
+	return m.flush(ctx)
+}
+
 // flush writes news that an earlier write here could not.
-func (m *Marker) flush(ctx context.Context) {
+func (m *Marker) flush(ctx context.Context) error {
 	m.mu.Lock()
 	pending := m.pending
 	m.pending = nil
 	m.mu.Unlock()
 	if pending == nil {
-		return
+		return nil
 	}
 	if e := m.write(ctx, *pending); e != nil {
 		m.keep(*pending)
 		observability.CatalogChange("publish", "failure")
-		return
+		return e
 	}
 	observability.CatalogChange("publish", "success")
+	return nil
 }
 
 // look reads the object if it has moved and returns what it says changed since the last

@@ -212,8 +212,13 @@ func sortedStrings(values []any) []any {
 }
 
 // highlightsGroup is what the home page's highlights are held under, so a change to any
-// review can drop them.
+// review, or to any shop they may show, can drop them.
 const highlightsGroup = "home:highlights"
+
+// nearbyKeys begins the key of every list of a shop's neighbours held in the read cache. The
+// list is held under the shop it is about, and it shows other shops -- their rating, review
+// count, name, photo -- so a change to any shop may move lists held under others.
+const nearbyKeys = "nearby|"
 
 // storePageChanged is called after this process changes one shop's own page and nothing a
 // list or the sitemap index shows: a favourite, a comment's moderation. Both copies of that
@@ -249,6 +254,15 @@ func (s *Server) changed(c changes.Change) {
 
 // forget drops what c made out of date from everything this process holds. It is the same
 // whether the write landed here or on another instance, so a reader cannot tell which.
+//
+// A change that can move any list also drops every neighbours' list and the highlights held
+// here, whichever shop they are held under: both show other shops' review counts, names,
+// categories and photos. Dropping them costs little: each is filled again by the next reader
+// who asks, and few are asked for twice within the lifetime anyway -- a crawler asks for each
+// shop about once per language, which is why the read cache answered 4% of shop pages -- and
+// with the catalogue copy serving, it is consulted only for what the copy leaves to the
+// database. A change that can move them is a review, an administrator's edit or a new shop:
+// a few a day.
 func (s *Server) forget(c changes.Change) {
 	if c.AllPages {
 		s.reads.Clear()
@@ -256,7 +270,8 @@ func (s *Server) forget(c changes.Change) {
 	for _, id := range c.Stores {
 		s.reads.Drop(storeGroup(id))
 	}
-	if c.Reviews {
+	if c.Full || c.Reviews {
+		s.reads.DropKeys(nearbyKeys)
 		s.reads.Drop(highlightsGroup)
 	}
 	if c.Full || c.AllPages {

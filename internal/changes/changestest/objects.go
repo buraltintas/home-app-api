@@ -7,6 +7,7 @@ package changestest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 
@@ -25,6 +26,9 @@ type Objects struct {
 
 	// Set to make every operation of that kind fail with ErrDown.
 	FailReads, FailWrites atomic.Bool
+	// How many of the next writes are refused as busy (changes.ErrBusy), the way Cloud
+	// Storage answers a second write to one object within a second.
+	Busy atomic.Int64
 	// How many operations of each kind were asked for, failed ones included.
 	Generations, Reads, Writes, Conflicts atomic.Int64
 }
@@ -63,6 +67,9 @@ func (o *Objects) Write(ctx context.Context, name string, body []byte, generatio
 	if o.FailWrites.Load() {
 		return ErrDown
 	}
+	if o.busy() {
+		return fmt.Errorf("%w: 429 rate limit exceeded", changes.ErrBusy)
+	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.generation[name] != generation {
@@ -75,6 +82,18 @@ func (o *Objects) Write(ctx context.Context, name string, body []byte, generatio
 	o.next++
 	o.bodies[name], o.generation[name] = append([]byte(nil), body...), o.next
 	return nil
+}
+
+func (o *Objects) busy() bool {
+	for {
+		n := o.Busy.Load()
+		if n <= 0 {
+			return false
+		}
+		if o.Busy.CompareAndSwap(n, n-1) {
+			return true
+		}
+	}
 }
 
 // Put replaces an object unconditionally, as somebody editing the bucket by hand would.

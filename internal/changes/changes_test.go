@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -177,6 +178,114 @@ func TestAFailedTellingNeverFailsTheWriteAndIsToldLater(t *testing.T) {
 				t.Fatalf("after the failure the other instance was told %+v, want %v", got, want)
 			}
 		})
+	}
+}
+
+// Cloud Storage takes about one write a second to one object and answers a faster one with
+// 429; a 408 or 5xx asks for the same patience. Such a write is waited for and tried again,
+// not given up at the first refusal -- given up, it would wait for this instance's next write
+// or look, and be lost with the instance if neither came. What still does not fit in a write's
+// time is kept, like any failure, and never holds the write up longer than that.
+func TestABusyStoreIsWaitedForAndTriedAgain(t *testing.T) {
+	objects := &changestest.Objects{}
+	clk := start()
+	a, b := newInstance(objects, clk), newInstance(objects, clk)
+	b.read()
+	shop := uuid.New()
+	objects.Busy.Store(1)
+	began := time.Now()
+	a.Publish(changes.Change{Stores: []uuid.UUID{shop}, Full: true})
+	if took := time.Since(began); took < 500*time.Millisecond {
+		t.Fatalf("tried again after %v, sooner than the store takes a second write", took)
+	}
+	if n := a.log.count("could not be told"); n != 0 {
+		t.Fatal("a write the store took at the second try was logged as not told")
+	}
+	clk.advance(interval)
+	if got := b.read(); len(got) != 1 || !same(got[0].Stores, []uuid.UUID{shop}) || !got[0].Full {
+		t.Fatalf("after one busy answer the other instance was told %+v", got)
+	}
+
+	objects.Busy.Store(1000)
+	other := uuid.New()
+	began = time.Now()
+	a.Publish(changes.Change{Stores: []uuid.UUID{other}})
+	if took := time.Since(began); took > 3*time.Second {
+		t.Fatalf("a write was held up %v by a store that stayed busy", took)
+	}
+	if n := a.log.count("could not be told"); n != 1 {
+		t.Fatalf("a store busy past the write's time was logged %d times", n)
+	}
+	objects.Busy.Store(0)
+	clk.advance(interval)
+	a.read()
+	clk.advance(interval)
+	if got := b.read(); len(got) != 1 || !same(got[0].Stores, []uuid.UUID{other}) {
+		t.Fatalf("news a busy store refused was told as %+v", got)
+	}
+}
+
+// slowWrites is a store whose writes, once switched on, take as long as the caller allows.
+type slowWrites struct {
+	*changestest.Objects
+	slow atomic.Bool
+}
+
+func (o *slowWrites) Write(ctx context.Context, name string, body []byte, generation int64) error {
+	if o.slow.Load() {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return o.Objects.Write(ctx, name, body, generation)
+}
+
+// A look is what the reading request is waiting on, so news kept from an earlier failure is
+// told in the time the look leaves, not before it: a store slow to take that write -- busy,
+// or hanging -- cannot cost the reader the look.
+func TestTellingKeptNewsCannotCostTheLook(t *testing.T) {
+	objects := &changestest.Objects{}
+	slow := &slowWrites{Objects: objects}
+	clk := start()
+	a, b := newInstance(objects, clk), newInstance(slow, clk)
+	b.read()
+	objects.FailWrites.Store(true)
+	b.Publish(changes.Change{Stores: []uuid.UUID{uuid.New()}})
+	objects.FailWrites.Store(false)
+	shop := uuid.New()
+	a.Publish(changes.Change{Stores: []uuid.UUID{shop}})
+	slow.slow.Store(true)
+	clk.advance(interval)
+	if got := b.read(); len(got) != 1 || !same(got[0].Stores, []uuid.UUID{shop}) {
+		t.Fatalf("with its own news held up the look was told %+v", got)
+	}
+	if n := b.log.count("could not be read"); n != 0 {
+		t.Fatal("the look failed because telling its own news took the time")
+	}
+}
+
+// What a failed write left behind is told when the process is stopped, if it had no later
+// write or look to tell it with.
+func TestFlushTellsWhatAFailedWriteLeft(t *testing.T) {
+	objects := &changestest.Objects{}
+	clk := start()
+	a, b := newInstance(objects, clk), newInstance(objects, clk)
+	b.read()
+	if e := a.Flush(context.Background()); e != nil || objects.Writes.Load() != 0 {
+		t.Fatalf("nothing to tell wrote %d times, %v", objects.Writes.Load(), e)
+	}
+	objects.FailWrites.Store(true)
+	shop := uuid.New()
+	a.Publish(changes.Change{Stores: []uuid.UUID{shop}, Full: true})
+	if e := a.Flush(context.Background()); e == nil {
+		t.Fatal("a flush the store refused reported success")
+	}
+	objects.FailWrites.Store(false)
+	if e := a.Flush(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	clk.advance(interval)
+	if got := b.read(); len(got) != 1 || !same(got[0].Stores, []uuid.UUID{shop}) || !got[0].Full {
+		t.Fatalf("what the stopping instance flushed was told as %+v", got)
 	}
 }
 
@@ -414,6 +523,9 @@ func TestANilMarkerIsAWorkingConfiguration(t *testing.T) {
 	var m *changes.Marker
 	m.Publish(changes.Change{Full: true})
 	m.Check(context.Background(), func(c changes.Change) { t.Fatalf("a nil marker told %+v", c) })
+	if e := m.Flush(context.Background()); e != nil {
+		t.Fatal(e)
+	}
 }
 
 func TestObjectNameKeepsEnvironmentsApart(t *testing.T) {

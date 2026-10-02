@@ -33,6 +33,7 @@ package readcache
 
 import (
 	"container/list"
+	"strings"
 	"sync"
 	"time"
 )
@@ -61,6 +62,8 @@ type Cache struct {
 	ttl     time.Duration
 	hits    int64
 	misses  int64
+	// Moved on by every Drop, DropKeys and Clear; see Mark.
+	drops uint64
 }
 
 // New returns a cache, or nil when it is switched off. A nil *Cache is usable: every method
@@ -101,15 +104,37 @@ func (c *Cache) Get(key string) ([]byte, bool) {
 	return found.body, true
 }
 
+// Mark is taken before an answer is built from the database and handed to Put with it.
+//
+// A build that began reading before a write committed may have read the old answer, and the
+// drop that write causes may land before the build stores it -- here, or on another instance
+// at its next look at the change marker. Stored anyway, the old answer would outlive the drop
+// that was meant to remove it by the whole lifetime. So Put refuses an answer if anything at
+// all was dropped since its mark. Writes are rare and builds take milliseconds, so what this
+// refuses is the odd answer, read again by the next reader.
+func (c *Cache) Mark() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.drops
+}
+
 // Put stores an answer under a key, and under a group that a later write can drop whole.
 // The group is the thing the answer is about -- a shop -- so that reviewing a shop drops
 // its page and its neighbours' list together, whatever locale or limit they were asked in.
-func (c *Cache) Put(key, group string, body []byte) {
+// mark is what Mark said before the answer was built; the answer is not stored if anything
+// was dropped since.
+func (c *Cache) Put(key, group string, body []byte, mark uint64) {
 	if c == nil || len(body) == 0 || len(body) > c.budget {
 		return
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if mark != c.drops {
+		return
+	}
 	if existing, ok := c.entries[key]; ok {
 		c.removeLocked(existing)
 	}
@@ -139,12 +164,30 @@ func (c *Cache) Drop(group string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.drops++
 	for key := range c.groups[group] {
 		if found, ok := c.entries[key]; ok {
 			c.removeLocked(found)
 		}
 	}
 	delete(c.groups, group)
+}
+
+// DropKeys removes every answer whose key begins with prefix: one kind of answer, whichever
+// shop it is held under. A list of a shop's neighbours shows each neighbour's rating, review
+// count, name and photo, so a change to one shop moves lists held under others.
+func (c *Cache) DropKeys(prefix string) {
+	if c == nil || prefix == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.drops++
+	for key, found := range c.entries {
+		if strings.HasPrefix(key, prefix) {
+			c.removeLocked(found)
+		}
+	}
 }
 
 // Clear removes everything. Called when something changed and which shops it touched is not
@@ -156,6 +199,7 @@ func (c *Cache) Clear() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.drops++
 	c.entries = make(map[string]*entry)
 	c.groups = make(map[string]map[string]struct{})
 	c.order.Init()

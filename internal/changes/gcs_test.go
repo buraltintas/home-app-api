@@ -34,6 +34,8 @@ type fakeGCS struct {
 	generation map[string]int64
 	next       int64
 	requests   []string
+	// Statuses the next uploads are answered with instead of being taken, one each.
+	refuse []int
 }
 
 func (f *fakeGCS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +94,14 @@ func (f *fakeGCS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body, _ := io.ReadAll(part)
+		if len(f.refuse) > 0 {
+			status := f.refuse[0]
+			f.refuse = f.refuse[1:]
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = fmt.Fprintf(w, `{"error":{"code":%d,"message":"%s"}}`, status, http.StatusText(status))
+			return
+		}
 		if want := r.URL.Query().Get("ifGenerationMatch"); want == "" || want != strconv.FormatInt(f.generation[meta.Name], 10) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusPreconditionFailed)
@@ -178,6 +188,79 @@ func TestTheMarkerWorksOverGCS(t *testing.T) {
 	var told []changes.Change
 	b.Check(context.Background(), func(c changes.Change) { told = append(told, c) })
 	if len(told) != 1 || !same(told[0].Stores, []uuid.UUID{shop}) || !told[0].Full || !told[0].Reviews {
+		t.Fatalf("the other instance was told %+v", told)
+	}
+}
+
+// What Cloud Storage asks to be tried again comes back as ErrBusy -- a 429 when one object is
+// written faster than about once a second, a 408 or a 5xx when it could not finish -- and
+// what it does not, as itself. The client is not left to retry the upload on its own: each
+// answer is one request.
+func TestGCSSaysWhenToTryAgain(t *testing.T) {
+	fake := &fakeGCS{bodies: map[string][]byte{}, generation: map[string]int64{}}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("STORAGE_EMULATOR_HOST", strings.TrimPrefix(server.URL, "http://"))
+	ctx := context.Background()
+	objects, e := changes.NewGCS(ctx, "bucket")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusRequestTimeout, http.StatusServiceUnavailable, http.StatusInternalServerError} {
+		fake.mu.Lock()
+		fake.refuse, fake.requests = []int{status}, nil
+		fake.mu.Unlock()
+		if e := objects.Write(ctx, name, []byte(`{}`), 0); !errors.Is(e, changes.ErrBusy) {
+			t.Fatalf("%d answered %v", status, e)
+		}
+		fake.mu.Lock()
+		n := len(fake.requests)
+		fake.mu.Unlock()
+		if n != 1 {
+			t.Fatalf("%d was sent %d times", status, n)
+		}
+	}
+	fake.mu.Lock()
+	fake.refuse = []int{http.StatusForbidden}
+	fake.mu.Unlock()
+	if e := objects.Write(ctx, name, []byte(`{}`), 0); e == nil || errors.Is(e, changes.ErrBusy) || errors.Is(e, changes.ErrConflict) {
+		t.Fatalf("403 answered %v", e)
+	}
+}
+
+// And the marker waits and tries again: a write refused once with 429 still lands, and the
+// other instance learns it at its next look.
+func TestTheMarkerTriesAgainWhenGCSIsBusy(t *testing.T) {
+	fake := &fakeGCS{bodies: map[string][]byte{}, generation: map[string]int64{}, refuse: []int{http.StatusTooManyRequests}}
+	server := httptest.NewServer(fake)
+	defer server.Close()
+	t.Setenv("STORAGE_EMULATOR_HOST", strings.TrimPrefix(server.URL, "http://"))
+	objects, e := changes.NewGCS(context.Background(), "bucket")
+	if e != nil {
+		t.Fatal(e)
+	}
+	log := &syncBuffer{}
+	a := changes.New(objects, name, time.Nanosecond, slog.New(slog.NewTextHandler(log, nil)))
+	b := changes.New(objects, name, time.Nanosecond, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	shop := uuid.New()
+	a.Publish(changes.Change{Stores: []uuid.UUID{shop}, Full: true})
+	if n := log.count("could not be told"); n != 0 {
+		t.Fatal("a write taken at the second try was logged as not told")
+	}
+	fake.mu.Lock()
+	uploads := 0
+	for _, r := range fake.requests {
+		if strings.HasPrefix(r, "POST /upload/") {
+			uploads++
+		}
+	}
+	fake.mu.Unlock()
+	if uploads != 2 {
+		t.Fatalf("%d uploads for one refused and one taken", uploads)
+	}
+	var told []changes.Change
+	b.Check(context.Background(), func(c changes.Change) { told = append(told, c) })
+	if len(told) != 1 || !same(told[0].Stores, []uuid.UUID{shop}) || !told[0].Full {
 		t.Fatalf("the other instance was told %+v", told)
 	}
 }

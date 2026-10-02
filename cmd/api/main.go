@@ -135,6 +135,7 @@ func main() {
 	// which would keep it awake. Set up before the catalogue is read, so a write landing on
 	// another instance while this one starts is taken as news rather than assumed to be in
 	// what it read.
+	var marker *changes.Marker
 	switch {
 	case cfg.CatalogChangesInterval == 0:
 		log.Info("catalog change marker off; writes on another instance reach this one by the catalogue copy's maximum age")
@@ -146,7 +147,8 @@ func main() {
 			log.Warn("catalog change marker unavailable; writes on another instance reach this one by the catalogue copy's maximum age", "error", e)
 			break
 		}
-		api.SetChanges(changes.New(objects, changes.ObjectName(cfg.Environment), cfg.CatalogChangesInterval, log))
+		marker = changes.New(objects, changes.ObjectName(cfg.Environment), cfg.CatalogChangesInterval, log)
+		api.SetChanges(marker)
 		log.Info("catalog change marker enabled", "object", changes.ObjectName(cfg.Environment), "interval", cfg.CatalogChangesInterval.String())
 	}
 	// Anonymous catalogue reads are answered from this process. Measured over four daytime
@@ -220,5 +222,11 @@ func main() {
 	defer cancel()
 	if e := server.Shutdown(shutdown); e != nil {
 		log.Error("shutdown failed", "error", e)
+	}
+	// A write here whose news Cloud Storage refused keeps it for this instance's next write
+	// or look, and a stopping instance has neither. Told now, in the seconds Cloud Run gives
+	// it, after the last request has finished.
+	if e := marker.Flush(shutdown); e != nil {
+		log.Warn("catalog change could not be told to the other instances before stopping; they show it by their copy's maximum age", "error", e)
 	}
 }
