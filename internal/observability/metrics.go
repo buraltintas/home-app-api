@@ -36,7 +36,10 @@ var (
 	catalogLoads  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_loads_total", Help: "Reads of the whole catalogue by reason and outcome."}, []string{"reason", "outcome"})
 	catalogStores = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_stores", Help: "Live stores in the catalogue copy held in memory."})
 	catalogBytes  = prometheus.NewGauge(prometheus.GaugeOpts{Name: brand.MetricsNamespace + "_catalog_snapshot_bytes", Help: "Approximate bytes held by the catalogue copy in memory."})
-	workerRetries = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
+	// The marker that tells the other instances about a write here. A run of look failures
+	// means writes elsewhere reach this instance only by the copy's maximum age again.
+	catalogChanges = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_catalog_changes_total", Help: "Catalogue change marker operations: publish success/failure, look unchanged/changed/failure."}, []string{"action", "outcome"})
+	workerRetries  = prometheus.NewCounterVec(prometheus.CounterOpts{Name: brand.MetricsNamespace + "_worker_retries_total", Help: "Background job retry attempts."}, []string{"worker"})
 	// What the search sufficiency gate decided, and why. The decision counter gives the
 	// Local Only Rate and the Places Fallback Rate; the reason counter says which of the
 	// gate's four conditions is driving the calls that remain, which is the difference
@@ -50,7 +53,7 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, readCache, readCacheBytes, catalogReads, catalogLoads, catalogStores, catalogBytes, searchGate, searchGateReason, searchShadow, searchStage)
+	prometheus.MustRegister(httpRequests, httpDuration, httpInFlight, authEvents, searches, searchDuration, zeroResults, providerRequests, providerDuration, workerJobs, workerRetries, readCache, readCacheBytes, catalogReads, catalogLoads, catalogStores, catalogBytes, catalogChanges, searchGate, searchGateReason, searchShadow, searchStage)
 }
 
 type statusWriter struct {
@@ -167,6 +170,9 @@ func CatalogLoad(reason string, ok bool, stores, bytes int) {
 	catalogStores.Set(float64(stores))
 	catalogBytes.Set(float64(bytes))
 }
+
+// CatalogChange records one use of the catalogue change marker.
+func CatalogChange(action, outcome string) { catalogChanges.WithLabelValues(action, outcome).Inc() }
 
 func Worker(worker, outcome string, retry bool) {
 	workerJobs.WithLabelValues(worker, outcome).Inc()

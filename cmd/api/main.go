@@ -13,6 +13,7 @@ import (
 
 	adminpkg "github.com/burakaltintas/home-app-api/internal/admin"
 	"github.com/burakaltintas/home-app-api/internal/auth"
+	"github.com/burakaltintas/home-app-api/internal/changes"
 	"github.com/burakaltintas/home-app-api/internal/config"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/burakaltintas/home-app-api/internal/email"
@@ -128,6 +129,26 @@ func main() {
 	feedbackSvc := feedback.NewService(db, cfg.FeedbackNotifyEmail)
 	feedbackSvc.SetMailNotifier(emailWorker.Notify)
 	api := server.NewServer(db, authSvc, stores, socialSvc, searchSvc, placesSvc, users, mediaSvc, adminSvc, reportSvc, feedbackSvc, []byte(cfg.OTPHashSecret))
+	// The answers held below for anonymous readers are dropped by a write in the instance it
+	// landed in. The other instances learn of it from one small object in the media bucket,
+	// looked at once per interval inside an anonymous read -- never by asking the database,
+	// which would keep it awake. Set up before the catalogue is read, so a write landing on
+	// another instance while this one starts is taken as news rather than assumed to be in
+	// what it read.
+	switch {
+	case cfg.CatalogChangesInterval == 0:
+		log.Info("catalog change marker off; writes on another instance reach this one by the catalogue copy's maximum age")
+	case cfg.ObjectStorageProvider != "gcs":
+		log.Info("catalog change marker needs OBJECT_STORAGE_PROVIDER=gcs; writes on another instance reach this one by the catalogue copy's maximum age")
+	default:
+		objects, e := changes.NewGCS(ctx, cfg.Bucket)
+		if e != nil {
+			log.Warn("catalog change marker unavailable; writes on another instance reach this one by the catalogue copy's maximum age", "error", e)
+			break
+		}
+		api.SetChanges(changes.New(objects, changes.ObjectName(cfg.Environment), cfg.CatalogChangesInterval, log))
+		log.Info("catalog change marker enabled", "object", changes.ObjectName(cfg.Environment), "interval", cfg.CatalogChangesInterval.String())
+	}
 	// Anonymous catalogue reads are answered from this process. Measured over four daytime
 	// hours, it takes 3,817 requests down to 302 and gives the database 107 minutes of the
 	// quiet it needs to suspend itself -- 45% of the window -- where today it gets none.

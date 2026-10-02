@@ -19,6 +19,8 @@ import (
 	"time"
 
 	adminpkg "github.com/burakaltintas/home-app-api/internal/admin"
+	"github.com/burakaltintas/home-app-api/internal/changes"
+	"github.com/burakaltintas/home-app-api/internal/changes/changestest"
 	"github.com/burakaltintas/home-app-api/internal/database"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
 	appmw "github.com/burakaltintas/home-app-api/internal/middleware"
@@ -45,6 +47,9 @@ type catalogueRig struct {
 	ids      map[string]uuid.UUID
 	quiet    string
 	review   string
+	// A second instance on the same database, when the test asked for one (withMarker).
+	other       *Server
+	otherRouter http.Handler
 	// Everybody the rig signed in, so they can be removed whatever became of their address.
 	people []uuid.UUID
 }
@@ -121,18 +126,7 @@ func newCatalogueRig(t *testing.T) *catalogueRig {
 	rig.fresh(t)
 	activity.OnUse(func() { rig.queries.Add(1) })
 	rig.tokens = security.NewTokenManager("rig-access-secret-more-than-32-bytes-long", time.Hour, time.Hour)
-	r := chi.NewRouter()
-	r.Use(appmw.RequestLocale(i18n.DefaultLocale), appmw.OptionalAuth(rig.tokens))
-	r.Get("/v1/categories", rig.server.storeCategories)
-	r.Get("/v1/search/highlights", rig.server.searchHighlights)
-	r.Get("/v1/search/popular-cities", rig.server.searchPopularCities)
-	r.Get("/v1/stores/index", rig.server.storeIndex)
-	r.Get("/v1/discovery/city-categories", rig.server.cityCategories)
-	r.Get("/v1/discovery/stores", rig.server.cityCategoryStores)
-	r.Get("/v1/discovery/city-brands", rig.server.cityBrands)
-	r.Get("/v1/discovery/brand-stores", rig.server.cityBrandStores)
-	r.Get("/v1/stores/{id}", rig.server.storeDetail)
-	r.Get("/v1/stores/{id}/nearby", rig.server.storeNearby)
+	r := rig.readRoutes(rig.server)
 	// Every route that writes something an anonymous catalogue read shows, behind the same
 	// checks as in Router. Importing a chain (it calls the provider) and settling the match
 	// queue (it needs an import run) are the two left out.
@@ -160,16 +154,54 @@ func newCatalogueRig(t *testing.T) *catalogueRig {
 	return rig
 }
 
+// readRoutes are the anonymous catalogue reads of one instance, as Router mounts them.
+func (rig *catalogueRig) readRoutes(s *Server) chi.Router {
+	r := chi.NewRouter()
+	r.Use(appmw.RequestLocale(i18n.DefaultLocale), appmw.OptionalAuth(rig.tokens))
+	r.Get("/v1/categories", s.storeCategories)
+	r.Get("/v1/search/highlights", s.searchHighlights)
+	r.Get("/v1/search/popular-cities", s.searchPopularCities)
+	r.Get("/v1/stores/index", s.storeIndex)
+	r.Get("/v1/discovery/city-categories", s.cityCategories)
+	r.Get("/v1/discovery/stores", s.cityCategoryStores)
+	r.Get("/v1/discovery/city-brands", s.cityBrands)
+	r.Get("/v1/discovery/brand-stores", s.cityBrandStores)
+	r.Get("/v1/stores/{id}", s.storeDetail)
+	r.Get("/v1/stores/{id}/nearby", s.storeNearby)
+	return r
+}
+
+// withMarker gives the rig's instance a catalogue change marker over objects, and starts a
+// second instance on the same database -- its own copy, its own read cache, its own marker
+// over the same objects: two Cloud Run instances and the bucket between them. Both markers
+// look on every read, so the other instance's next read is its next look.
+func (rig *catalogueRig) withMarker(t *testing.T, objects *changestest.Objects) {
+	t.Helper()
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rig.server.SetChanges(changes.New(objects, changes.ObjectName("rigtest"), time.Nanosecond, quiet))
+	s := rig.server
+	rig.other = NewServer(rig.db, nil, s.stores, s.social, s.search, nil, s.users, nil, s.admin, s.report, nil, s.hashKey)
+	rig.other.SetChanges(changes.New(objects, changes.ObjectName("rigtest"), time.Nanosecond, quiet))
+	rig.otherRouter = rig.readRoutes(rig.other)
+	rig.fresh(t)
+}
+
 // fresh reads the catalogue again and empties the read cache, as a new instance would have
-// it, so each write starts from a copy that holds the state before it.
+// it, so each write starts from a copy that holds the state before it. Both instances, when
+// there are two.
 func (rig *catalogueRig) fresh(t *testing.T) {
 	t.Helper()
-	catalog := storepkg.NewCatalog(rig.db, rig.activity, 6*time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	if e := catalog.Load(context.Background()); e != nil {
-		t.Fatal(e)
+	for _, s := range []*Server{rig.server, rig.other} {
+		if s == nil {
+			continue
+		}
+		catalog := storepkg.NewCatalog(rig.db, rig.activity, 6*time.Hour, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		if e := catalog.Load(context.Background()); e != nil {
+			t.Fatal(e)
+		}
+		s.SetCatalog(catalog, false)
+		s.SetReadCache(readcache.New(1<<20, time.Hour))
 	}
-	rig.server.SetCatalog(catalog, false)
-	rig.server.SetReadCache(readcache.New(1<<20, time.Hour))
 }
 
 // signIn makes a person with a live session and returns them with an access token.
@@ -220,13 +252,24 @@ func (rig *catalogueRig) send(t *testing.T, method, path, token string, body any
 
 func (rig *catalogueRig) get(t *testing.T, path string, header ...string) (*httptest.ResponseRecorder, int64) {
 	t.Helper()
+	return rig.getFrom(t, rig.router, path, header...)
+}
+
+// getOther is an anonymous read arriving at the second instance (see withMarker).
+func (rig *catalogueRig) getOther(t *testing.T, path string, header ...string) (*httptest.ResponseRecorder, int64) {
+	t.Helper()
+	return rig.getFrom(t, rig.otherRouter, path, header...)
+}
+
+func (rig *catalogueRig) getFrom(t *testing.T, router http.Handler, path string, header ...string) (*httptest.ResponseRecorder, int64) {
+	t.Helper()
 	before := rig.queries.Load()
 	req := httptest.NewRequest("GET", path, nil)
 	for i := 0; i+1 < len(header); i += 2 {
 		req.Header.Set(header[i], header[i+1])
 	}
 	rec := httptest.NewRecorder()
-	rig.router.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 	if rec.Code != 200 {
 		t.Fatalf("%s answered %d: %s", path, rec.Code, rec.Body.String())
 	}
@@ -410,8 +453,32 @@ func listed(t *testing.T, body []byte, slug string) map[string]any {
 // the home page's highlights too. Each write starts from a copy read just before it, which the
 // read before the write is checked to come from, so a handler that forgot to say what it
 // changed -- or said "one shop's page" where a list moved -- fails here.
+//
+// The marker that would tell other instances can be neither written nor read here. No write
+// may fail for that, and every one still shows on this instance at once.
 func TestEveryWriteRouteShowsOnTheNextAnonymousRead(t *testing.T) {
 	rig := newCatalogueRig(t)
+	down := &changestest.Objects{}
+	down.FailReads.Store(true)
+	down.FailWrites.Store(true)
+	rig.withMarker(t, down)
+	everyWriteRouteShows(t, rig, rig.get)
+}
+
+// The owner's requirement across instances: every one of those writes, sent to one
+// instance, shows on the next anonymous read the other instance answers after its next look
+// at the marker -- and the home page's highlights there are dropped by a review as well.
+func TestEveryWriteRouteOnOneInstanceShowsOnTheOther(t *testing.T) {
+	rig := newCatalogueRig(t)
+	objects := &changestest.Objects{}
+	rig.withMarker(t, objects)
+	everyWriteRouteShows(t, rig, rig.getOther)
+	if objects.Writes.Load() == 0 || objects.Generations.Load() == 0 {
+		t.Fatal("the instances did not go through the marker")
+	}
+}
+
+func everyWriteRouteShows(t *testing.T, rig *catalogueRig, get func(*testing.T, string, ...string) (*httptest.ResponseRecorder, int64)) {
 	ctx := context.Background()
 	authorID, author := rig.signIn(t, "rigtest-author@example.test")
 	adminID, adminToken := rig.signIn(t, rigAdmin)
@@ -586,25 +653,25 @@ func TestEveryWriteRouteShowsOnTheNextAnonymousRead(t *testing.T) {
 		}
 		rig.fresh(t)
 		for _, r := range c.reads {
-			rec, _ := rig.get(t, r.path)
+			rec, _ := get(t, r.path)
 			if r.shows(rec.Body.Bytes()) {
 				t.Fatalf("%s: %s already shows the write before it was made", c.name, r.path)
 			}
 		}
 		if c.reviews {
-			rig.get(t, "/v1/search/highlights")
-			if rec, _ := rig.get(t, "/v1/search/highlights"); rec.Header().Get("X-Cache") != "hit" {
+			get(t, "/v1/search/highlights")
+			if rec, _ := get(t, "/v1/search/highlights"); rec.Header().Get("X-Cache") != "hit" {
 				t.Fatalf("%s: the highlights were not held to begin with", c.name)
 			}
 		}
 		c.write()
 		for _, r := range c.reads {
-			if rec, _ := rig.get(t, r.path); !r.shows(rec.Body.Bytes()) {
+			if rec, _ := get(t, r.path); !r.shows(rec.Body.Bytes()) {
 				t.Fatalf("%s: %s does not show the write on the next read (X-Cache %q): %s", c.name, r.path, rec.Header().Get("X-Cache"), rec.Body.String())
 			}
 		}
 		if c.reviews {
-			if rec, _ := rig.get(t, "/v1/search/highlights"); rec.Header().Get("X-Cache") != "miss" {
+			if rec, _ := get(t, "/v1/search/highlights"); rec.Header().Get("X-Cache") != "miss" {
 				t.Fatalf("%s: the home page's highlights outlived a change to the reviews", c.name)
 			}
 		}

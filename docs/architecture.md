@@ -302,10 +302,20 @@ let it sleep anyway:
   read again inside the request that needs it -- after a write here, when it is over an hour
   old and the database is already awake, or at `CATALOG_SNAPSHOT_MAX_AGE` -- and replaced
   atomically; readers never lock. A copy that could not be replaced by its maximum age is not
-  answered from. Writes in this process invalidate it at once; writes elsewhere reach it
-  within the maximum age.
+  answered from. Writes in this process invalidate it at once; writes on another instance
+  reach it through the change marker below, and anything written outside the API (an
+  import run from a laptop) within the maximum age.
 - **`readcache.Cache`** holds rendered answers for six hours: the store pages the snapshot
   leaves to the database.
+- **`changes.Marker`** carries what a write on one instance made out of date to the others,
+  through one object in the media bucket (`_cache/<APP_ENV>/catalog-changes.json`): every
+  write that invalidates the copies here appends an entry -- shops, and whether every list
+  moved -- with a write conditional on the object's generation, inside the write's request,
+  and never fails the write. Every instance reads the object's generation at most once per
+  `CATALOG_CHANGES_INTERVAL` (30s) inside an anonymous catalogue read, and drops exactly what
+  the new entries name, or everything when it cannot tell what it missed. It never asks the
+  database. When the object cannot be read the look is skipped and the maximum age rules,
+  as before.
 - **The home page's highlights and popular cities** are held in the same cache, one copy for
   every language, dropped by a review written, deleted or moderated here.
 - **`database.Activity`** listens to the pool's connections being handed back, so the process

@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 
 	"github.com/burakaltintas/home-app-api/internal/brand"
 )
@@ -158,5 +159,27 @@ func TestCatalogSnapshotDefaultsToShadowAndRefusesAShortMaximumAge(t *testing.T)
 	t.Setenv("CATALOG_SNAPSHOT_MAX_AGE", "10m")
 	if _, err = Load(); err == nil {
 		t.Fatal("a ten-minute maximum age was accepted")
+	}
+}
+
+// Writes on another instance are looked for every thirty seconds unless told otherwise; a
+// look is a paid read, so an interval shorter than a second is a typo, and one as long as the
+// copy's maximum age is the marker doing nothing.
+func TestCatalogChangesIntervalDefaultsToThirtySeconds(t *testing.T) {
+	requiredTestEnvironment(t)
+	t.Setenv("CATALOG_SNAPSHOT_MAX_AGE", "")
+	t.Setenv("CATALOG_CHANGES_INTERVAL", "")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CatalogChangesInterval != 30*time.Second {
+		t.Fatalf("interval %s", cfg.CatalogChangesInterval)
+	}
+	for value, ok := range map[string]bool{"0": true, "1s": true, "5m": true, "100ms": false, "6h": false, "soon": false} {
+		t.Setenv("CATALOG_CHANGES_INTERVAL", value)
+		if _, err = Load(); (err == nil) != ok {
+			t.Fatalf("%q: accepted %v, want %v (%v)", value, err == nil, ok, err)
+		}
 	}
 }

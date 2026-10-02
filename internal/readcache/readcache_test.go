@@ -46,6 +46,30 @@ func TestDropTakesEverythingAboutOneShop(t *testing.T) {
 	}
 }
 
+// When which shops changed is not known, everything goes, and the cache fills again as
+// before: the budget it counts against starts from nothing.
+func TestClearTakesEverything(t *testing.T) {
+	c := New(1<<20, time.Minute)
+	c.Put("detail:tr", "store:1", []byte("tr"))
+	c.Put("highlights", "home:highlights", []byte("h"))
+	c.Clear()
+	for _, key := range []string{"detail:tr", "highlights"} {
+		if _, ok := c.Get(key); ok {
+			t.Fatalf("%s survived the clear", key)
+		}
+	}
+	c.Put("again", "store:1", []byte("again"))
+	if _, _, bytes, entries := c.Stats(); entries != 1 || bytes != len("again")+len("again") {
+		t.Fatalf("after a clear the cache holds %d entries, %d bytes", entries, bytes)
+	}
+	c.Drop("store:1")
+	if _, ok := c.Get("again"); ok {
+		t.Fatal("an answer stored after a clear could not be dropped by its group")
+	}
+	var off *Cache
+	off.Clear()
+}
+
 // The budget is in bytes because entries differ by twenty to one.
 func TestBudgetEvictsOldestFirst(t *testing.T) {
 	c := New(120, time.Minute)

@@ -14,6 +14,7 @@ import (
 	adminpkg "github.com/burakaltintas/home-app-api/internal/admin"
 	"github.com/burakaltintas/home-app-api/internal/auth"
 	"github.com/burakaltintas/home-app-api/internal/brand"
+	"github.com/burakaltintas/home-app-api/internal/changes"
 	"github.com/burakaltintas/home-app-api/internal/feedback"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/i18n"
@@ -55,6 +56,9 @@ type Server struct {
 	// SetCatalog. Nil when switched off.
 	catalog       *storepkg.Catalog
 	catalogShadow bool
+	// How a write here reaches the copies the other instances hold, and how theirs reach the
+	// ones held here; see internal/changes and SetChanges. Nil when switched off.
+	changes *changes.Marker
 }
 
 // SetReadCache hands the server its catalogue cache. Separate from the constructor because
@@ -95,6 +99,7 @@ func storeGroup(id uuid.UUID) string { return "store:" + id.String() }
 // so a write drops both.
 func (s *Server) answer(w http.ResponseWriter, r *http.Request, key string, build func() (any, string, error)) {
 	if key != "" {
+		s.catchUp(r)
 		body, ok := s.reads.Get(key)
 		_, _, held, _ := s.reads.Stats()
 		observability.ReadCache(ok, held)
@@ -814,10 +819,11 @@ func (s *Server) storeDetail(w http.ResponseWriter, r *http.Request) {
 		// A shop with reviews is not stored at all, and the exception is smaller than it
 		// sounds: eleven shops in a catalogue of 11,252 have one. Everything on a shop's
 		// page that somebody would notice going stale is a review or a number derived from
-		// reviews, and a write can only drop this copy in the process it arrived at -- with
-		// several running, the page rebuilt after a review could still be handed an old
-		// answer by another one. Rather than make that unlikely, the eleven pages where it
-		// would matter are left out.
+		// reviews, and a write drops this copy at once only in the process it arrived at;
+		// the others drop it at their next look at the change marker -- so with several
+		// running, the page rebuilt right after a review could still be handed an old answer
+		// by another one inside that interval. Rather than make that unlikely, the eleven
+		// pages where it would matter are left out.
 		if x.Platform.ReviewCount > 0 {
 			return map[string]any{"store": x, "recent_posts": posts}, "", nil
 		}
@@ -1372,7 +1378,8 @@ func (s *Server) storeNames(w http.ResponseWriter, r *http.Request) {
 // web deploy; each of those took the database three seconds and, once the catalogue stopped
 // keeping it awake, would on their own have woken it a fifth of the time. Nothing in it is
 // in a language, so one copy answers all four. A review written, removed or moderated here
-// drops it at once; one that lands on another instance shows within the lifetime.
+// drops it at once; one that lands on another instance drops it at this one's next look at
+// the change marker, or within the lifetime when the marker is off or cannot be read.
 func (s *Server) searchHighlights(w http.ResponseWriter, r *http.Request) {
 	key := ""
 	if cacheableRead(r) {

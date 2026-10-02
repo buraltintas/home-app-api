@@ -24,9 +24,11 @@
 //   - A reader who is signed in never reads from it. Whoever notices staleness is whoever
 //     wrote something, and they are signed in; the crawlers that fill it are not. This is
 //     what lets the lifetime be long without anybody meeting a stale page.
-//   - A write drops what it changed, here and now. Other instances of this process cannot
-//     be told -- the usual way of telling them holds a connection open to the database,
-//     which would defeat the entire point -- so they expire by time instead.
+//   - A write drops what it changed, here and now. The usual way of telling the other
+//     instances holds a connection open to the database, which would defeat the entire
+//     point, so they are told through one object in Cloud Storage instead and drop the same
+//     at their next look (internal/changes). When that object cannot be read, they expire
+//     by time, as they did before it existed.
 package readcache
 
 import (
@@ -143,6 +145,21 @@ func (c *Cache) Drop(group string) {
 		}
 	}
 	delete(c.groups, group)
+}
+
+// Clear removes everything. Called when something changed and which shops it touched is not
+// known -- an account deleted with its reviews, or news from another instance that this one
+// could not follow.
+func (c *Cache) Clear() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries = make(map[string]*entry)
+	c.groups = make(map[string]map[string]struct{})
+	c.order.Init()
+	c.bytes = 0
 }
 
 // Stats reports what it is doing, for the metrics endpoint. A cache nobody can see the hit

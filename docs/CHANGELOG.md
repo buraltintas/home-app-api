@@ -6,6 +6,109 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A write on one instance reaches the others within thirty seconds
+
+The owner's rule for the copies held in memory is "if there is a write, the current data must
+show; if not, from memory is fine". A write dropped what it made out of date only in the
+instance it landed in. When Cloud Run ran a second instance -- 6 of 1,437 minutes on 1 October
+-- that one went on answering from its copy: a shop's first review was missing from its page
+for up to six hours there (the catalogue copy's maximum age, and the read cache's lifetime in
+production today), and the web then holds whatever it rendered for up to a day.
+
+The other instances are now told, through one small object in the media bucket
+(`_cache/<APP_ENV>/catalog-changes.json`), never through the database -- the usual ways of
+telling them, LISTEN/NOTIFY or a version row polled on a timer, would keep it from ever
+suspending, which is the reason the copies exist.
+
+- **Telling.** Every write that already dropped something here -- reviews written, deleted or
+  moderated, favourites, comment moderation, covers, flags, categories, new shops, merges,
+  imports, deleted accounts -- also appends one entry to the object: which shops, whether every
+  list moved, whether the home page's highlights did, with a sequence number, a timestamp and
+  the writing instance. The append reads the object and writes it back only if its generation
+  has not moved; when it has, it reads the other writer's entry and adds to it, so two writes at
+  once cannot lose either. It runs inside the write's own request (Cloud Run throttles the CPU
+  once the response is sent), within two seconds, and it never fails the write: news that
+  cannot be written is kept and written with that instance's next write or next look. Only an
+  instance stopped before then loses it, and the maximum age covers that.
+- **Learning.** Each instance looks at the object's generation at most once every
+  `CATALOG_CHANGES_INTERVAL` (30 seconds by default), inside an anonymous catalogue read, with
+  a one-second limit. That is one metadata read; the object itself is read only when the
+  generation has moved. It drops exactly what the new entries name -- one shop's page, or the
+  whole catalogue copy, the read cache's pages for those shops and the highlights -- and skips
+  its own entries. An instance that missed entries already dropped from the object (it keeps
+  the last 64, about a fortnight of writes), or finds the object broken or started again,
+  drops everything. A new instance takes only what was written since it started, because
+  everything before is in what it read at startup.
+- **When Cloud Storage does not answer,** the look is skipped and logged once per interval,
+  and the copies fall back on the maximum age exactly as before. The look never touches the
+  database; the catalogue is read again only when a look has made the copy stale, which is the
+  read a write here already caused.
+
+One gap closed with it. Deleting an account removes its reviews from shops the write does not
+name, so nothing held about those shops was dropped: the neighbour lists counting their
+reviews stayed until they expired. Every answer held now goes, here and on the other
+instances.
+
+**What a visitor sees after a review, today and after this.** Today's production runs the read
+cache and not the catalogue copy. A review through the web goes to one API instance, and the
+web drops its own copy of the shop's page (`updateTag`, under the shop's id and slug) on the
+web server that handled the review, then reloads the page, nearly always from that same web
+server. The API answers that reload fresh -- unless it is the shop's first review, two API
+instances are up, the reload reaches the other one, and that one served the same page within
+the last six hours: then the page without the review is rendered and the web keeps it for a
+day. Every other web server keeps the copy it had for up to a day (two or more were up in 38
+of 1,439 minutes on 1 October), and a review from the mobile app tells the web nothing at
+all, so every web server shows that shop's page as it last rendered it, for up to a day. City
+lists are cached by the web for an hour.
+
+After this, every API instance answers the write within the interval instead of six hours: with
+`CATALOG_SNAPSHOT=on`, store pages, neighbours, lists, the sitemap index and categories; in
+every mode, the read cache's pages for the shops named and the highlights. The web
+side is unchanged, and that is where the rule is still not met: its one-day page cache, dropped
+only on the web server that handled a web review, and never for a mobile one. One API-side gap
+remains as well: the reviewer's own reload arrives a second or two after the write, and if it
+reaches a second API instance whose last look predates the write, that instance still answers
+from its copy, and the web keeps that page for a day. It needs two API instances up at that
+moment, and it is closed by a shorter interval -- at `CATALOG_CHANGES_INTERVAL=1s` a reload two
+seconds after the write finds that instance has looked since, unless Cloud Storage did not
+answer -- for the cost below.
+
+**What it costs.** Measured on 1 October: 55,091 API requests (926 to 10,772 an hour), one
+instance nearly all day; between 25 September and 1 October, about thirty writes that tell
+(ten reviews written, ten deleted, nine favourites) plus administrators' edits. At list price
+for the bucket's class (Class A $0.005 and Class B $0.0004 per thousand; the always-free
+allowance applies to US buckets only):
+
+- looks: at most 2,880 per instance-day at 30 seconds, about 88,000 a month for one instance
+  -- $0.035; $0.07 if two ran all month;
+- telling: about 130 writes a month, one read and one conditional write each -- under $0.001;
+  each other instance reads the object once per write it learns about -- negligible;
+- transfer: the bucket is in another region than the service, about 1 KB per look, roughly
+  90 MB a month -- $0.002;
+- storage: one object of a few kilobytes, plus the overwritten versions the bucket's seven-day
+  soft delete keeps -- about a megabyte.
+
+About $0.04 a month in all. At a one-second interval the looks become nearly one per anonymous
+catalogue read -- around 1.6 million a month at today's traffic, about $0.65. Each look adds a
+cross-region round trip (tens of milliseconds, estimated rather than measured) to the one
+request that takes it; each write adds two. Cloud Storage accepts about one write a second to one object, so a burst of writes
+is spaced out by the retries, and what does not fit in two seconds is told with the next look.
+
+Nothing new is created: the runtime service account can already write the media bucket, and
+the object sits under `_cache/`, where no media key can fall (those begin with `users/`). It is
+on only with `OBJECT_STORAGE_PROVIDER=gcs`; `CATALOG_CHANGES_INTERVAL=0` switches it off and
+leaves the maximum age as the limit. The metric `catalog_changes_total{action,outcome}` counts
+tellings and looks; a run of look failures means the maximum age is the limit again.
+
+Checked with an object store in memory: a write on one instance is learned by another at its
+next look and not before; a failed write is told later and never fails the write; an
+unreachable store is tried once per interval and changes nothing; concurrent writers lose
+nothing; a catalogue copy is not read during a look. Every write route was run against one
+instance and read from a second over a throwaway local database, and the same routes still
+succeed with the marker unwritable. The adapter was checked through the real Cloud Storage
+client against a fake server: one request per operation, and a moved generation comes back as
+a conflict.
+
 ## The integration suite no longer says to run against `DATABASE_URL`
 
 The README told whoever ran the integration suite to `export TEST_DATABASE_URL=
@@ -106,8 +209,8 @@ rendered through the other instance can then show the shop without the review un
 instance reads the catalogue again, and the web holds what it rendered for up to a day, so
 that page can lag the review by up to a day, not six hours. A shop that already has a post
 never has this problem: it stays with the database. Closing it needs a way to tell the other
-instances that does not touch the database, which this does not build; `on` is a decision to
-accept it.
+instances that does not touch the database, which this entry does not build; the entry "A
+write on one instance reaches the others within thirty seconds" does.
 
 **Keeping it fresh must not wake the database either**, or the saving is spent on the
 upkeep. A copy is read again on three occasions: when a write here makes it stale or none is

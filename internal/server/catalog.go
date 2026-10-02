@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/burakaltintas/home-app-api/internal/changes"
 	. "github.com/burakaltintas/home-app-api/internal/httpapi"
 	"github.com/burakaltintas/home-app-api/internal/observability"
 	storepkg "github.com/burakaltintas/home-app-api/internal/store"
@@ -26,6 +27,11 @@ import (
 func (s *Server) SetCatalog(c *storepkg.Catalog, shadow bool) {
 	s.catalog, s.catalogShadow = c, shadow
 }
+
+// SetChanges hands the server the marker through which the instances tell each other about
+// their writes. Nil is a working configuration: a write here is still visible here at once,
+// and reaches the other instances by their copies' maximum age, as before it existed.
+func (s *Server) SetChanges(m *changes.Marker) { s.changes = m }
 
 func ignoreComparison(any, error) {}
 
@@ -41,7 +47,11 @@ func ignoreComparison(any, error) {}
 // the log, which is how the copy is checked against the database on real traffic before it
 // is trusted to answer.
 func (s *Server) fromCatalog(w http.ResponseWriter, r *http.Request, answer func(*storepkg.Snapshot) (any, bool)) (bool, func(any, error)) {
-	if s.catalog == nil || !cacheableRead(r) {
+	if !cacheableRead(r) {
+		return false, ignoreComparison
+	}
+	s.catchUp(r)
+	if s.catalog == nil {
 		return false, ignoreComparison
 	}
 	snap := s.catalog.Current(r.Context())
@@ -209,8 +219,7 @@ const highlightsGroup = "home:highlights"
 // list or the sitemap index shows: a favourite, a comment's moderation. Both copies of that
 // page held here go, the rest stay.
 func (s *Server) storePageChanged(id uuid.UUID) {
-	s.reads.Drop(storeGroup(id))
-	s.catalog.InvalidateStore(id)
+	s.changed(changes.Change{Stores: []uuid.UUID{id}})
 }
 
 // catalogueChanged is called after this process changes something any catalogue list may
@@ -218,15 +227,51 @@ func (s *Server) storePageChanged(id uuid.UUID) {
 // in the sitemap index. Until the catalogue has been read again every catalogue read here
 // goes to the database, so whoever made the change sees it on the next page they open.
 func (s *Server) catalogueChanged(stores ...uuid.UUID) {
-	for _, id := range stores {
-		s.reads.Drop(storeGroup(id))
-	}
-	s.catalog.Invalidate()
+	s.changed(changes.Change{Stores: stores, Full: true})
 }
 
 // reviewsChanged is catalogueChanged for a review: its shop's counts move up or down every
-// list it is in, and the home page's highlights are counted from reviews.
+// list it is in, and the home page's highlights are counted from reviews. Called with no shop
+// -- an account deleted with all its reviews -- it cannot say which pages carried them, so
+// every page held goes.
 func (s *Server) reviewsChanged(stores ...uuid.UUID) {
-	s.catalogueChanged(stores...)
-	s.reads.Drop(highlightsGroup)
+	s.changed(changes.Change{Stores: stores, Full: true, Reviews: true, AllPages: len(stores) == 0})
+}
+
+// changed drops here what a write in this process made out of date, then tells the other
+// instances, which drop the same on their next look (see internal/changes). Called after the
+// write has committed and inside its request: the telling waits for Cloud Storage, briefly,
+// because the CPU is throttled once the response is sent, and it never fails the write.
+func (s *Server) changed(c changes.Change) {
+	s.forget(c)
+	s.changes.Publish(c)
+}
+
+// forget drops what c made out of date from everything this process holds. It is the same
+// whether the write landed here or on another instance, so a reader cannot tell which.
+func (s *Server) forget(c changes.Change) {
+	if c.AllPages {
+		s.reads.Clear()
+	}
+	for _, id := range c.Stores {
+		s.reads.Drop(storeGroup(id))
+	}
+	if c.Reviews {
+		s.reads.Drop(highlightsGroup)
+	}
+	if c.Full || c.AllPages {
+		s.catalog.Invalidate()
+		return
+	}
+	for _, id := range c.Stores {
+		s.catalog.InvalidateStore(id)
+	}
+}
+
+// catchUp learns what the other instances have written since this one last looked, and
+// drops it here, before an anonymous catalogue read is answered from memory. It looks at most
+// once per CATALOG_CHANGES_INTERVAL, inside the request, at Cloud Storage and never at the
+// database; every other call returns at once.
+func (s *Server) catchUp(r *http.Request) {
+	s.changes.Check(r.Context(), s.forget)
 }

@@ -69,18 +69,25 @@ type Config struct {
 	// "off" leaves every read on the database as before; "shadow" reads the catalogue and
 	// compares its answers with the database's without serving them; "on" serves them.
 	//
-	// The maximum age is the one thing a reader can notice: a change made outside this
-	// process -- a catalogue import from a laptop, an edit that landed on another instance --
-	// reaches anonymous catalogue pages within it, and usually within the hour (see
-	// store.Catalog). Each time it runs out on a sleeping database it wakes it, so it has a
-	// floor: an hour.
+	// The maximum age is the one thing a reader can notice: a change made outside the API --
+	// a catalogue import from a laptop -- reaches anonymous catalogue pages within it, and
+	// usually within the hour (see store.Catalog); so does an edit that landed on another
+	// instance when the change marker below is off or cannot be read. Each time it runs out
+	// on a sleeping database it wakes it, so it has a floor: an hour.
 	CatalogSnapshot       string
 	CatalogSnapshotMaxAge time.Duration
-	MetricsToken          string
-	AdminEmails           []string
-	OTELEnabled           bool
-	OTLPEndpoint          string
-	DefaultLocale         i18n.Locale
+	// How often each instance looks for writes made on the others, so the copies it holds
+	// drop them: one metadata read of one Cloud Storage object per interval, never the
+	// database (see internal/changes). It is the most a write on another instance takes to
+	// reach this one's anonymous answers; zero switches the marker off, and the maximum age
+	// above is that limit again. Used only with OBJECT_STORAGE_PROVIDER=gcs, whose bucket
+	// holds the marker.
+	CatalogChangesInterval time.Duration
+	MetricsToken           string
+	AdminEmails            []string
+	OTELEnabled            bool
+	OTLPEndpoint           string
+	DefaultLocale          i18n.Locale
 }
 
 func Load() (Config, error) {
@@ -232,6 +239,12 @@ func Load() (Config, error) {
 	}
 	if c.CatalogSnapshotMaxAge < time.Hour {
 		return c, errors.New("CATALOG_SNAPSHOT_MAX_AGE must be at least an hour: each time it runs out it may wake the database")
+	}
+	if c.CatalogChangesInterval, err = duration("CATALOG_CHANGES_INTERVAL", 30*time.Second); err != nil {
+		return c, err
+	}
+	if c.CatalogChangesInterval != 0 && (c.CatalogChangesInterval < time.Second || c.CatalogChangesInterval >= c.CatalogSnapshotMaxAge) {
+		return c, errors.New("CATALOG_CHANGES_INTERVAL must be 0 (off), or at least 1s and shorter than CATALOG_SNAPSHOT_MAX_AGE: each look is a paid Cloud Storage read")
 	}
 	if c.SearchLocationRetentionDays, err = integer("SEARCH_LOCATION_RETENTION_DAYS", 30); err != nil {
 		return c, err

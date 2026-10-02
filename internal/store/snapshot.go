@@ -626,12 +626,13 @@ func (s *Snapshot) photo(x *snapStore) *Photo {
 }
 
 // Store is a shop's page as somebody who is not signed in reads it, or false when that page
-// belongs to the database: the shop is unknown here, has any post at all, or was changed by
-// this process after this copy was read.
+// belongs to the database: the shop is unknown here, has any post at all, or was changed --
+// by this process, or by another one that said so through the change marker -- after this
+// copy was read.
 //
 // A shop with posts is the owner's standing exception (see storeDetail): everything on its
-// page that a reader would notice going stale is a review, and a write can only reach the
-// copy in the process it arrived at.
+// page that a reader would notice going stale is a review, and a write reaches the copies in
+// other processes only at their next look at the marker, not at once.
 func (s *Snapshot) Store(ref string, locale i18n.Locale) (Item, bool) {
 	x, ok := s.resolve(ref)
 	if !ok || !x.hasStats || x.hasPosts || x.stats.ReviewCount > 0 || x.stats.PostCount > 0 || s.changedSince(x.id) {
