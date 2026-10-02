@@ -201,6 +201,10 @@ func sortedStrings(values []any) []any {
 	return out
 }
 
+// highlightsGroup is what the home page's highlights are held under, so a change to any
+// review can drop them.
+const highlightsGroup = "home:highlights"
+
 // storePageChanged is called after this process changes one shop's own page and nothing a
 // list shows: a favourite, a premium or catalogue flag. Both copies of that page held here
 // go, the rest stay.
@@ -221,7 +225,8 @@ func (s *Server) catalogueChanged(stores ...uuid.UUID) {
 }
 
 // reviewsChanged is catalogueChanged for a review: its shop's counts move up or down every
-// list it is in.
+// list it is in, and the home page's highlights are counted from reviews.
 func (s *Server) reviewsChanged(stores ...uuid.UUID) {
 	s.catalogueChanged(stores...)
+	s.reads.Drop(highlightsGroup)
 }

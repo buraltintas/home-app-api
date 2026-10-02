@@ -6,6 +6,22 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## The home page's community blocks are read once every six hours
+
+`/v1/search/highlights` took three seconds a request and was asked about 113 times a day: once
+an hour per language per web server, and again after every web deploy. Once the catalogue
+stopped keeping the database awake, those requests alone would have woken it 16% of the time.
+
+Two changes. The query joins posts with an inner join instead of an outer one: every list it
+feeds needs at least one published review, so the outer join only carried fifteen and a half
+thousand review-less shops through three correlated subqueries each, three times a request,
+to have them thrown away. Same rows out, checked against the old query on every case where the
+two could part; the planner's estimate fell from 1,148,415 to 122. And the answer, which has
+nothing in any language, is held in the read cache for its lifetime, one copy for all four
+languages, dropped at once by a review written, deleted or moderated here. Popular cities are
+held the same way, per limit. A review that lands on another instance reaches the home page
+within six hours; the web already held these for an hour.
+
 ## The catalogue is read from memory, so the database can sleep
 
 The database had not suspended once in three days. Over 79 hours of request logs there was

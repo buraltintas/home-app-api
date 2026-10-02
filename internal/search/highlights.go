@@ -67,21 +67,17 @@ type MonthlyStoreHighlights struct {
 	Recent []StoreHighlight `json:"recent,omitempty"`
 }
 
-// MonthlyHighlights answers what the home page can honestly say about the community this
-// month. Three things, and they are not the same kind of claim.
+// monthlyHighlightBase is every store that has had a published review, with the figures
+// the three home page lists are chosen from.
 //
-// Two are standouts -- the largest rating increase and the most reviews -- and a standout
-// says a crowd agreed. Those require five reviews, from at least three different people,
-// with activity inside the window. Missing signals stay nil so a client omits the section
-// rather than filling it with something weak.
-//
-// The third is the recently reviewed list, which claims nothing beyond "somebody wrote
-// about this one lately" and therefore carries no threshold. It exists because a home page
-// with no standout had nothing to point at, and a home page that points at no store page
-// is a home page that passes its standing to nothing.
-func (s *Service) MonthlyHighlights(ctx context.Context) (MonthlyStoreHighlights, error) {
-	windowStart := s.now().Add(-highlightWindowDays * 24 * time.Hour)
-	base := `
+// The join to posts is an inner join, and that is the whole of its cost. It was a LEFT JOIN,
+// which carried all fifteen and a half thousand shops through three correlated subqueries
+// each -- three times per request, once per list -- to arrive at rows with no reviews that
+// every list then threw away: the standouts need five reviews and the recent list needs one.
+// A shop whose reviews have all been deleted has a review count of zero either way, and is
+// thrown away either way. Same rows out, a planner estimate of 122 against 1,148,415, and
+// three seconds a request that the database was kept awake for.
+const monthlyHighlightBase = `
 WITH review_stats AS (
   SELECT s.id, s.slug, s.name, s.city, coalesce(s.district, '') AS district,
          coalesce((SELECT b.slug FROM brands b WHERE b.id=s.brand_id), '') AS brand_slug,
@@ -101,7 +97,7 @@ WITH review_stats AS (
            WHERE p.created_at < $1 AND (p.deleted_at IS NULL OR p.deleted_at >= $1)
          ) AS prior_rating
   FROM stores s
-  LEFT JOIN posts p ON p.store_id = s.id AND p.moderation = 'published'
+  JOIN posts p ON p.store_id = s.id AND p.moderation = 'published'
   WHERE s.deleted_at IS NULL
   GROUP BY s.id, s.slug, s.name, s.city, s.district, brand_slug, own_media, categories
 )
@@ -109,6 +105,25 @@ SELECT id, slug, name, city, district, brand_slug, own_media, categories, curren
        reviewer_count, coalesce(current_rating - prior_rating, 0) AS rating_increase
 FROM review_stats
 `
+
+// MonthlyHighlights answers what the home page can honestly say about the community this
+// month. Three things, and they are not the same kind of claim.
+//
+// Two are standouts -- the largest rating increase and the most reviews -- and a standout
+// says a crowd agreed. Those require five reviews, from at least three different people,
+// with activity inside the window. Missing signals stay nil so a client omits the section
+// rather than filling it with something weak.
+//
+// The third is the recently reviewed list, which claims nothing beyond "somebody wrote
+// about this one lately" and therefore carries no threshold. It exists because a home page
+// with no standout had nothing to point at, and a home page that points at no store page
+// is a home page that passes its standing to nothing.
+func (s *Service) MonthlyHighlights(ctx context.Context) (MonthlyStoreHighlights, error) {
+	return s.monthlyHighlights(ctx, monthlyHighlightBase)
+}
+
+func (s *Service) monthlyHighlights(ctx context.Context, base string) (MonthlyStoreHighlights, error) {
+	windowStart := s.now().Add(-highlightWindowDays * 24 * time.Hour)
 
 	out := MonthlyStoreHighlights{}
 	// The two standouts carry the thresholds; the recent list deliberately does not.

@@ -276,3 +276,24 @@ func TestShadowModeFindsNoDifferenceOnAnUnchangedCatalogue(t *testing.T) {
 		t.Fatalf("a real difference went unreported:\n%s", logged.String())
 	}
 }
+
+// The home page's highlights are read once and held; a review written here drops them.
+func TestHighlightsAreHeldUntilAReviewChanges(t *testing.T) {
+	rig := newCatalogueRig(t)
+	if _, queries := rig.get(t, "/v1/search/highlights"); queries == 0 {
+		t.Fatal("the first request did not read the highlights")
+	}
+	for _, locale := range i18n.Supported() {
+		if rec, queries := rig.get(t, "/v1/search/highlights", "X-Locale", string(locale)); queries != 0 || rec.Header().Get("X-Cache") != "hit" {
+			t.Fatalf("highlights in %s read the database again (%d)", locale, queries)
+		}
+	}
+	rig.get(t, "/v1/search/popular-cities?limit=5")
+	if _, queries := rig.get(t, "/v1/search/popular-cities"); queries != 0 {
+		t.Fatal("the default limit is the same list and was read again")
+	}
+	rig.server.reviewsChanged()
+	if rec, queries := rig.get(t, "/v1/search/highlights"); queries == 0 || rec.Header().Get("X-Cache") != "miss" {
+		t.Fatal("a review written here did not drop the held highlights")
+	}
+}

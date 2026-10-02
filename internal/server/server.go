@@ -1366,24 +1366,40 @@ func (s *Server) storeNames(w http.ResponseWriter, r *http.Request) {
 // searchHighlights exposes only community signals that have crossed the agreed
 // review threshold. Nil values are intentional: clients hide a weak or empty
 // section instead of manufacturing a recommendation.
+//
+// Held in this process for as long as the read cache holds anything (six hours by default).
+// The home page asks for it once an hour per language per web server, and again after every
+// web deploy; each of those took the database three seconds and, once the catalogue stopped
+// keeping it awake, would on their own have woken it a fifth of the time. Nothing in it is
+// in a language, so one copy answers all four. A review written, removed or moderated here
+// drops it at once; one that lands on another instance shows within the lifetime.
 func (s *Server) searchHighlights(w http.ResponseWriter, r *http.Request) {
-	items, e := s.search.MonthlyHighlights(r.Context())
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
+	key := ""
+	if cacheableRead(r) {
+		key = "highlights"
 	}
-	JSON(w, 200, items)
+	s.answer(w, r, key, func() (any, string, error) {
+		items, e := s.search.MonthlyHighlights(r.Context())
+		return items, highlightsGroup, e
+	})
 }
 
 // searchPopularCities exposes only rolling city-level totals that crossed the public
 // threshold. It never returns a district, coordinate, query, visitor or user identifier.
+//
+// Held here like the highlights, and for the same reason. It is a thirty-day count, so six
+// hours behind is the same answer to anyone reading it; it is held per limit, the only thing
+// that changes it.
 func (s *Server) searchPopularCities(w http.ResponseWriter, r *http.Request) {
-	items, e := s.search.PopularCities(r.Context(), queryInt(r, "limit", 5))
-	if e != nil {
-		WriteError(w, e, r.Context())
-		return
+	limit := searchpkg.PopularCityLimit(queryInt(r, "limit", 5))
+	key := ""
+	if cacheableRead(r) {
+		key = fmt.Sprintf("popular-cities|%d", limit)
 	}
-	JSON(w, http.StatusOK, map[string]any{"items": items})
+	s.answer(w, r, key, func() (any, string, error) {
+		items, e := s.search.PopularCities(r.Context(), limit)
+		return map[string]any{"items": items}, "home:popular-cities", e
+	})
 }
 
 // storeCategories lists browsable categories with how often each has been searched, so the

@@ -15,16 +15,21 @@ type PopularCity struct {
 	SearchCount int64  `json:"search_count"`
 }
 
+// PopularCityLimit is how many cities PopularCities returns when asked for limit: five when
+// the caller has no opinion, never more than ten. Said once so a caller holding the answer
+// can tell two requests for the same list apart from two for different ones.
+func PopularCityLimit(limit int) int {
+	if limit < 1 {
+		return 5
+	}
+	return min(limit, popularCityMaxLimit)
+}
+
 // PopularCities returns the cities where completed searches happened most often during
 // the rolling month. A city must cross a small public threshold so one person's location
 // never appears as a trend by itself.
 func (s *Service) PopularCities(ctx context.Context, limit int) ([]PopularCity, error) {
-	if limit < 1 {
-		limit = 5
-	}
-	if limit > popularCityMaxLimit {
-		limit = popularCityMaxLimit
-	}
+	limit = PopularCityLimit(limit)
 	rows, err := s.db.Query(ctx, `SELECT min(btrim(search_city)) AS city, count(*)
 FROM searches
 WHERE status='completed'

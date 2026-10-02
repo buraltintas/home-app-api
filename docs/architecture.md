@@ -305,6 +305,8 @@ let it sleep anyway:
   elsewhere reach it within the maximum age.
 - **`readcache.Cache`** holds rendered answers for six hours: the store pages the snapshot
   leaves to the database.
+- **The home page's highlights and popular cities** are held in the same cache, one copy for
+  every language, dropped by a review written, deleted or moderated here.
 - **`database.Activity`** listens to the pool's connections being handed back, so the process
   knows whether the database is awake without asking it. The snapshot refreshes on it.
 
