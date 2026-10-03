@@ -6,6 +6,34 @@ What has changed and why, newest first. Written for whoever picks this up next.
 file. Where a change was security-relevant it is described by its effect, never by
 repeating the value involved.
 
+## A review can say why the visit was made
+
+`posts.visit_purpose` (migration 000040): why somebody went to the shop, from a fixed list --
+`gift`, `trousseau`, `new_home` or `routine`, the last being the answer for every other reason
+so the list is complete without growing. Somebody shopping for a trousseau and somebody
+replacing a kettle judge the same shop by different things, and a reader planning one of those
+trips wants to find the reviews written on one.
+
+`POST /v1/posts` takes it as `visit_purpose`, beside `purchased` and `purchased_item`. It is
+optional: absent or empty is stored as NULL, which means "not asked" and is not the same answer
+as `routine`. The phone app does not send it and nothing about its requests or responses
+changes. Unlike a stray purchase item or criterion note, which are dropped, an unknown value is
+refused with 400 `INVALID_INPUT` before anything is read or written -- it is a fixed list, so a
+value outside it is a client sending the wrong word, and storing nothing in its place would lose
+the answer without anybody noticing. The column carries the same four values as a check, so no
+other route can store a fifth.
+
+Every read that returns a review now carries it, omitted when absent: the feed, a single post,
+a store's and a user's posts (and so the store page), and both admin review lists. The feed and
+the single-post read did not return the purchase fields or the criteria before this and still
+do not; this field was added to them because the reader of a feed card is the one it is for.
+
+**Deploy order.** The code reads the column on every store page. Apply 000040 with the
+migration job first, and deploy the code only after it has run -- shipped the other way round,
+every store page returns 500, which is exactly the outage `criterion_notes` caused. The web may
+send the field only once this API is live: the request decoder refuses unknown fields, so an
+older API would reject the whole review.
+
 ## A write on one instance reaches the others within thirty seconds
 
 The owner's rule for the copies held in memory is "if there is a write, the current data must

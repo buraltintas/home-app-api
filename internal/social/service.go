@@ -119,12 +119,39 @@ type CreatePost struct {
 	// calls what they bought is the vocabulary a search for it will use.
 	Purchased     *bool  `json:"purchased"`
 	PurchasedItem string `json:"purchased_item"`
+	// Why somebody went: one of visitPurposes, or nothing. Optional, because the phone app
+	// does not ask and an absent answer is "not asked", not "routine". Unlike a stray
+	// purchase item or note, an unknown value is refused rather than dropped: it is a fixed
+	// list, so a value outside it is a client sending the wrong word, and silently storing
+	// nothing would lose the answer without anybody finding out.
+	VisitPurpose string `json:"visit_purpose"`
 	// Why a heading scored badly, keyed by the heading. The form asks for a sentence
 	// whenever somebody gives a one or a two, and keeping it against the key rather than
 	// inside the body means the store page can put it beside the score it explains. Keys
 	// the eight questions do not name are dropped rather than refused: a review is worth
 	// more than a field a client got wrong.
 	CriterionNotes map[string]string `json:"criterion_notes"`
+}
+
+// Why a visit was made, as the API spells it. The values are a stable contract shared with
+// the clients and with the column's check constraint (migration 000040): gift shopping,
+// trousseau shopping, shopping for a new home, and routine -- which is the answer for every
+// other reason, so the list is complete without growing.
+var visitPurposes = map[string]struct{}{
+	"gift": {}, "trousseau": {}, "new_home": {}, "routine": {},
+}
+
+// cleanVisitPurpose reads the purpose a client sent. Empty means not answered and is
+// returned as empty; anything else must be one of visitPurposes exactly.
+func cleanVisitPurpose(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", true
+	}
+	if _, ok := visitPurposes[value]; !ok {
+		return "", false
+	}
+	return value, true
 }
 
 // The eight questions, by the names the scores already use. One list, so a note can only be
@@ -235,6 +262,10 @@ type Post struct {
 	// written by somebody who looked and left, and the page had no way to say so.
 	Purchased     *bool  `json:"purchased,omitempty"`
 	PurchasedItem string `json:"purchased_item,omitempty"`
+	// Why somebody went: gift, trousseau, new_home or routine. Absent when nobody was
+	// asked, which is every review written before the form asked and every one written by
+	// a client that does not.
+	VisitPurpose string `json:"visit_purpose,omitempty"`
 	// Why a heading scored one or two, keyed by the heading. Only the headings that were
 	// scored that low have one.
 	CriterionNotes map[string]string `json:"criterion_notes,omitempty"`
@@ -344,6 +375,13 @@ func (s *Service) CreateReview(ctx context.Context, user uuid.UUID, in CreatePos
 	if utf8.RuneCountInString(in.PurchasedItem) > 120 {
 		return Created{}, httpapi.E(422, "PURCHASED_ITEM_TOO_LONG", "What was bought is too long")
 	}
+	// Refused before anything is read or written, the same way an unknown content language
+	// is: the column's check would refuse it too, but as a 500 after the moderation call.
+	purpose, ok := cleanVisitPurpose(in.VisitPurpose)
+	if !ok {
+		return Created{}, httpapi.ErrInvalidInput
+	}
+	in.VisitPurpose = purpose
 	textLength := utf8.RuneCountInString(in.Text)
 	hasProof := in.VisitVerificationID != nil
 	// The eight criteria are the review, and the overall rating is derived from them rather
@@ -456,8 +494,8 @@ func (s *Service) CreateReview(ctx context.Context, user uuid.UUID, in CreatePos
 			criteria[i] = score
 		}
 	}
-	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,visit_verified,verification_distance_meters,verified_at,content_language,purchased,purchased_item,criterion_notes,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness,moderation) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
-		append(append([]any{id, user, in.StoreID, in.Text, in.Rating, verified, recordedDistance, verifiedAt, in.ContentLanguage, in.Purchased, nullIfEmpty(in.PurchasedItem), nullIfNoNotes(in.CriterionNotes)}, criteria...), state)...)
+	_, e = tx.Exec(ctx, `INSERT INTO posts(id,user_id,store_id,body,rating,visit_verified,verification_distance_meters,verified_at,content_language,purchased,purchased_item,criterion_notes,rating_availability,rating_value,rating_layout,rating_staff_care,rating_staff_knowledge,rating_checkout,rating_returns,rating_cleanliness,moderation,visit_purpose) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)`,
+		append(append([]any{id, user, in.StoreID, in.Text, in.Rating, verified, recordedDistance, verifiedAt, in.ContentLanguage, in.Purchased, nullIfEmpty(in.PurchasedItem), nullIfNoNotes(in.CriterionNotes)}, criteria...), state, nullIfEmpty(in.VisitPurpose))...)
 	if e != nil {
 		return Created{}, e
 	}
@@ -590,7 +628,8 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
  CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text)
  ELSE (SELECT jsonb_build_object('source','google','name',x.attribution->>'photo_name','attributions',coalesce(x.attribution->'photo_attributions','[]'::jsonb)) FROM store_external_sources x WHERE x.store_id=st.id AND x.provider='google' AND x.attribution ? 'photo_name' AND x.refreshed_at > now()-interval '30 days' LIMIT 1) END,
  coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),
- CASE WHEN $5::float8 IS NULL OR $6::float8 IS NULL THEN NULL ELSE ST_Distance(st.location,ST_SetSRID(ST_MakePoint($6,$5),4326)::geography) END store_distance_meters
+ CASE WHEN $5::float8 IS NULL OR $6::float8 IS NULL THEN NULL ELSE ST_Distance(st.location,ST_SetSRID(ST_MakePoint($6,$5),4326)::geography) END store_distance_meters,
+ coalesce(p.visit_purpose,'') visit_purpose
  FROM posts p JOIN users u ON u.id=p.user_id AND u.deleted_at IS NULL JOIN user_profiles up ON up.user_id=u.id JOIN stores st ON st.id=p.store_id AND st.deleted_at IS NULL
  WHERE p.deleted_at IS NULL AND p.moderation='published')
  SELECT * FROM feed WHERE
@@ -607,7 +646,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 	for rows.Next() {
 		var p Post
 		var storePhotoJSON []byte
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &p.StoreDistanceMeters); e != nil {
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &p.StoreDistanceMeters, &p.VisitPurpose); e != nil {
 			return nil, "", e
 		}
 		if p.StorePhoto, e = decodeStorePhoto(storePhotoJSON); e != nil {
@@ -636,7 +675,7 @@ func (s *Service) Feed(ctx context.Context, viewer *uuid.UUID, cursor string, li
 func (s *Service) GetPost(ctx context.Context, id uuid.UUID, viewer *uuid.UUID) (Post, error) {
 	var p Post
 	var storePhotoJSON []byte
-	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb) FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL AND p.moderation='published'`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media)
+	e := s.db.QueryRow(ctx, `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$2),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$2),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$2),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),coalesce(p.visit_purpose,'') FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.id=$1 AND p.deleted_at IS NULL AND p.moderation='published'`, id, viewer).Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &p.VisitPurpose)
 	if errors.Is(e, pgx.ErrNoRows) {
 		return p, httpapi.E(404, "POST_NOT_FOUND", "Post not found")
 	}
@@ -689,7 +728,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 	if column == "user_id" && viewer != nil && *viewer == id {
 		visibility = ""
 	}
-	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.purchased,coalesce(p.purchased_item,''),coalesce(p.criterion_notes,'{}'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness,p.moderation FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL` + visibility + ` ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
+	q := `SELECT p.id,p.user_id,p.store_id,p.body,coalesce(p.content_language::text,''),p.rating,p.visit_verified,p.verification_distance_meters,p.created_at,coalesce(up.username::text,''),coalesce(up.display_name,''),coalesce(up.avatar_url,''),st.name,st.slug,st.city,coalesce(st.district,''),(SELECT count(*) FROM posts ap WHERE ap.user_id=p.user_id AND ap.deleted_at IS NULL AND ap.moderation='published'),(SELECT count(*) FROM likes l WHERE l.post_id=p.id),(SELECT count(*) FROM comments c WHERE c.post_id=p.id AND c.deleted_at IS NULL AND c.moderation='published'),EXISTS(SELECT 1 FROM likes l WHERE l.post_id=p.id AND l.user_id=$3),EXISTS(SELECT 1 FROM follows f WHERE f.following_id=p.user_id AND f.follower_id=$3),EXISTS(SELECT 1 FROM favorites f WHERE f.store_id=p.store_id AND f.user_id=$3),CASE WHEN st.cover_media_id IS NOT NULL THEN jsonb_build_object('source','admin','media_id',st.cover_media_id::text) ELSE (SELECT jsonb_build_object('source','brand','brand_slug',b.slug) FROM brands b WHERE b.id=st.brand_id) END,coalesce((SELECT jsonb_agg(jsonb_build_object('id',m.id,'url','/media/'||m.id::text,'mime_type',m.mime_type,'width',m.width,'height',m.height) ORDER BY pm.position) FROM post_media pm JOIN media m ON m.id=pm.media_id WHERE pm.post_id=p.id),'[]'::jsonb),p.purchased,coalesce(p.purchased_item,''),coalesce(p.visit_purpose,''),coalesce(p.criterion_notes,'{}'::jsonb),p.rating_availability,p.rating_value,p.rating_layout,p.rating_staff_care,p.rating_staff_knowledge,p.rating_checkout,p.rating_returns,p.rating_cleanliness,p.moderation FROM posts p JOIN user_profiles up ON up.user_id=p.user_id JOIN stores st ON st.id=p.store_id WHERE p.` + column + `=$1 AND p.deleted_at IS NULL` + visibility + ` ORDER BY p.created_at DESC,p.id DESC LIMIT $2`
 	rows, e := s.db.Query(ctx, q, id, limit, viewer)
 	if e != nil {
 		return nil, e
@@ -700,7 +739,7 @@ func (s *Service) PostsBy(ctx context.Context, column string, id uuid.UUID, view
 		var p Post
 		var storePhotoJSON []byte
 		var c [8]*int16
-		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &p.Purchased, &p.PurchasedItem, &p.CriterionNotes, &c[0], &c[1], &c[2], &c[3], &c[4], &c[5], &c[6], &c[7], &p.Moderation); e != nil {
+		if e = rows.Scan(&p.ID, &p.UserID, &p.StoreID, &p.Text, &p.ContentLanguage, &p.Rating, &p.VisitVerified, &p.DistanceMeters, &p.CreatedAt, &p.Username, &p.DisplayName, &p.AvatarURL, &p.StoreName, &p.StoreSlug, &p.StoreCity, &p.StoreDistrict, &p.AuthorReviewCount, &p.LikeCount, &p.CommentCount, &p.ViewerLiked, &p.ViewerFollows, &p.ViewerFavorited, &storePhotoJSON, &p.Media, &p.Purchased, &p.PurchasedItem, &p.VisitPurpose, &p.CriterionNotes, &c[0], &c[1], &c[2], &c[3], &c[4], &c[5], &c[6], &c[7], &p.Moderation); e != nil {
 			return nil, e
 		}
 		if p.StorePhoto, e = decodeStorePhoto(storePhotoJSON); e != nil {

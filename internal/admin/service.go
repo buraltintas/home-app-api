@@ -136,11 +136,13 @@ type ReviewRow struct {
 	Deleted   bool      `json:"deleted"`
 	// published, held or removed.
 	Moderation string `json:"moderation"`
+	// gift, trousseau, new_home or routine; absent when the review was not asked.
+	VisitPurpose string `json:"visit_purpose,omitempty"`
 }
 
 func (s *Service) Reviews(ctx context.Context, query string, limit, offset int) ([]ReviewRow, error) {
 	query = strings.ToLower(strings.TrimSpace(query))
-	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,st.slug,p.user_id,coalesce(up.display_name,''),p.rating,p.body,p.created_at,p.deleted_at IS NOT NULL,p.moderation
+	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,st.slug,p.user_id,coalesce(up.display_name,''),p.rating,p.body,p.created_at,p.deleted_at IS NOT NULL,p.moderation,coalesce(p.visit_purpose,'')
  FROM posts p JOIN stores st ON st.id=p.store_id LEFT JOIN user_profiles up ON up.user_id=p.user_id
  WHERE ($1='' OR lower(st.name) LIKE '%'||$1||'%' OR lower(coalesce(up.display_name,'')) LIKE '%'||$1||'%')
  ORDER BY p.created_at DESC LIMIT $2 OFFSET $3`, query, clamp(limit), offset)
@@ -151,7 +153,7 @@ func (s *Service) Reviews(ctx context.Context, query string, limit, offset int) 
 	out := []ReviewRow{}
 	for rows.Next() {
 		var x ReviewRow
-		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.CreatedAt, &x.Deleted, &x.Moderation); e != nil {
+		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.CreatedAt, &x.Deleted, &x.Moderation, &x.VisitPurpose); e != nil {
 			return nil, e
 		}
 		out = append(out, x)
@@ -488,6 +490,7 @@ type HeldReview struct {
 	Rating        float64           `json:"rating"`
 	Text          string            `json:"text"`
 	PurchasedItem string            `json:"purchased_item,omitempty"`
+	VisitPurpose  string            `json:"visit_purpose,omitempty"`
 	Notes         map[string]string `json:"criterion_notes,omitempty"`
 	// severe: the check found something; unchecked: the check could not run, and the review
 	// was held rather than published unread.
@@ -504,7 +507,7 @@ func (s *Service) HeldReviews(ctx context.Context, limit, offset int) ([]HeldRev
 		return nil, 0, e
 	}
 	rows, e := s.db.Query(ctx, `SELECT p.id,p.store_id,st.name,st.slug,p.user_id,coalesce(up.display_name,''),p.rating::float8,
- coalesce(p.body,''),coalesce(p.purchased_item,''),coalesce(p.criterion_notes,'{}'::jsonb),
+ coalesce(p.body,''),coalesce(p.purchased_item,''),coalesce(p.visit_purpose,''),coalesce(p.criterion_notes,'{}'::jsonb),
  coalesce(m.verdict,'unchecked'),coalesce(m.findings,'[]'::jsonb),coalesce(m.error,''),p.created_at
  FROM posts p JOIN stores st ON st.id=p.store_id LEFT JOIN user_profiles up ON up.user_id=p.user_id
  LEFT JOIN post_moderation m ON m.post_id=p.id
@@ -518,7 +521,7 @@ func (s *Service) HeldReviews(ctx context.Context, limit, offset int) ([]HeldRev
 	for rows.Next() {
 		var x HeldReview
 		var notes []byte
-		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.PurchasedItem, &notes, &x.Verdict, &x.Findings, &x.Error, &x.CreatedAt); e != nil {
+		if e = rows.Scan(&x.ID, &x.StoreID, &x.StoreName, &x.StoreSlug, &x.UserID, &x.Author, &x.Rating, &x.Text, &x.PurchasedItem, &x.VisitPurpose, &notes, &x.Verdict, &x.Findings, &x.Error, &x.CreatedAt); e != nil {
 			return nil, 0, e
 		}
 		if len(notes) > 0 {

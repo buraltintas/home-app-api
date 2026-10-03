@@ -171,3 +171,87 @@ func TestCriterionNotesKeepOnlyWhatTheFormCanAsk(t *testing.T) {
 		t.Fatal("a map with nothing usable in it should be nothing at all")
 	}
 }
+
+// The four purposes are the API's contract, spelled exactly; nothing is the answer of a
+// client that did not ask, and everything else is refused.
+func TestCleanVisitPurpose(t *testing.T) {
+	for _, value := range []string{"gift", "trousseau", "new_home", "routine"} {
+		if got, ok := cleanVisitPurpose(value); !ok || got != value {
+			t.Fatalf("%q was not accepted as itself: %q %v", value, got, ok)
+		}
+	}
+	if got, ok := cleanVisitPurpose("  new_home "); !ok || got != "new_home" {
+		t.Fatalf("surrounding space was not trimmed: %q %v", got, ok)
+	}
+	for _, value := range []string{"", "   "} {
+		if got, ok := cleanVisitPurpose(value); !ok || got != "" {
+			t.Fatalf("an unanswered purpose %q should be nothing, not refused: %q %v", value, got, ok)
+		}
+	}
+	for _, value := range []string{"Gift", "GIFT", "new-home", "newhome", "other", "hediyelik", "routine,gift"} {
+		if _, ok := cleanVisitPurpose(value); ok {
+			t.Fatalf("%q was accepted", value)
+		}
+	}
+}
+
+// An unknown purpose is refused before anything is read or written, with the error the
+// service already gives for a bad field: 400 INVALID_INPUT.
+func TestCreatePostRejectsAnUnknownVisitPurpose(t *testing.T) {
+	proofID := uuid.New()
+	_, err := (&Service{}).CreatePost(context.Background(), uuid.New(), CreatePost{StoreID: uuid.New(), Text: "Geçerli yorum", Rating: 5, VisitVerificationID: &proofID, VisitPurpose: "shopping"})
+	app, ok := err.(*httpapi.Error)
+	if !ok || app != httpapi.ErrInvalidInput || app.Status != 400 || app.Code != "INVALID_INPUT" {
+		t.Fatalf("an unknown visit purpose was not refused as invalid input: %v", err)
+	}
+}
+
+// Each known purpose, and none at all, gets past validation. The duplicate media is there to
+// stop the call at the last check before the database, so reaching DUPLICATE_MEDIA proves
+// the purpose was accepted -- for the older contract the phone app uses as much as the newer.
+func TestCreatePostAcceptsEveryVisitPurposeAndNone(t *testing.T) {
+	proofID := uuid.New()
+	mediaID := uuid.New()
+	criteria := ReviewCriteria{Availability: 5, Value: 4, Layout: 5, StaffCare: 4, StaffKnowledge: 5, Checkout: 4, Returns: 5, Cleanliness: 4}
+	for _, purpose := range []string{"", "gift", "trousseau", "new_home", "routine"} {
+		for _, in := range []CreatePost{
+			{StoreID: uuid.New(), Criteria: &criteria, VisitVerificationID: &proofID, MediaIDs: []uuid.UUID{mediaID, mediaID}, VisitPurpose: purpose},
+			{StoreID: uuid.New(), Text: "Geçerli yorum", Rating: 5, VisitVerificationID: &proofID, MediaIDs: []uuid.UUID{mediaID, mediaID}, VisitPurpose: purpose},
+		} {
+			_, err := (&Service{}).CreatePost(context.Background(), uuid.New(), in)
+			if app, ok := err.(*httpapi.Error); !ok || app.Code != "DUPLICATE_MEDIA" {
+				t.Fatalf("visit purpose %q did not pass validation: %v", purpose, err)
+			}
+		}
+	}
+}
+
+// The request decoder refuses fields it does not know, so the name is part of the contract:
+// visit_purpose is read, and a body without it -- every body the phone app sends -- still
+// decodes. On the way out it is omitted when there is none, so an older client sees exactly
+// what it saw before.
+func TestVisitPurposeWireFormat(t *testing.T) {
+	for body, want := range map[string]string{
+		`{"store_id":"` + uuid.NewString() + `","text":"Geçerli yorum","rating":5,"visit_purpose":"trousseau"}`: "trousseau",
+		`{"store_id":"` + uuid.NewString() + `","text":"Geçerli yorum","rating":5}`:                             "",
+		`{"store_id":"` + uuid.NewString() + `","text":"Geçerli yorum","rating":5,"visit_purpose":null}`:        "",
+	} {
+		dec := json.NewDecoder(strings.NewReader(body))
+		dec.DisallowUnknownFields()
+		var in CreatePost
+		if err := dec.Decode(&in); err != nil {
+			t.Fatalf("%s did not decode: %v", body, err)
+		}
+		if in.VisitPurpose != want {
+			t.Fatalf("%s decoded to %q, want %q", body, in.VisitPurpose, want)
+		}
+	}
+	raw, _ := json.Marshal(Post{})
+	if strings.Contains(string(raw), "visit_purpose") {
+		t.Fatalf("a review with no purpose reported one: %s", raw)
+	}
+	raw, _ = json.Marshal(Post{VisitPurpose: "new_home"})
+	if !strings.Contains(string(raw), `"visit_purpose":"new_home"`) {
+		t.Fatalf("a review's purpose was not reported: %s", raw)
+	}
+}

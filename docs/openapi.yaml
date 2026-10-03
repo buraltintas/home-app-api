@@ -519,6 +519,7 @@ components:
               origin_search_id: {type: [string, 'null'], format: uuid}
               origin_search_result_id: {type: [string, 'null'], format: uuid}
               content_language: {$ref: '#/components/schemas/Locale', description: Optional language metadata; content is stored unchanged.}
+              visit_purpose: {$ref: '#/components/schemas/VisitPurpose'}
     VisitVerification:
       required: true
       content:
@@ -533,6 +534,10 @@ components:
               accuracy_meters: {type: number, exclusiveMinimum: 0}
   schemas:
     Locale: {type: string, enum: [tr, en, de, ru]}
+    VisitPurpose:
+      type: string
+      enum: [gift, trousseau, new_home, routine]
+      description: Optional reason for the visit. routine is also the answer for any other reason. On a request, absent or an empty string means not answered and is stored as no answer; any other value is refused with 400 INVALID_INPUT. On a response, omitted when not answered. Never translated.
     FeedbackMessage:
       type: object
       required: [id, kind, message, status, created_at]
@@ -629,6 +634,7 @@ components:
         viewer_has_liked: {type: boolean}
         viewer_follows_author: {type: boolean}
         viewer_has_favorited_store: {type: boolean}
+        visit_purpose: {$ref: '#/components/schemas/VisitPurpose'}
     Comment:
       type: object
       required: [id, user_id, body, display_name, avatar_url, created_at]
